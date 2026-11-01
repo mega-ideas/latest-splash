@@ -8,6 +8,7 @@
  * be, and what the chain charged is on each receipt. Pure and client-safe.
  */
 import { formatUsdc } from '../fees/copy.ts';
+import { declinedByLabel, type Decliners } from '../team/declined-by.ts';
 import { MODE_WORDS, RUN_STATE, type RunStatus, type ScheduleMode } from '../schedule/rules.ts';
 
 /**
@@ -20,8 +21,8 @@ import { MODE_WORDS, RUN_STATE, type RunStatus, type ScheduleMode } from '../sch
 export type Group = 'paid' | 'in_progress' | 'failed' | 'not_paid';
 export type Tone = 'ok' | 'wait' | 'bad';
 
-export type TransferRow = { id: string; paymentRef: string; status: string; payeeKind: string; payeeName: string; payeeMasked: string | null; payeeCountry: string | null; amountMinor: string; reference: string | null; createdAt: string };
-export type BatchRow = { id: string; label: string | null; status: string; rowCount: number; totalMinor: string; createdAt: string };
+export type TransferRow = { id: string; paymentRef: string; status: string; payeeKind: string; payeeName: string; payeeMasked: string | null; payeeCountry: string | null; amountMinor: string; reference: string | null; createdAt: string; declinedBy?: Decliners | null };
+export type BatchRow = { id: string; label: string | null; status: string; rowCount: number; totalMinor: string; createdAt: string; declinedBy?: Decliners | null };
 export type WithdrawalRow = { id: string; status: string; destination: { label: string; last4: string } | null; amountMinor: string; currency: string; createdAt: string };
 /** A run of a scheduled batch, as GET /api/wallet/schedules/runs answers it (lib/schedule/views.ts). */
 export type ScheduledRunRow = { id: string; scheduleName: string; status: RunStatus; mode: ScheduleMode; ranAs: ScheduleMode | null; fallback: boolean; reason: string | null; itemCount: number; totalMinor: string; dueAt: string; receiptPath: string | null; batchId: string | null };
@@ -60,6 +61,7 @@ const TRANSFER: Record<string, { label: string; tone: Tone; group: Group }> = {
   awaiting_signatures: { label: 'Waiting for signatures', tone: 'wait', group: 'in_progress' },
   asked_owners: { label: 'Waiting for an owner', tone: 'wait', group: 'in_progress' },
   failed: { label: 'Did not go through', tone: 'bad', group: 'failed' },
+  // Said by declinedByLabel, which names who declined it; this is the words when nobody is named.
   declined: { label: 'Declined by an owner', tone: 'bad', group: 'not_paid' },
   expired: { label: 'Expired before it was signed', tone: 'bad', group: 'not_paid' },
   withdrawn: { label: 'Withdrawn', tone: 'bad', group: 'not_paid' },
@@ -72,7 +74,7 @@ const BATCH: Record<string, { label: string; tone: Tone; group: Group }> = {
   prepared: { label: 'Waiting for an owner to start the signatures', tone: 'wait', group: 'in_progress' },
   failed: { label: 'Did not go through', tone: 'bad', group: 'failed' },
   expired: { label: 'Expired before it was signed', tone: 'bad', group: 'not_paid' },
-  declined: { label: 'Declined by the owners', tone: 'bad', group: 'not_paid' },
+  declined: { label: 'Declined by an owner', tone: 'bad', group: 'not_paid' },
   withdrawn: { label: 'Withdrawn', tone: 'bad', group: 'not_paid' },
 };
 
@@ -130,6 +132,9 @@ const EXPLAIN = {
   },
 } as const satisfies Record<string, Explain>;
 
+/** A declined row says who declined it; every other state keeps its own words and never carries a name. */
+const statusOf = (s: { label: string; tone: Tone }, status: string, declinedBy: Decliners | null | undefined): { label: string; tone: Tone } => ({ label: status === 'declined' ? declinedByLabel(declinedBy) : s.label, tone: s.tone });
+
 function transferEntry(t: TransferRow): HistoryEntry {
   const s = TRANSFER[t.status] ?? UNKNOWN;
   const receipt = t.status === 'settled' || t.status === 'on_the_way';
@@ -142,7 +147,7 @@ function transferEntry(t: TransferRow): HistoryEntry {
     amountText: usdc(t.amountMinor),
     reference: t.reference ?? '',
     group: s.group,
-    status: { label: s.label, tone: s.tone },
+    status: statusOf(s, t.status, t.declinedBy),
     date: t.createdAt,
     href: receipt ? `/dashboard/history/${path(t.paymentRef)}` : null,
     noReceipt: receipt ? null : missingReceipt(s.group),
@@ -163,7 +168,7 @@ function batchEntry(b: BatchRow): HistoryEntry {
     amountText: usdc(b.totalMinor),
     reference: '',
     group: s.group,
-    status: { label: s.label, tone: s.tone },
+    status: statusOf(s, b.status, b.declinedBy),
     date: b.createdAt,
     href: receipt ? `/dashboard/history/batch/${path(b.id)}` : null,
     noReceipt: receipt ? null : missingReceipt(s.group),

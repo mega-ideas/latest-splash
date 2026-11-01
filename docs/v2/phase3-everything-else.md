@@ -48,8 +48,18 @@ A row is in exactly one of four groups, each with its own filter and count:
 withdrawal that came back, an earlier transfer that failed or was refunded);
 **Not paid** (a person declined, cancelled or withdrew it, or the time to sign
 ran out). A payment or batch whose request its sender took back, or that the
-owners declined, is Withdrawn or Declined by the owners under Not paid and
-never Failed: the history reads the request's close, not only its status. A failed row carries two sentences in plain words, what happened and
+owners declined, is Withdrawn or "Declined by Aisha" under Not paid and
+never Failed: the history reads the request's close, not only its status.
+Who declined comes from the signing request's own record (`declined_at` on its
+signers, or the owner who declined a staff member's ask), in the order they
+declined: "Declined by Aisha", "Declined by Aisha and Ben", "Declined by Aisha,
+Ben and 1 more", and "Declined by an owner" when no usable name is on record.
+A name is cleaned to plain words (no link, markup, number or symbol; at most
+30 characters) by `lib/team/declined-by.ts`, read only through the business's
+own request (another business reads none of it), and said the same in History,
+the batch list and the batch's own page. "Withdrawn" names nobody, even if an
+owner had declined before the sender took the request back
+(`tests/declined-by.test.mjs`, `tests/declined-by-history.test.mjs`). A failed row carries two sentences in plain words, what happened and
 what to do next, from `EXPLAIN` in `lib/history-page/entries.ts`. Failed takes
 the alarm colour; Not paid never does. When a refresh fails the loaded counts
 and list stay, and one sentence above the list says they are the last ones

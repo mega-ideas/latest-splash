@@ -362,11 +362,27 @@ threshold rule that counts the Finance lead differently from an owner), that is
 a Move change and Sebastian approves every file under `move/`. Today the role is
 Splash's, not the chain's.
 
-## Release note: existing members lose Add funds and Withdraw until an owner grants them
+## Release note: existing staff and approvers start without Add funds and Withdraw
 
-Migration 0066 grants nothing. The moment it ships, every existing staff member
-and approver is refused on Add funds, Withdraw and Transfer's top-up, and sees a
-sentence that an owner can turn it on, until an owner opens Settings > Team and
-switches it on for them. Owners are not affected. Decision for the product
-owner: tell owners in the release notes, or run a one-off grant of both to
-today's staff and approvers so nothing changes on day one. Neither is done.
+Sky decided (1 Nov): **day one for existing staff and approvers is that they do
+not have Add funds or Withdraw until an owner turns it on. No backfill.**
+
+Migration 0066 grants nothing, and nothing grants anything for anyone. The
+moment it ships, every existing staff member and approver is refused on Add
+funds, Withdraw and Transfer's top-up, and sees a sentence that an owner can
+turn it on, until an owner opens Settings > Team, chooses Manage on that person
+and switches it on. Owners are not affected, and a viewer never has either.
+
+- **Tell owners in the release notes**: staff and approvers who were already on
+  the team lose Add funds and Withdraw until an owner switches them on, one
+  person at a time.
+- **The product says it too**: Settings > Team shows owners one plain sentence
+  (`EXISTING_MEMBERS_FUNDS_NOTE`, `lib/team/view.ts`): "Staff and approvers who
+  were already on the team do not have Add funds or Withdraw until an owner
+  turns them on, one person at a time, under Manage." The Finance lead and
+  members who manage nothing do not see it: they cannot grant the access, and
+  the member already has the sentence about asking an owner.
+- **No one-off grant.** No migration, route or seed inserts into
+  `wallet_member_access` for existing members (`tests/team-view.test.mjs` fails
+  if a migration backfills it).
+- Nothing here touches `move/`.

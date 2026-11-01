@@ -20,10 +20,11 @@
  */
 import { createHash } from 'node:crypto';
 
-import { and, eq, gt, gte, inArray, isNull, lte, or, sql } from 'drizzle-orm';
+import { and, asc, eq, gt, gte, inArray, isNotNull, isNull, lte, or, sql } from 'drizzle-orm';
 import type { PgDatabase } from 'drizzle-orm/pg-core';
 
-import { paymentScheduleRunPayments, walletSigningRequests, walletSigningSigners, walletSingleSignerConsents } from '../db/schema.ts';
+import { paymentScheduleRunPayments, users, walletApprovalAsks, walletSigningRequests, walletSigningSigners, walletSingleSignerConsents } from '../db/schema.ts';
+import { cleanDecliners, plainName, type Decliners } from '../team/declined-by.ts';
 import type * as schemaModule from '../db/schema.ts';
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -69,6 +70,46 @@ export const DECLINED_BY_SIGNERS = 'enough signers declined that it can no longe
 
 /** How a request that people closed ended: the owners declined it, or its sender took it back. */
 export const endedByPeople = (error: string | null | undefined): 'declined' | 'withdrawn' => (error === DECLINED_BY_SIGNERS ? 'declined' : 'withdrawn');
+
+/**
+ * Who declined each of these requests of this business, by the request's own record (a signer's
+ * `declined_at`), in the order they declined. Names are read through the business's own signers
+ * only, so another business's request, or its people, read as absent. A request with no decline
+ * on record has no entry. Names are cleaned to plain words here (lib/team/declined-by.ts); a
+ * decliner whose name leaves nothing is counted, not named.
+ */
+export async function declinersOfRequests(db: DrizzleDb, orgId: string, requestIds: string[]): Promise<Map<string, Decliners>> {
+  const out = new Map<string, Decliners>();
+  const ids = [...new Set(requestIds)];
+  if (ids.length === 0) return out;
+  const rows = await db
+    .select({ requestId: walletSigningSigners.requestId, name: users.name })
+    .from(walletSigningSigners)
+    .innerJoin(walletSigningRequests, and(eq(walletSigningRequests.id, walletSigningSigners.requestId), eq(walletSigningRequests.orgId, orgId)))
+    .leftJoin(users, eq(users.id, walletSigningSigners.userId))
+    .where(and(eq(walletSigningSigners.orgId, orgId), inArray(walletSigningSigners.requestId, ids), isNotNull(walletSigningSigners.declinedAt)))
+    .orderBy(asc(walletSigningSigners.declinedAt), asc(walletSigningSigners.userId));
+  for (const r of rows) {
+    const entry = out.get(r.requestId) ?? { names: [], unnamed: 0 };
+    const name = plainName(r.name);
+    if (name) entry.names.push(name);
+    else entry.unnamed += 1;
+    out.set(r.requestId, entry);
+  }
+  return out;
+}
+
+/** The owner who declined this approval ask of this business, or null when the ask is not declined here or names no one. */
+export async function askDeclinerOf(db: DrizzleDb, orgId: string, askId: string): Promise<Decliners | null> {
+  const [row] = await db
+    .select({ name: users.name, decidedBy: walletApprovalAsks.decidedBy, status: walletApprovalAsks.status })
+    .from(walletApprovalAsks)
+    .leftJoin(users, eq(users.id, walletApprovalAsks.decidedBy))
+    .where(and(eq(walletApprovalAsks.orgId, orgId), eq(walletApprovalAsks.id, askId)))
+    .limit(1);
+  if (!row || row.status !== 'declined') return null;
+  return cleanDecliners({ names: [row.name], unnamed: 0 });
+}
 
 /** Requests whose dedupe key is held: open, or sent with no final answer. */
 export const IN_FLIGHT: readonly SigningStatus[] = ['collecting', 'submitting', 'unknown'];

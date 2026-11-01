@@ -60,7 +60,8 @@ import { parseAmountMinor, U64_MAX } from '../transfer/plan.ts';
 import { validClientKey } from '../funding/wallet-funding.ts';
 import { recipientPayable, requestWalletBatch, type WalletMembers } from './business-wallet.ts';
 import { readRequestForSigner, type RequestView } from './wallet-signing.ts';
-import { endedByPeople } from './wallet-signing-store.ts';
+import { declinersOfRequests, endedByPeople } from './wallet-signing-store.ts';
+import type { Decliners } from '../team/declined-by.ts';
 import { resolvePayee, isUniqueViolation, maskAddress, TRANSFER_INTENT_LIFETIME_MS, TRANSFER_SETTLE_WINDOW_MS, type PayeeInput, type TransferDeps } from './wallet-transfers.ts';
 
 /** A batch to run later under a rule (splash_spend, the operator named as executor by an owner) is not built on this server yet. */
@@ -126,6 +127,8 @@ export type BatchView = {
   signingRequestId: string | null;
   requestedBy: string;
   createdAt: string;
+  /** Present only when the owners declined it: who, by the signing request's own record, plain names in the order they declined. Said by lib/team/declined-by.ts. */
+  declinedBy?: Decliners;
   rows: Array<{ position: number; paymentRef: string; payeeKind: string; payeeName: string; payeeMasked: string | null; address: string; payeeCountry: string | null; amountMinor: string; feeMinor: string; feeKind: number; reference: string | null }>;
 };
 
@@ -373,10 +376,13 @@ async function rowsOf(deps: Pick<BatchDeps, 'db'>, orgId: string, batchId: strin
 
 async function viewOf(deps: BatchDeps, row: BatchRow): Promise<BatchView> {
   const rows = await rowsOf(deps, row.orgId, row.id);
+  const status = await requestStatusOf(deps, row);
+  const declinedBy = status === 'declined' && row.signingRequestId ? ((await declinersOfRequests(deps.db, row.orgId, [row.signingRequestId])).get(row.signingRequestId) ?? { names: [], unnamed: 0 }) : status === 'declined' ? { names: [], unnamed: 0 } : null;
   return {
     id: row.id,
     label: row.label,
-    status: await requestStatusOf(deps, row),
+    status,
+    ...(declinedBy ? { declinedBy } : {}),
     rowCount: row.rowCount,
     totalMinor: row.totalAmountMinor.toString(),
     feeMinor: row.totalMaxFeeMinor.toString(),

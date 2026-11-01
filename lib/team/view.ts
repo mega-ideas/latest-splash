@@ -272,6 +272,12 @@ export function walletActions(access: { addFunds: boolean; withdraw: boolean } |
   };
 }
 
+/**
+ * Said to owners in Settings, Team (Sky's decision): staff and approvers who were already on the team start
+ * without Add funds and Withdraw, and nothing is granted for them. An owner turns each on under Manage.
+ */
+export const EXISTING_MEMBERS_FUNDS_NOTE = 'Staff and approvers who were already on the team do not have Add funds or Withdraw until an owner turns them on, one person at a time, under Manage.';
+
 /** Said where a member without Add funds would otherwise be offered a top-up. */
 export const ADD_FUNDS_ASK = 'Adding funds is turned on by an owner. Ask an owner to add funds, or to give you access in Settings.';
 

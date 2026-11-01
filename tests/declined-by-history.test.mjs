@@ -213,7 +213,7 @@ test('a payment a staff member asked the owners to approve names the owner who d
   const now = T0;
   const recipientId = await savedWallet(t);
   await db.insert(schema.walletApprovalAsks).values({ id: 'wpa_decl1', orgId: 'acme', intentId: 'intent-1', requestedBy: 'u-three', intent: {}, note: null, contentHash: 'h', walrusBlobId: 'b', status: 'open', expiresAt: new Date(now.getTime() + 86_400_000) });
-  await db.insert(schema.walletTransfers).values({ id: 'wtr_ask1', orgId: 'acme', clientKey: 'tx_key_ask00001', requestHash: 'x', paymentRef: 'pay_ask1', route: 'asked_owners', payeeKind: 'self_custody', recipientId, payeeName: 'Dela Cruz Trading Corp', address: SUPPLIER_WALLET, amountMinor: 5_000_000_000n, maxFeeMinor: 1n, feeKind: 1, askId: 'wpa_decl1', requestedBy: 'u-three' });
+  await db.insert(schema.walletTransfers).values({ id: 'wtr_ask1', orgId: 'acme', clientKey: 'tx_key_ask00001', requestHash: 'x', paymentRef: 'a'.repeat(64), route: 'asked_owners', payeeKind: 'self_custody', recipientId, payeeName: 'Dela Cruz Trading Corp', address: SUPPLIER_WALLET, amountMinor: 5_000_000_000n, maxFeeMinor: 1n, feeKind: 1, askId: 'wpa_decl1', requestedBy: 'u-three' });
   assert.deepEqual(labels(await historyOf(t)), ['Waiting for an owner']);
   const declined = await declineApprovalAsk(db, { orgId: 'acme', userId: 'u-two', askId: 'wpa_decl1', now: () => now });
   assert.equal(declined.ok, true, JSON.stringify(declined));
@@ -232,7 +232,7 @@ test('another business reads none of it: not in its lists, not by id, not from t
   await rename(t, { 'u-two': 'Aisha', 'u-three': 'Ben', 'u-north': 'Nadia' });
   const made = await declinedPayment(t, 'tx_key_declin06', ['u-two', 'u-three']);
   // Northwind has its own declined request, with its own names.
-  await t.w.client.exec(`INSERT INTO wallet_signing_requests (id, org_id, purpose, dedupe_key, sender_address, signer_kind, threshold, gas_mode, tx_bytes, tx_digest, bytes_hash, summary, status, requested_by, expires_at, error) SELECT 'sr_north', 'northwind', purpose, 'north:1', sender_address, signer_kind, threshold, gas_mode, tx_bytes, tx_digest, bytes_hash, summary, 'cancelled', 'u-north', expires_at, 'enough signers declined that it can no longer be signed' FROM wallet_signing_requests WHERE id = '${made.signingRequest.id}'`);
+  await t.w.client.exec(`INSERT INTO wallet_signing_requests (id, org_id, purpose, dedupe_key, sender_address, signer_kind, multisig_public_key, threshold, gas_mode, tx_bytes, tx_digest, bytes_hash, summary, status, requested_by, expires_at, error) SELECT 'sr_north', 'northwind', purpose, 'north:1', sender_address, signer_kind, multisig_public_key, threshold, gas_mode, tx_bytes, 'north-digest', 'north-hash', summary, 'cancelled', 'u-north', expires_at, 'enough signers declined that it can no longer be signed' FROM wallet_signing_requests WHERE id = '${made.signingRequest.id}'`);
   await t.w.client.exec(`INSERT INTO wallet_signing_signers (request_id, org_id, user_id, address, public_key, weight, declined_at) VALUES ('sr_north', 'northwind', 'u-north', '${SUPPLIER_WALLET}', 'pk', 1, '${T0.toISOString()}')`);
 
   assert.deepEqual(await T.listTransfers(t.deps('northwind')), [], 'its list holds none of Acme’s payments');

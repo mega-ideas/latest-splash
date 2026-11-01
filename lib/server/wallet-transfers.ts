@@ -53,7 +53,8 @@ import { askOwnersToApprove, type ApprovalAsk, type AskNotifier, type AskPolicy 
 import { recipientPayable, requestWalletPayment, type WalletContext, type WalletMembers } from './business-wallet.ts';
 import type { PaymentRecorder } from './payment-record.ts';
 import { readRequestForSigner, type RequestView } from './wallet-signing.ts';
-import { endedByPeople, type DrizzleDb } from './wallet-signing-store.ts';
+import { askDeclinerOf, declinersOfRequests, endedByPeople, type DrizzleDb } from './wallet-signing-store.ts';
+import type { Decliners } from '../team/declined-by.ts';
 
 export type TransferFailure = { ok: false; status: number; code: string; error: string; feeMinor?: string; reasons?: ApprovalReason[] };
 const fail = (status: number, code: string, error: string, more: { feeMinor?: string; reasons?: ApprovalReason[] } = {}): TransferFailure => ({ ok: false, status, code, error, ...more });
@@ -130,6 +131,8 @@ export type TransferView = {
   signingRequestId: string | null;
   askId: string | null;
   createdAt: string;
+  /** Present only when the owners declined it: who, by the signing request's own record (or the ask's), plain names in the order they declined. Said by lib/team/declined-by.ts. */
+  declinedBy?: Decliners;
 };
 
 type Row = typeof walletTransfers.$inferSelect;
@@ -188,12 +191,22 @@ async function statusOf(deps: TransferDeps, row: Row): Promise<TransferStatus> {
   return 'failed';
 }
 
+/** Who declined a payment the owners declined, from the record of the request or the ask that ended it. This business's own record only. */
+async function declinersOf(deps: TransferDeps, row: Row): Promise<Decliners> {
+  if ((row.route === 'owners_sign' || row.route === 'staff_rule') && row.signingRequestId) {
+    return (await declinersOfRequests(deps.db, row.orgId, [row.signingRequestId])).get(row.signingRequestId) ?? { names: [], unnamed: 0 };
+  }
+  return (row.askId ? await askDeclinerOf(deps.db, row.orgId, row.askId) : null) ?? { names: [], unnamed: 0 };
+}
+
 async function viewOf(deps: TransferDeps, row: Row): Promise<TransferView> {
+  const status = await statusOf(deps, row);
   return {
     id: row.id,
     paymentRef: row.paymentRef,
     route: row.route as TransferView['route'],
-    status: await statusOf(deps, row),
+    status,
+    ...(status === 'declined' ? { declinedBy: await declinersOf(deps, row) } : {}),
     payeeKind: row.payeeKind,
     payeeName: row.payeeName,
     payeeMasked: row.payeeMasked,

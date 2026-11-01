@@ -178,7 +178,7 @@ test('Settings > Team tells an owner, in one plain sentence, that existing staff
   assert.equal(EXISTING_MEMBERS_FUNDS_NOTE.match(/[.!?](\s|$)/g)?.length, 1, 'one sentence');
   const { copyViolations } = await import('../scripts/copy-rules.mjs');
   assert.deepEqual(copyViolations('components/settings/TeamCard.tsx', EXISTING_MEMBERS_FUNDS_NOTE), []);
-  const card = code(read('components/settings/TeamCard.tsx'));
+  const card = code(read('components/settings/TeamCard.tsx')).replace(/^import .*$/gm, '');
   assert.match(card, /EXISTING_MEMBERS_FUNDS_NOTE/);
   // It is said to owners, in the part of the card only a manager sees, and only to an owner: the Finance lead cannot turn it on.
   const owners = card.slice(card.indexOf("manager === 'owner' ? <p"), card.indexOf('<ul className="space-y-2" aria-label="Team">'));

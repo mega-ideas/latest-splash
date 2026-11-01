@@ -14,7 +14,7 @@ import { QuietButton } from '@/components/transfer/ui';
 import { PersonInCharge, type InCharge } from '@/components/wallet/Migration';
 import { Card, Loading, Note, Pill } from '@/components/wallet/parts';
 import { teamRows, type SpendWire } from '@/lib/team-rules/view';
-import { FINANCE_LEAD_NAME, ROLE_NAME, rowControls, type TeamMemberWire, type TeamWire } from '@/lib/team/view';
+import { EXISTING_MEMBERS_FUNDS_NOTE, FINANCE_LEAD_NAME, ROLE_NAME, rowControls, type TeamMemberWire, type TeamWire } from '@/lib/team/view';
 
 type Load<T> = { data: T | null; loading: boolean; error: string | null };
 
@@ -99,6 +99,7 @@ export default function TeamCard({
             ? 'You run the team. Invite people or add them directly, choose their role, decide who can add funds and withdraw, and answer requests to leave. Owners sign for the business wallet; staff pay within the rule they hold, approvers approve, and viewers read.'
             : `You are the ${FINANCE_LEAD_NAME}. You can invite or add people, and change or remove viewers, staff and approvers. Owners, the wallet’s signers, bank accounts and Add funds or Withdraw access stay with the owners, and so do the people an owner put in charge or gave that access.`}
         </p>
+        {manager === 'owner' ? <p className="text-[13px] leading-5 text-[#326273]">{EXISTING_MEMBERS_FUNDS_NOTE}</p> : null}
 
         <ul className="space-y-2" aria-label="Team">
           {members.map((m) => {
