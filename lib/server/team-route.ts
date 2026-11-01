@@ -9,9 +9,11 @@
  */
 import 'server-only';
 
+import { eq } from 'drizzle-orm';
 import { NextResponse } from 'next/server';
 
 import { resolveAuthorityForSession, type AuthorityContext } from '@/lib/auth/authority';
+import { users } from '@/lib/db/schema';
 import { requireCustomerRequest } from '@/lib/server/customer-auth';
 import { RATE_LIMITS, enforceRateLimit } from '@/lib/server/rate-limit';
 import { requireSessionAccount } from '@/lib/server/session-account';
@@ -38,6 +40,32 @@ export async function teamRoute(request: Request): Promise<{ route: TeamRoute; r
   }
   const { getDb } = await import('@/lib/db/client');
   return { route: { orgId: authority.orgId, authority, db: getDb() as unknown as DrizzleDb }, response: null };
+}
+
+export type InviteeRoute = { userId: string; db: DrizzleDb };
+
+/**
+ * The front of the routes a person uses to answer an invitation. They have no
+ * membership yet (or belong to a business they cannot leave by accepting), so
+ * this gate asks only for a signed-in customer and finds their account by the
+ * session's email. Whose invitation is theirs is decided by the service, from
+ * that account's verified email and nothing in the request. No database, or no
+ * account behind the session, is a refusal.
+ */
+export async function inviteeRoute(request: Request): Promise<{ route: InviteeRoute; response: null } | { route: null; response: Response }> {
+  const auth = await requireCustomerRequest(request);
+  if (auth.response) return { route: null, response: auth.response };
+  if (!process.env.DATABASE_URL) return { route: null, response: NextResponse.json({ error: 'no account' }, { status: 403, headers: NO_STORE }) };
+  const { getDb } = await import('@/lib/db/client');
+  const db = getDb() as unknown as DrizzleDb;
+  const [user] = await db.select({ id: users.id }).from(users).where(eq(users.email, auth.session.email.trim().toLowerCase())).limit(1);
+  if (!user) return { route: null, response: NextResponse.json({ error: 'no account' }, { status: 403, headers: NO_STORE }) };
+  return { route: { userId: user.id, db }, response: null };
+}
+
+/** Answering invitations is limited per person. */
+export async function limitInviteeChanges(route: InviteeRoute): Promise<Response | null> {
+  return enforceRateLimit({ rule: RATE_LIMITS.teamChangeUser, key: route.userId, message: 'Too many team changes. Try again shortly.' });
 }
 
 /** Every change to the team is limited per person and per business. */
