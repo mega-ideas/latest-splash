@@ -5,7 +5,7 @@
  * OFFER, and they offer nothing the server would refuse.
  */
 import assert from 'node:assert/strict';
-import { readFileSync } from 'node:fs';
+import { readFileSync, readdirSync } from 'node:fs';
 import test from 'node:test';
 
 import {
@@ -19,6 +19,7 @@ import {
 } from '../lib/team/view.ts';
 
 const read = (path) => readFileSync(new URL(`../${path}`, import.meta.url), 'utf8');
+const code = (text) => text.replace(/\/\*[\s\S]*?\*\//g, '').replace(/^\s*\/\/.*$/gm, '');
 
 const row = (over = {}) => ({ userId: 'u-x', name: 'Mei', email: 'mei@acme.test', role: 'maker', financeLead: false, inCharge: false, addFunds: false, withdraw: false, ...over });
 
@@ -164,4 +165,47 @@ test('Settings shows the team to anyone who manages it, even before a business w
   const page = read('components/settings/SettingsPage.tsx');
   assert.match(page, /\/api\/team'/);
   assert.match(page, /<TeamCard/);
+});
+
+// ─── Day one for existing staff and approvers (Sky's decision, p3-labels) ───
+
+test('Settings > Team tells an owner, in one plain sentence, that existing staff and approvers have no Add funds or Withdraw until an owner turns it on', async () => {
+  const { EXISTING_MEMBERS_FUNDS_NOTE } = await import('../lib/team/view.ts');
+  assert.equal(
+    EXISTING_MEMBERS_FUNDS_NOTE,
+    'Staff and approvers who were already on the team do not have Add funds or Withdraw until an owner turns them on, one person at a time, under Manage.',
+  );
+  assert.equal(EXISTING_MEMBERS_FUNDS_NOTE.match(/[.!?](\s|$)/g)?.length, 1, 'one sentence');
+  const { copyViolations } = await import('../scripts/copy-rules.mjs');
+  assert.deepEqual(copyViolations('components/settings/TeamCard.tsx', EXISTING_MEMBERS_FUNDS_NOTE), []);
+  const card = code(read('components/settings/TeamCard.tsx'));
+  assert.match(card, /EXISTING_MEMBERS_FUNDS_NOTE/);
+  // It is said to owners, in the part of the card only a manager sees, and only to an owner: the Finance lead cannot turn it on.
+  const owners = card.slice(card.indexOf("manager === 'owner' ? <p"), card.indexOf('<ul className="space-y-2" aria-label="Team">'));
+  assert.match(owners, /EXISTING_MEMBERS_FUNDS_NOTE/);
+  const manageless = card.slice(0, card.indexOf('const rows = teamRows('));
+  assert.doesNotMatch(manageless, /EXISTING_MEMBERS_FUNDS_NOTE/, 'a person who manages nothing is not shown the owners’ note');
+  assert.doesNotMatch(card.replace(owners, ''), /EXISTING_MEMBERS_FUNDS_NOTE/, 'it appears once, for owners');
+});
+
+test('nothing is granted to anyone on day one: no migration, route or seed turns Add funds or Withdraw on for existing members', () => {
+  for (const dir of ['drizzle']) {
+    let files = [];
+    try { files = readdirSync(new URL(`../${dir}/`, import.meta.url)).filter((f) => f.endsWith('.sql')); } catch { continue; }
+    for (const file of files) {
+      const sql = read(`${dir}/${file}`);
+      assert.doesNotMatch(sql, /INSERT\s+INTO\s+"?wallet_member_access"?[\s\S]{0,400}\bSELECT\b/i, `${dir}/${file} must not backfill wallet_member_access`);
+    }
+  }
+});
+
+test('the release note keeps Sky’s decision: no backfill, the owners turn it on', () => {
+  const doc = read('docs/v2/phase3-team-roles.md');
+  const note = doc.slice(doc.indexOf('## Release note'));
+  assert.match(note, /Sky decided/i);
+  assert.match(note, /no backfill/i);
+  assert.match(note, /Settings, Team|Settings > Team|Settings → Team/);
+  assert.match(note, /existing staff|already staff|already on the team/i);
+  assert.doesNotMatch(note, /Neither is done/i, 'the open question is closed');
+  assert.doesNotMatch(note, /Decision for the product owner/i);
 });
