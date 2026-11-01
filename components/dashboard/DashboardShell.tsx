@@ -7,6 +7,7 @@ import DashboardHeader from '@/components/DashboardHeader';
 import { CustodyPhaseContext, LaunchScopeContext, SweepSwitchContext } from '@/components/dashboard/CustodyPhaseContext';
 import { DeviceProvider, OffPhone, OnPhone } from '@/components/dashboard/Device';
 import GovernanceAlertBanner from '@/components/dashboard/GovernanceAlertBanner';
+import InvitationBanner from '@/components/team/InvitationBanner';
 import PhoneTabBar from '@/components/dashboard/PhoneTabBar';
 import type { CustomerSession } from '@/lib/auth/customer-session';
 import type { GovernanceBannerAlert } from '@/lib/server/governance-events';
@@ -516,6 +517,8 @@ export default function DashboardShell({ children, session, kyb, locks, setup, s
         {/* Above the KYB banner and above any page lock: it asks every owner
             to act before a date, whatever else the workspace is waiting on. */}
         <GovernanceAlertBanner alerts={governanceAlerts ?? []} />
+        {/* An invitation sent to this signed-in person's verified email: accept, or decline. */}
+        <InvitationBanner />
         {kyb?.blocked ? (
           <div
             role="status"

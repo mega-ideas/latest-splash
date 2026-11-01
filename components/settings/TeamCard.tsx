@@ -3,16 +3,18 @@
 import { useState } from 'react';
 import { Fingerprint, Landmark, UserRound } from 'lucide-react';
 
+import AddPersonForm from '@/components/team/AddPersonForm';
 import FinanceLeadNote from '@/components/team/FinanceLeadNote';
+import LeaveRequests from '@/components/team/LeaveRequests';
+import LeaveSection from '@/components/team/LeaveSection';
 import MemberDialog from '@/components/team/MemberDialog';
+import OpenInvitations from '@/components/team/OpenInvitations';
 import TeamActivity from '@/components/team/TeamActivity';
-import { call, errorText } from '@/components/transfer/api';
-import { Field, PrimaryButton, QuietButton, SelectInput, TextInput } from '@/components/transfer/ui';
+import { QuietButton } from '@/components/transfer/ui';
 import { PersonInCharge, type InCharge } from '@/components/wallet/Migration';
 import { Card, Loading, Note, Pill } from '@/components/wallet/parts';
-import type { MembershipRole } from '@/lib/membership-roles';
 import { teamRows, type SpendWire } from '@/lib/team-rules/view';
-import { FINANCE_LEAD_NAME, ROLE_NAME, roleChoicesFor, roleWithArticle, rowControls, type TeamMemberWire, type TeamWire } from '@/lib/team/view';
+import { FINANCE_LEAD_NAME, ROLE_NAME, rowControls, type TeamMemberWire, type TeamWire } from '@/lib/team/view';
 
 type Load<T> = { data: T | null; loading: boolean; error: string | null };
 
@@ -43,16 +45,11 @@ export default function TeamCard({
   onChanged: () => void;
 }) {
   const [selected, setSelected] = useState<string | null>(null);
-  const [email, setEmail] = useState('');
-  const [role, setRole] = useState<MembershipRole>('viewer');
-  const [adding, setAdding] = useState(false);
-  const [addError, setAddError] = useState<string | null>(null);
-  const [added, setAdded] = useState<string | null>(null);
 
   // Waiting is not failing: with neither an answer nor an error yet, the card says it is reading, never an empty alert.
   if (people.loading || (!people.data && !people.error)) return <Card id="team" title="Team"><Loading label="Reading your team…" /></Card>;
   if (!people.data) return <Card id="team" title="Team"><Note tone="error">{people.error}</Note></Card>;
-  const { you, members, activity } = people.data;
+  const { you, members, activity, invitations, leaveRequests, leave } = people.data;
   const manager = you.manager;
   const refresh = () => {
     people.reload();
@@ -77,6 +74,7 @@ export default function TeamCard({
             </span>
           </p>
           {charge.data && charge.data.personsInCharge.length > 0 ? <p className="text-[13px] text-[#326273]">In charge: {charge.data.personsInCharge.map((p) => p.name).join(', ')}.</p> : null}
+          <LeaveSection leave={leave} onChanged={refresh} />
         </div>
       </Card>
     );
@@ -88,23 +86,7 @@ export default function TeamCard({
   );
   const ruleOf = new Map(rows.map((r) => [r.userId, r]));
   const lead = members.find((m) => m.financeLead) ?? null;
-  const choices = roleChoicesFor(manager);
   const picked = members.find((m) => m.userId === selected) ?? null;
-
-  async function add() {
-    setAdding(true);
-    setAddError(null);
-    setAdded(null);
-    const answer = await call('/api/team', { body: { email: email.trim(), role } });
-    setAdding(false);
-    if (!answer.ok) {
-      setAddError(errorText(answer, 'That person was not added. Nothing was changed.'));
-      return;
-    }
-    setAdded(`${email.trim()} was added as ${roleWithArticle(role)}.`);
-    setEmail('');
-    refresh();
-  }
 
   const access = (m: TeamMemberWire) =>
     m.role === 'viewer' ? null : m.addFunds && m.withdraw ? 'Can add funds and withdraw.' : m.addFunds ? 'Can add funds.' : m.withdraw ? 'Can withdraw.' : 'Cannot add funds or withdraw.';
@@ -114,8 +96,8 @@ export default function TeamCard({
       <div className="space-y-5">
         <p className="text-[13px] leading-5 text-[#326273]">
           {manager === 'owner'
-            ? 'You run the team. Add people, choose their role, and decide who can add funds and withdraw. Owners sign for the business wallet; staff pay within the rule they hold, approvers approve, and viewers read.'
-            : `You are the ${FINANCE_LEAD_NAME}. You can add people and change or remove viewers, staff and approvers. Owners, the wallet’s signers, bank accounts and Add funds or Withdraw access stay with the owners, and so do the people an owner put in charge or gave that access.`}
+            ? 'You run the team. Invite people or add them directly, choose their role, decide who can add funds and withdraw, and answer requests to leave. Owners sign for the business wallet; staff pay within the rule they hold, approvers approve, and viewers read.'
+            : `You are the ${FINANCE_LEAD_NAME}. You can invite or add people, and change or remove viewers, staff and approvers. Owners, the wallet’s signers, bank accounts and Add funds or Withdraw access stay with the owners, and so do the people an owner put in charge or gave that access.`}
         </p>
 
         <ul className="space-y-2" aria-label="Team">
@@ -148,30 +130,11 @@ export default function TeamCard({
           })}
         </ul>
 
-        {choices.length > 0 ? (
-          <form
-            className="space-y-3 rounded-xl border border-[#326273]/15 p-3"
-            onSubmit={(e) => {
-              e.preventDefault();
-              if (email.trim() && !adding) void add();
-            }}
-          >
-            <h3 className="text-[13px] font-extrabold text-[#0c3e48]">Add a person</h3>
-            <div className="grid gap-3 sm:grid-cols-[minmax(0,1fr)_11rem]">
-              <Field label="Email" htmlFor="team-add-email" hint="Needs a verified Splash account">
-                <TextInput id="team-add-email" type="email" autoComplete="off" inputMode="email" value={email} onChange={(e) => setEmail(e.target.value)} />
-              </Field>
-              <Field label="Role" htmlFor="team-add-role">
-                <SelectInput id="team-add-role" value={role} onChange={(e) => setRole(e.target.value as MembershipRole)}>
-                  {choices.map((r) => <option key={r} value={r}>{ROLE_NAME[r]}</option>)}
-                </SelectInput>
-              </Field>
-            </div>
-            {addError ? <Note tone="error">{addError}</Note> : null}
-            <div aria-live="polite">{added ? <Note>{added}</Note> : null}</div>
-            <PrimaryButton type="submit" disabled={adding || !email.trim()}>{adding ? 'Adding…' : 'Add to team'}</PrimaryButton>
-          </form>
-        ) : null}
+        <AddPersonForm manager={manager} onChanged={refresh} />
+
+        <OpenInvitations invitations={invitations} onChanged={refresh} />
+
+        <LeaveRequests requests={leaveRequests} onChanged={refresh} />
 
         <FinanceLeadNote leadName={lead?.name ?? null} />
 
@@ -181,6 +144,8 @@ export default function TeamCard({
           <h3 id="team-activity" className="text-[13px] font-extrabold text-[#0c3e48]">Recent changes</h3>
           <TeamActivity activity={activity} />
         </section>
+
+        <LeaveSection leave={leave} onChanged={refresh} />
       </div>
 
       <MemberDialog key={picked?.userId ?? 'none'} member={picked} manager={manager} youUserId={you.userId} onClose={() => setSelected(null)} onChanged={refresh} />

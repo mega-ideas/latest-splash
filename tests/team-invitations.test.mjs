@@ -18,7 +18,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 
-import { and, eq } from 'drizzle-orm';
+import { eq } from 'drizzle-orm';
 
 import { migratedDb } from './helpers/store-db.mjs';
 import * as schema from '../lib/db/schema.ts';

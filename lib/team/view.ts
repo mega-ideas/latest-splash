@@ -203,7 +203,9 @@ export function rowControls(ctx: { manager: Manager; youUserId: string }, row: P
 export function financeLeadWords(): { can: string[]; cannot: string[]; chain: string } {
   return {
     can: [
-      'Add a person to the team and choose whether they are a viewer, staff or an approver.',
+      'Send an invitation to a person, or add them directly, and choose whether they are a viewer, staff or an approver.',
+      'Withdraw an invitation for a viewer, staff member or approver.',
+      'Approve or decline a request to leave from a viewer, staff member or approver who is not in charge of sign-offs and cannot add funds or withdraw.',
       'Change the role of a viewer, a staff member or an approver, and remove one.',
       'Start a request to add a signer to the business wallet, for a person an owner has already made an owner.',
       'Sign a wallet request only when they are one of the wallet’s signers. The role adds no signing power.',
@@ -216,7 +218,8 @@ export function financeLeadWords(): { can: string[]; cannot: string[]; chain: st
       'Change spending rules or limits, their own included.',
       'Put someone in charge of sign-offs, or change or take back this role.',
       'Change or remove someone who is in charge of sign-offs or who can add funds or withdraw. An owner does that, and takes the access back first.',
-      'Take back a spending rule. A person moved to viewer or removed keeps the rule they hold until the owners revoke it.',
+      'Decide a request to leave from an owner, or from someone in charge of sign-offs or who can add funds or withdraw. An owner decides those, and no one decides their own.',
+      'Take back a spending rule. A person moved to viewer, removed or allowed to leave keeps the rule they hold until the owners revoke it.',
     ],
     chain:
       'Nothing about the business wallet changes on the chain. Its owners’ signers control it: when a signer is added, the owners sign that request on their own devices and read exactly what it does first. The Finance lead can start the request. Splash holds no key.',
