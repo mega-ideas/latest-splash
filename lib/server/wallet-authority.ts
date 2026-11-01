@@ -72,7 +72,8 @@ export type AuthorityAction =
   | 'leave_requested'
   | 'leave_withdrawn'
   | 'leave_approved'
-  | 'leave_declined';
+  | 'leave_declined'
+  | 'leave_follow_up';
 
 export type AuthorityFailure = { ok: false; status: number; code: string; error: string };
 const fail = (status: number, code: string, error: string): AuthorityFailure => ({ ok: false, status, code, error });

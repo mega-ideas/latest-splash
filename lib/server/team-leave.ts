@@ -6,8 +6,10 @@
  *              their access, any spending rule and any place in charge until an
  *              owner approves. The only owner of a business cannot ask.
  *   withdraw   The person can take the request back.
- *   decide     An owner, or the Finance lead for a person below owner who is not
- *              in charge of sign-offs and holds neither Add funds nor Withdraw.
+ *   decide     An owner alone (Sky's decision: the highest authority). The
+ *              Finance lead sees the requests and decides none: approving ends
+ *              access at once but only the wallet's owners can take the spending
+ *              rule back, so a lead's approval would leave a live rule behind.
  *              Nobody decides their own request: an owner's leaving needs
  *              another owner. (One rule for the server and the page:
  *              lib/team/view.ts leaveDecisionRefusal.)
@@ -34,7 +36,7 @@ import { and, asc, desc, eq } from 'drizzle-orm';
 import { memberships, teamLeaveRequests, users } from '../db/schema.ts';
 import type { MembershipRole } from '../membership-roles.ts';
 import { LAST_OWNER_SENTENCE, LEAVE_WHY_NOT, leaveDecisionRefusal, leaveSentence, type LeaveDecisionRefusal, type LeaveRequestWire, type LeaveStatusWire, type Manager } from '../team/view.ts';
-import { fail, holdsGrantedAuthority, inTransaction, lockOwners, teamManager, type TeamFailure } from './team-admin.ts';
+import { fail, inTransaction, lockOwners, teamManager, type TeamFailure } from './team-admin.ts';
 import { memberRole, offboardMember, passkeyAddressesOf, recordAuthorityEvent } from './wallet-authority.ts';
 import type { DrizzleDb } from './wallet-signing-store.ts';
 
@@ -144,13 +146,6 @@ export async function leaveStatusOf(db: DrizzleDb, input: { orgId: string; userI
 
 // ─── The managers' side ─────────────────────────────────────────────────────
 
-/** What the leaver holds that the Finance lead may not end: only for staff and approvers. */
-async function leaverFacts(tx: DrizzleDb, orgId: string, userId: string, role: string) {
-  const staff = role === 'maker' || role === 'checker';
-  const held = staff ? await holdsGrantedAuthority(tx, orgId, userId) : false;
-  return { userId, role: role as MembershipRole, inCharge: held, addFunds: false, withdraw: false };
-}
-
 /** The open requests of this business, oldest first, for someone who manages the team; with whether they may decide each. */
 export async function listLeaveRequests(db: DrizzleDb, input: { orgId: string; actorUserId: string }): Promise<LeaveRequestWire[]> {
   const manager: Manager = await teamManager(db, input.orgId, input.actorUserId);
@@ -164,7 +159,7 @@ export async function listLeaveRequests(db: DrizzleDb, input: { orgId: string; a
     .orderBy(asc(teamLeaveRequests.createdAt), asc(teamLeaveRequests.id));
   const out: LeaveRequestWire[] = [];
   for (const r of rows as Array<{ id: string; userId: string; createdAt: Date; name: string; email: string; role: string }>) {
-    const refusal = leaveDecisionRefusal({ manager, actorUserId: input.actorUserId, leaver: await leaverFacts(db, input.orgId, r.userId, r.role) });
+    const refusal = leaveDecisionRefusal({ manager, actorUserId: input.actorUserId, leaver: { userId: r.userId } });
     out.push({ id: r.id, userId: r.userId, name: r.name, email: r.email, role: r.role as MembershipRole, createdAt: r.createdAt.toISOString(), canDecide: refusal === null, whyNot: refusal ? LEAVE_WHY_NOT[refusal] : null });
   }
   return out;
@@ -200,7 +195,7 @@ export function approveLeaveRequest(
       await tx.update(teamLeaveRequests).set({ status: 'closed', decidedAt: now, decidedBy: input.actorUserId }).where(and(eq(teamLeaveRequests.id, row.id), eq(teamLeaveRequests.status, 'pending')));
       return NOT_PENDING();
     }
-    const refusal = leaveDecisionRefusal({ manager, actorUserId: input.actorUserId, leaver: await leaverFacts(tx, input.orgId, row.userId, role) });
+    const refusal = leaveDecisionRefusal({ manager, actorUserId: input.actorUserId, leaver: { userId: row.userId } });
     if (refusal) return refusalFailure(refusal);
     if (role === 'admin' && !owners.some((id) => id !== row.userId)) return LAST_OWNER();
 
@@ -234,7 +229,7 @@ export function declineLeaveRequest(
     if (row.status !== 'pending') return NOT_PENDING();
     const role = await memberRole(tx, input.orgId, row.userId);
     if (role === null) return NOT_PENDING();
-    const refusal = leaveDecisionRefusal({ manager, actorUserId: input.actorUserId, leaver: await leaverFacts(tx, input.orgId, row.userId, role) });
+    const refusal = leaveDecisionRefusal({ manager, actorUserId: input.actorUserId, leaver: { userId: row.userId } });
     if (refusal) return refusalFailure(refusal);
     const now = clock(input.now);
     const closed = await tx

@@ -526,6 +526,13 @@
       "when": 1794960000000,
       "tag": "0074_one_membership_per_person",
       "breakpoints": true
+    },
+    {
+      "idx": 75,
+      "version": "7",
+      "when": 1795046400000,
+      "tag": "0075_leave_follow_up_trail",
+      "breakpoints": true
     }
   ]
 }

@@ -1,19 +1,20 @@
 import { NextResponse } from 'next/server';
 
 import { approveLeaveRequest } from '@/lib/server/team-leave';
-import { revokeLeaverRules, ruleRevokeNote, type RuleRevoke } from '@/lib/server/team-leave-rules';
+import { runLeaveFollowUp } from '@/lib/server/team-leave-followup';
+import { leaveFollowUpDeps } from '@/lib/server/team-leave-rules';
 import { limitTeamChanges, NO_STORE, teamResponse, teamRoute } from '@/lib/server/team-route';
 
 export const dynamic = 'force-dynamic';
 
 /**
- * POST  approve a request to leave in the signed-in person's own business. An
- * owner decides any request but their own; the Finance lead only for a person
- * below owner who is not in charge and holds neither Add funds nor Withdraw.
- * The membership ends and every hold clears in one transaction. When an owner
- * approves, the person's spending rule is then taken back through the
- * spending-rules revoke path (a request the wallet's owners sign); the answer
- * says in words which of those happened. A repeat changes nothing.
+ * POST  approve a request to leave in the signed-in person's own business. Only
+ * an owner decides (the Finance lead sees the requests and decides none), and
+ * nobody decides their own. The membership ends and every hold clears in one
+ * transaction. Then the person's spending rule is taken back through the
+ * spending-rules revoke path (a request the wallet's owners sign) and the
+ * answer says whether they are still a signer on the business wallet; every
+ * outcome is a line of the trail. A repeat changes nothing.
  */
 export async function POST(request: Request, { params }: { params: Promise<{ requestId: string }> }) {
   const gate = await teamRoute(request);
@@ -23,9 +24,8 @@ export async function POST(request: Request, { params }: { params: Promise<{ req
   const { requestId } = await params;
   const result = await approveLeaveRequest(gate.route.db, { orgId: gate.route.orgId, actorUserId: gate.route.authority.userId, requestId });
   if (!result.ok) return teamResponse(result);
-  let rules: RuleRevoke | null = null;
-  if (result.changed && result.leaver) {
-    rules = gate.route.authority.role === 'OWNER' ? await revokeLeaverRules(request, { orgId: gate.route.orgId, actorUserId: gate.route.authority.userId }) : 'by_owner';
-  }
-  return NextResponse.json({ changed: result.changed, rules, note: rules ? ruleRevokeNote(rules) : null }, { headers: NO_STORE });
+  if (!result.changed || !result.leaver) return NextResponse.json({ changed: result.changed, rules: null, signer: null, note: null }, { headers: NO_STORE });
+  const who = { orgId: gate.route.orgId, actorUserId: gate.route.authority.userId, leaverUserId: result.leaver.userId };
+  const followUp = await runLeaveFollowUp(gate.route.db, { ...who, requestId, deps: leaveFollowUpDeps(request, who) });
+  return NextResponse.json({ changed: true, rules: followUp.rules, signer: followUp.signer, note: followUp.note }, { headers: NO_STORE });
 }

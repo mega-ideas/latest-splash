@@ -57,7 +57,7 @@ export default function LeaveRequests({ requests, manager, onChanged }: { reques
               asking === r.id ? (
                 <div role="group" aria-label={`Approve ${r.name}’s request`} className="space-y-2">
                   <p className="text-[13px] leading-5 text-[#1F4452]">
-                    Approve? {r.name} loses access to this business at once. Their place in charge, the Finance lead role and any Add funds or Withdraw access end, {manager === 'owner' ? 'and a spending rule they hold is taken back (the wallet’s owners sign that).' : 'and a spending rule they hold stays until an owner takes it back.'}
+                    Approve? {r.name} loses access to this business at once. Their place in charge, the Finance lead role and any Add funds or Withdraw access end, and a spending rule they hold is taken back (the wallet’s owners sign that). Leaving does not remove a signer: if {r.name} signs for the business wallet, they stay a signer until the owners change the signers.
                   </p>
                   <div className="flex flex-wrap gap-2">
                     <PrimaryButton type="button" autoFocus disabled={busy !== null} onClick={() => void decide(r, 'approve')}>

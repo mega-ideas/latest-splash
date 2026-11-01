@@ -96,31 +96,58 @@ export const ADD_CHOICES = {
 
 /**
  * May this manager decide this person's request to leave? The server and the
- * page use this one rule. A person never decides their own. The Finance lead
- * never decides an owner's, nor the request of someone in charge of sign-offs
- * or who holds Add funds or Withdraw: those are an owner's, as removing them is.
+ * page use this one rule. Sky's decision: a member cannot leave without the
+ * approval of the highest authority, an owner. Nobody decides their own, and
+ * the Finance lead decides none: approving ends access at once but cannot take
+ * the person's spending rule back (the wallet's owners sign that), so a lead's
+ * approval would leave a live rule behind. The lead still sees every request.
  */
-export type LeaveDecisionRefusal = 'not_a_manager' | 'own_request' | 'owner_only' | 'granted_authority';
+export type LeaveDecisionRefusal = 'not_a_manager' | 'own_request' | 'owner_only';
 export function leaveDecisionRefusal(ctx: {
   manager: Manager;
   actorUserId: string;
-  leaver: Pick<TeamMemberWire, 'userId' | 'role' | 'inCharge' | 'addFunds' | 'withdraw'>;
+  leaver: Pick<TeamMemberWire, 'userId'>;
 }): LeaveDecisionRefusal | null {
   if (!ctx.manager) return 'not_a_manager';
   if (ctx.leaver.userId === ctx.actorUserId) return 'own_request';
   if (ctx.manager === 'owner') return null;
-  if (ctx.leaver.role === 'admin') return 'owner_only';
-  if (holdsGrantedAuthority(ctx.leaver)) return 'granted_authority';
-  return null;
+  return 'owner_only';
 }
 
 /** Said next to a request the signed-in manager may not decide. */
 export const LEAVE_WHY_NOT: Record<LeaveDecisionRefusal, string> = {
   not_a_manager: 'Only an owner decides.',
   own_request: 'Another owner decides your own request.',
-  owner_only: 'An owner decides an owner’s request.',
-  granted_authority: 'This person is in charge of sign-offs or can add funds or withdraw. An owner decides.',
+  owner_only: 'Only an owner decides a request to leave.',
 };
+
+// ─── What follows an owner's approval ───────────────────────────────────────
+
+/** Whether the person's spending rule was taken back: a request opened, nothing to take back, or it could not be opened. */
+export type RuleRevoke = 'opened' | 'none' | 'not_opened';
+/** Whether the person still signs for the business wallet. 'unknown' when the chain or the wallet could not be read. */
+export type SignerState = 'still_signer' | 'not_a_signer' | 'unknown';
+
+/**
+ * What an owner is told, in words, once a person has left: what became of the
+ * spending rule, and that leaving the team does not remove a signer (the
+ * wallet's owners change the signers, signing on their own devices).
+ */
+export function leaveFollowUpNote(o: { rules: RuleRevoke; signer: SignerState }): string {
+  const rule =
+    o.rules === 'opened'
+      ? 'Their spending rule is being taken back. The owners sign that request on their own devices; until they do, the rule still exists on the chain.'
+      : o.rules === 'none'
+        ? 'They held no spending rule, so there is nothing to take back.'
+        : 'Their spending rule could not be taken back automatically. If they held one, an owner takes it back under Spending rules in Settings, where it shows as belonging to a former member.';
+  const signer =
+    o.signer === 'still_signer'
+      ? 'They are still a signer on the business wallet and can co-sign its requests from their own device. Changing the signers is a separate request the owners sign.'
+      : o.signer === 'unknown'
+        ? 'If they signed for the business wallet, they still do. Changing the signers is a separate request the owners sign.'
+        : '';
+  return [rule, signer].filter(Boolean).join(' ');
+}
 
 /** The sentence a person reads about their own request to leave. */
 export function leaveSentence(state: 'none' | 'pending' | 'declined', decidedBy?: string | null): string | null {
@@ -205,7 +232,7 @@ export function financeLeadWords(): { can: string[]; cannot: string[]; chain: st
     can: [
       'Send an invitation to a person, or add them directly, and choose whether they are a viewer, staff or an approver.',
       'Withdraw an invitation for a viewer, staff member or approver.',
-      'Approve or decline a request to leave from a viewer, staff member or approver who is not in charge of sign-offs and cannot add funds or withdraw.',
+      'See requests to leave. An owner decides them.',
       'Change the role of a viewer, a staff member or an approver, and remove one.',
       'Start a request to add a signer to the business wallet, for a person an owner has already made an owner.',
       'Sign a wallet request only when they are one of the wallet’s signers. The role adds no signing power.',
@@ -218,7 +245,7 @@ export function financeLeadWords(): { can: string[]; cannot: string[]; chain: st
       'Change spending rules or limits, their own included.',
       'Put someone in charge of sign-offs, or change or take back this role.',
       'Change or remove someone who is in charge of sign-offs or who can add funds or withdraw. An owner does that, and takes the access back first.',
-      'Decide a request to leave from an owner, or from someone in charge of sign-offs or who can add funds or withdraw. An owner decides those, and no one decides their own.',
+      'Approve or decline a request to leave. An owner decides every one, and no one decides their own.',
       'Take back a spending rule. A person moved to viewer, removed or allowed to leave keeps the rule they hold until the owners revoke it.',
     ],
     chain:
@@ -269,6 +296,7 @@ export const TEAM_ACTIONS = [
   'leave_withdrawn',
   'leave_approved',
   'leave_declined',
+  'leave_follow_up',
 ] as const;
 
 /** One trail line in plain words: who did what to whom. */
@@ -314,6 +342,11 @@ export function activitySummary(e: { action: string; detail: unknown; actorName:
       return `${e.actorName} approved ${who}’s request to leave. ${who} no longer has access.`;
     case 'leave_declined':
       return `${e.actorName} declined ${who}’s request to leave. ${who} is still on the team.`;
+    case 'leave_follow_up': {
+      const rules = d.rules === 'opened' || d.rules === 'none' ? d.rules : 'not_opened';
+      const signer = d.signer === 'still_signer' || d.signer === 'not_a_signer' ? d.signer : 'unknown';
+      return `After ${who} left: ${leaveFollowUpNote({ rules, signer })}`;
+    }
     default:
       return `${e.actorName} changed the team.`;
   }
