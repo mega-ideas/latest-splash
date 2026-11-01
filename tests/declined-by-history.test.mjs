@@ -446,5 +446,10 @@ test('migration 0081 adds the snapshot columns to both records and is last in th
   for (const column of ['declined_name', 'declined_title', 'decided_name', 'decided_title']) assert.match(sql, new RegExp(`"${column}"`), column);
   assert.doesNotMatch(sql, /DROP TABLE|CASCADE/i, 'nothing is dropped but one foreign key, by name');
   const journal = JSON.parse(readFileSync(new URL('../drizzle/meta/_journal.json', import.meta.url), 'utf8'));
-  assert.equal(journal.entries.at(-1).tag, '0081_decliner_snapshot');
+  const tags = journal.entries.map((entry) => entry.tag);
+  const at = tags.indexOf('0081_decliner_snapshot');
+  assert.notEqual(at, -1, 'it is in the journal');
+  // Later migrations (0082, the invitation email) may follow it; none may come in between or take its number.
+  assert.equal(tags[at - 1]?.slice(0, 4), '0080', 'it follows 0080');
+  for (const later of tags.slice(at + 1)) assert.ok(Number(later.slice(0, 4)) > 81, `${later} comes after it`);
 });
