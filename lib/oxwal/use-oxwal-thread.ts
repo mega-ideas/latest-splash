@@ -402,16 +402,20 @@ export function useOxwalThread(options: UseOxwalThreadOptions = {}) {
    * thread. It is never sent to the model, and nothing is prepared yet.
    */
   const attachSheet = useCallback(
-    async (payload: SheetPayload) => {
+    async (payload: SheetPayload): Promise<boolean> => {
       const id = newId('sheet');
       setThread((current) => [...current, { kind: 'sheet', id, sheet: { phase: 'reading', name: payload.name } }]);
       const answer = await sendSheet<{ card?: SheetCard }>(payload, { review: true });
-      if (answer.status === 401) return sessionEnded(id);
+      if (answer.status === 401) {
+        sessionEnded(id);
+        return false;
+      }
       if (answer.ok && answer.body?.card) {
         patchSheet(id, { phase: 'review', card: answer.body.card, confirmed: false, preparing: false, error: null, intentKey: newBatchKey() });
-      } else {
-        patchSheet(id, { phase: 'failed', text: errorText(answer, SHEET_COPY.readFailed) });
+        return true;
       }
+      patchSheet(id, { phase: 'failed', text: errorText(answer, SHEET_COPY.readFailed) });
+      return false;
     },
     [patchSheet, sessionEnded],
   );
@@ -441,7 +445,7 @@ export function useOxwalThread(options: UseOxwalThreadOptions = {}) {
       const { card, confirmed, intentKey, preparing } = item.sheet;
       if (preparing || !card.ready || (card.needsConfirmation && !confirmed)) return;
       patchSheet(id, { ...item.sheet, preparing: true, error: null });
-      const label = `Zeke · ${card.fileName ?? 'pasted rows'}`.slice(0, 80);
+      const label = `Zeke · ${card.fileName ?? (card.source === 'file' ? 'uploaded sheet' : 'pasted rows')}`.slice(0, 80);
       const answer = await call<{ batch?: { id: string; status: string } }>('/api/wallet/batches', {
         body: { rows: card.sheet, maxFeeMinor: card.maxFeeMinor, label, confirmDuplicates: confirmed, confirmNewPayees: confirmed },
         key: intentKey,

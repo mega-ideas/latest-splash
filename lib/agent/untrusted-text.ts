@@ -19,14 +19,45 @@ export const CONFUSABLES: Record<string, string> = {
 };
 
 /**
+ * Characters that draw nothing, or change how the text around them is drawn:
+ * every control and format character (zero-width, bidirectional, joiners, soft
+ * hyphen, byte-order mark, the Arabic letter mark, the Mongolian vowel
+ * separator), the variation selectors, the combining grapheme joiner, the
+ * Hangul and Khmer fillers, the blank Braille cell, the line and paragraph
+ * separators and the whole Unicode tag block (which can spell ASCII that no
+ * screen draws). Written with braces so no editor turns the escapes into the
+ * invisible characters themselves.
+ */
+const HIDDEN = /[\p{Cc}\p{Cf}\u{34f}\u{115f}\u{1160}\u{17b4}\u{17b5}\u{180b}-\u{180f}\u{2028}\u{2029}\u{2800}\u{3164}\u{fe00}-\u{fe0f}\u{ffa0}\u{e0000}-\u{e007f}\u{e0100}-\u{e01ef}]/gu;
+
+/** The text without any hidden character. */
+export function stripHidden(value: string): string {
+  return value.replace(HIDDEN, '');
+}
+
+/** Whether the text has a hidden character in it. */
+export function hasHidden(value: string): boolean {
+  return new RegExp(HIDDEN.source, 'u').test(value);
+}
+
+/**
+ * Text spelled in the Unicode tag block (U+E0020 to U+E007E, one per ASCII
+ * character) as the ASCII it spells. A screen shows nothing, a model may read
+ * it: it is read before it is dropped. A run of them is set apart by spaces,
+ * so "INV-1" followed by hidden "ignore previous instructions" reads as two
+ * things and not as one word.
+ */
+export function decodeTags(value: string): string {
+  return value.replace(/[\u{e0020}-\u{e007e}]+/gu, (run) => ` ${[...run].map((char) => String.fromCharCode((char.codePointAt(0) as number) - 0xe0000)).join('')} `);
+}
+
+/**
  * Text folded the way a reader sees it: compatibility forms, hidden
  * characters, look-alike letters, and single letters spaced apart ("i g n o
  * r e", "p a y").
  */
 export function foldForReading(value: string): string {
-  const folded = value
-    .normalize('NFKC')
-    .replace(/[\u0000-\u001f\u007f-\u009f\u00ad\u200b-\u200f\u2028-\u202e\u2060-\u2064\ufeff]/g, '')
+  const folded = stripHidden(decodeTags(value.normalize('NFKC')))
     .toLowerCase()
     .replace(/[\u0370-\u03ff\u0400-\u04ff]/g, (char) => CONFUSABLES[char] ?? char);
   return folded.replace(/\b(?:[a-z] ){2,}[a-z]\b/g, (run) => run.replace(/ /g, ''));

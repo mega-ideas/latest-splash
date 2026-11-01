@@ -54,7 +54,24 @@ changed is recorded on the row, so the person sees it.
 - **Links and commands** are stripped from what is shown back (schemes, `www.`,
   an address with a path, email addresses; backticks, `$(`, `&&`, `|`, HTML tags,
   `javascript:`, `curl ... host`).
-- **Hidden and bidirectional characters** are removed from every cell.
+- **Hidden characters** of every kind are removed from every cell and the row says so:
+  all control and format characters, the variation selectors, U+034F, the Hangul and
+  Khmer fillers, the blank Braille cell and the whole Unicode tag block
+  (`lib/agent/untrusted-text.ts`, one list for the sheet reader, the invoice scan and
+  typed batches). Text spelled in the tag block (ASCII that no screen draws) is read
+  before it is dropped, so an instruction hidden there clears the cell.
+- **A name that sounds like a command is still a name.** Phrases that can only be
+  aimed at an assistant ("ignore previous instructions", `SYSTEM:`) hold for every
+  cell. A verb and an object ("send it", "release payments") hold for references, and
+  for a name only when it reads as an order (starts with please or kindly, or is five
+  words or more). So "Release Payments Ltd" and "Zeke's Diner" are suppliers. A name
+  that is cleared says so and tells the person to use the wallet address.
+- **A row that no longer says what the file said is a row to check.** A cell cleared
+  as an instruction or a command, or a recipient that had a link or a formula cut
+  out, makes its row **Check** (one box, as for a repeat).
+- **A file name** is shown, and stored as the batch label, only when it is plain. A
+  name with a link, a host name (a dot and letters) or an instruction in it is not
+  shown: the card says "Uploaded sheet" and the label is generic.
 - **Caps.** The file: 256 KB. Rows scanned: 200. Columns: 40. One cell: 400
   characters. A spreadsheet is a zip: its directory is read first and a spreadsheet
   that would expand past 8 MB or 200 parts is refused **before it is opened**. A
@@ -64,7 +81,10 @@ changed is recorded on the row, so the person sees it.
 - **One currency, USDC.** Zero and negative amounts, a currency sign or code beside
   an amount, and a currency column that says anything but USDC are refused. A
   foreign currency travels with the amount ("100 EUR"), so a row cannot become
-  USDC by being passed on: the review refuses it again.
+  USDC by being passed on: the review refuses it again. **Only a currency cell that
+  is truly empty means USDC.** A cell that had something in it which was cleared (a
+  command, an instruction) is unreadable, not USDC: the row is refused and the
+  review sees "100 ?".
 
 Matching a name or an address to a recipient is not done here. The review does it,
 against **this business's** saved recipients only (`reviewBatch`), exactly as for a
@@ -77,8 +97,13 @@ Only when the **headers** are not ones the reader knows (`recipient`, `name`,
 `lib/batch/sheet.ts`). Then `mapColumns` is given the header names, never a cell,
 and answers which header is the recipient, amount, reference and currency. The answer
 is **checked**: every named header must exist exactly once, no header is used
-twice, the amount column must hold numbers, the recipient column must hold
-something. A header that reads like an instruction is replaced by "(column 3)"
+twice, **every** amount cell must be a number or an amount with a currency beside
+it, the recipient column must hold something, and a column of whole numbers (invoice
+numbers) is not the amount while another unused column of amounts has cents.
+**Columns a model chose need the person's yes**: the card names them ("Recipient:
+Party. Amount: Settle Total. Reference: Invoice No."), the chip reads "Check the
+columns", and Prepare waits for the box. Batch payouts shows the same notice, and the
+columns that were not used, above the review. A header that reads like an instruction is replaced by "(column 3)"
 before the model sees it. With no `ANTHROPIC_API_KEY`, or a wrong answer, or a
 model that throws, nothing is guessed: the person is asked to name the columns.
 There is no sandbox answer to reach in production or anywhere else.
@@ -114,7 +139,20 @@ amount an owner must approve. Each reason is said with its numbers
 second-approval rule"), so a row outside the rule is **marked, not blocked**, and a
 row inside it says that the owners still sign. If the rule cannot be read, one note
 says every row waits for the owners; no rule is ever made up. An owner is not judged
-by a rule.
+by a rule. The card says so in one line ("No spending rule applies to an owner.
+Every batch still needs the owners' signatures."), because the product has no
+owner-side per-payment or daily limit to check a row against: SpendPolicy's
+per-payment maximum and second-approval amount are the staff rule's, and
+`approvalPlan` answers `owners_sign` with no reasons for an owner, in Transfer too.
+
+### The card
+
+The amount is the amount that will be signed (`1,200.00`), with the typed text as a
+tooltip when it differs. The table sits outside the thread's live region
+(`aria-live="off"`) and one status line is announced instead ("Payout sheet: 7 rows
+read, 3 cannot be paid.", `components/oxwal/SheetStatus.tsx`). Rows pasted into the
+box stay there until the sheet has been read, so a question that looked like rows is
+not lost.
 
 ## Prepared, and not sent
 
@@ -194,6 +232,9 @@ conversions still are.
 
 - `tests/zeke-sheet-ingest.test.mjs`: the reader (hostile content, caps, a zip that
   expands, currency, the model's answer checked).
+- `tests/zeke-sheet-ingest-fixes.test.mjs`: the independent review's findings on the
+  reader (a cleared currency cell, hidden characters, columns a model chose, file
+  names, supplier names), and that the reader's source holds no invisible character.
 - `tests/zeke-sheet-review.test.mjs`: the table, unverified recipients, the rule,
   limits, tenants, production, preparing without a draw, replay and races, Zeke's
   words, the route's gates and the body cap.

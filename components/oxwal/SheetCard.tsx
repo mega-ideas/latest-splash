@@ -63,6 +63,13 @@ function Flags({ flags }: { flags: SheetFlag[] }) {
   );
 }
 
+/** The amount as it will be signed (1,200.00); the text as typed is the tooltip when it differs. */
+function Amount({ row }: { row: SheetCardRow }) {
+  if (!row.amountDisplay) return <>{row.amount || '–'}</>;
+  const typed = row.amount.trim();
+  return <span title={typed !== row.amountDisplay ? `Typed as ${typed}` : undefined}>{row.amountDisplay}</span>;
+}
+
 function Payee({ row }: { row: SheetCardRow }) {
   if (!row.payee) return null;
   const kind = row.payee.kind === 'splash_business' ? 'Business on Splash' : 'Saved recipient';
@@ -90,10 +97,11 @@ export default function SheetCard({
   onDismiss: (id: string) => void;
 }) {
   const indent = compact ? 'pl-7' : 'sm:pl-8';
+  // The card is a table with reasons; it is kept out of the thread's live region and SheetStatus announces one line instead.
 
   if (sheet.phase === 'reading') {
     return (
-      <div className={indent}>
+      <div className={indent} aria-live="off">
         <p role="status" className="inline-flex items-center gap-2 rounded-lg border border-[#326273]/14 bg-white px-3 py-2.5 text-[13px] font-semibold text-[#326273]">
           <span className="h-3.5 w-3.5 animate-spin rounded-full border-2 border-[#5C9EAD] border-t-transparent motion-reduce:animate-none" aria-hidden="true" />
           {SHEET_COPY.reading}
@@ -104,7 +112,7 @@ export default function SheetCard({
 
   if (sheet.phase === 'failed') {
     return (
-      <div className={indent}>
+      <div className={indent} aria-live="off">
         <div role="alert" className="flex flex-wrap items-center gap-2 rounded-lg border border-[var(--warn)] bg-[var(--warn-bg)] px-3 py-2.5 text-[13px] font-semibold leading-5 text-[var(--warn-ink)]">
           <AlertTriangle className="h-4 w-4 shrink-0" aria-hidden="true" />
           <span className="min-w-0 flex-1">{sheet.text}</span>
@@ -130,22 +138,24 @@ export default function SheetCard({
   ].filter(Boolean);
 
   return (
-    <div className={indent}>
+    <div className={indent} aria-live="off">
       <section aria-label={SHEET_COPY.title} className="overflow-hidden rounded-xl border border-[#326273]/16 bg-white">
         <header className="flex flex-wrap items-start gap-3 border-b border-[#326273]/12 px-3.5 py-3">
           <span className="grid h-9 w-9 shrink-0 place-items-center rounded-lg bg-[var(--zeke-tint)]">
             <FileSpreadsheet className="h-[18px] w-[18px] text-[#0d6370]" aria-hidden="true" />
           </span>
           <div className="min-w-[11rem] flex-1">
-            <h3 className="truncate text-sm font-bold text-[#0c3e48]">{card.fileName ?? 'Pasted rows'}</h3>
+            <h3 className="truncate text-sm font-bold text-[#0c3e48]">{card.fileName ?? (card.source === 'file' ? SHEET_COPY.uploadedSheet : SHEET_COPY.pastedRows)}</h3>
             <p className="text-[13px] leading-5 text-[var(--ink-muted)] tabular-nums">{summary.join(' · ')}</p>
           </div>
-          <p className={cn('rounded-md px-2 py-1 text-[13px] font-bold', card.blockedCount > 0 ? 'bg-[var(--error-bg)] text-[var(--error)]' : card.confirmCount > 0 ? 'bg-[var(--warn-bg)] text-[var(--warn-ink)]' : 'bg-[var(--ok-bg)] text-[var(--ok-ink)]')}>
+          <p className={cn('rounded-md px-2 py-1 text-[13px] font-bold', card.blockedCount > 0 ? 'bg-[var(--error-bg)] text-[var(--error)]' : card.confirmCount > 0 || card.mappedBy === 'assistant' ? 'bg-[var(--warn-bg)] text-[var(--warn-ink)]' : 'bg-[var(--ok-bg)] text-[var(--ok-ink)]')}>
             {card.blockedCount > 0
               ? `${card.blockedCount} cannot be paid`
               : card.confirmCount > 0
                 ? `${card.confirmCount} to check`
-                : `${card.readyCount} of ${card.rows.length} clear`}
+                : card.mappedBy === 'assistant'
+                  ? 'Check the columns'
+                  : `${card.readyCount} of ${card.rows.length} clear`}
           </p>
         </header>
 
@@ -180,7 +190,7 @@ export default function SheetCard({
                     {row.recipient ? <span title={row.recipient}>{mask(row.recipient)}</span> : <span className="font-medium text-[var(--ink-muted)]">No recipient</span>}
                     <Payee row={row} />
                   </td>
-                  <td className="py-2.5 pr-3 text-right font-semibold tabular-nums text-[#0c3e48]">{row.amount || '–'}</td>
+                  <td className="py-2.5 pr-3 text-right font-semibold tabular-nums text-[#0c3e48]"><Amount row={row} /></td>
                   <td className="py-2.5 pr-3 text-[13px] font-semibold text-[#0c3e48]">{row.currency}</td>
                   <td className="break-words py-2.5 pr-3 text-[13px] text-[#1F4452]">{row.reference || <span className="text-[var(--ink-muted)]">None</span>}</td>
                   <td className="py-2.5 pr-3.5"><StateLabel state={row.state} /></td>
@@ -205,7 +215,7 @@ export default function SheetCard({
                   {row.recipient ? <span title={row.recipient}>{mask(row.recipient)}</span> : <span className="font-medium text-[var(--ink-muted)]">No recipient</span>}
                 </p>
                 <p className="shrink-0 text-sm font-semibold tabular-nums text-[#0c3e48]">
-                  {row.amount || '–'} <span className="text-[13px]">{row.currency}</span>
+                  <Amount row={row} /> <span className="text-[13px]">{row.currency}</span>
                 </p>
               </div>
               <Payee row={row} />
@@ -219,7 +229,7 @@ export default function SheetCard({
         {card.notes.length > 0 || card.ignoredColumns.length > 0 ? (
           <ul className="space-y-1 border-t border-[#326273]/12 px-3.5 py-2.5">
             {card.notes.map((note) => (
-              <li key={note.code} className={cn('text-[13px] leading-5', FLAG_TONE[note.severity])}>
+              <li key={note.code} className={cn('text-[13px] leading-5', FLAG_TONE[note.severity], note.severity === 'confirm' && 'font-semibold')}>
                 {note.text}
                 {note.detail ? <span className="text-[var(--ink-muted)]"> {note.detail}</span> : null}
               </li>
@@ -253,7 +263,7 @@ export default function SheetCard({
                   onChange={(event) => onConfirm(id, event.target.checked)}
                   className="mt-0.5 h-4 w-4 shrink-0 accent-[#0d6370]"
                 />
-                {SHEET_COPY.confirmLabel}
+                {card.mappedBy === 'assistant' ? SHEET_COPY.confirmColumnsLabel : SHEET_COPY.confirmLabel}
               </label>
             ) : null}
             {review.error ? (

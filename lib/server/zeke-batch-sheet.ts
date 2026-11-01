@@ -27,10 +27,10 @@
  */
 import { ZEKE_LIMITATION_TEXT } from '../agent/oxwal.ts';
 import { SHEET_COPY } from '../agent/sheet-copy.ts';
-import { ingestSheet, safeFileName, toSheetRows, type ColumnMapper, type IngestInput } from '../batch/ingest.ts';
+import { ingestSheet, safeFileName, toSheetRows, type CellNote, type ColumnMapper, type ColumnNames, type IngestInput } from '../batch/ingest.ts';
 import { PROBLEM_TEXT } from '../batch/sheet.ts';
 import { formatUsdc } from '../fees/copy.ts';
-import { approvalPlan, approvalReasonLines, type PlanPayee, type PolicyFacts, type StaffRuleFacts } from '../transfer/plan.ts';
+import { approvalPlan, approvalReasonLines, parseAmountMinor, type PlanPayee, type PolicyFacts, type StaffRuleFacts } from '../transfer/plan.ts';
 import { reviewBatch, type BatchDeps, type RowReview } from './wallet-batches.ts';
 import { readStaffRule } from './spend-rules.ts';
 import { TRANSFER_SETTLE_WINDOW_MS } from './wallet-transfers.ts';
@@ -48,7 +48,10 @@ export type SheetCardRow = {
   line: number;
   /** As cleaned: what was written, without links, formulas or hidden characters. */
   recipient: string;
+  /** As typed in the file. */
   amount: string;
+  /** The amount that would be signed, grouped and with cents ("1,200.00"); null when the text is not an amount. */
+  amountDisplay: string | null;
   currency: string;
   reference: string;
   state: 'ready' | 'confirm' | 'blocked';
@@ -61,6 +64,8 @@ export type SheetCard = {
   fileName: string | null;
   source: 'file' | 'pasted';
   mappedBy: 'headers' | 'positions' | 'assistant';
+  /** The columns the rows were read from, by the file's own names. */
+  columns: ColumnNames;
   ignoredColumns: string[];
   rows: SheetCardRow[];
   readyCount: number;
@@ -72,7 +77,7 @@ export type SheetCard = {
   maxFeeMinor: string;
   totalDebitMinor: string;
   balance: { state: 'ok'; usdcMinor: string; shortByMinor: string; heldMinor: string } | { state: 'unknown' };
-  /** No row is blocked, the wallet covers it, and there is at least one row. Rows to check still need the person's yes. */
+  /** No row is blocked, the wallet covers it, and there is at least one row. Rows to check, and columns an assistant picked, still need the person's yes. */
   ready: boolean;
   needsConfirmation: boolean;
   notes: SheetFlag[];
@@ -88,6 +93,13 @@ export type SheetFailure = { ok: false; status: number; code: string; error: str
 
 export type StaffFacts = { rule: StaffRuleFacts | null; policy: PolicyFacts | null; runningTotals: Record<string, string> };
 export type RuleFactsReader = () => Promise<StaffFacts | null>;
+
+/** The amount the way it will be signed; null when the text is not an amount or the row is not in USDC. */
+function shownAmount(text: string, currency: string): string | null {
+  if (currency !== 'USDC') return null;
+  const minor = parseAmountMinor(text);
+  return minor === null ? null : formatUsdc(minor);
+}
 
 const PROBLEM_CODES = new Set(Object.keys(PROBLEM_TEXT));
 const OWN_TEXT_CODES = new Set(['duplicate_row', 'own_wallet', 'splash_controlled_address', 'not_payable_in_a_batch', 'use_payout_route', 'too_many_rows', 'empty_sheet']);
@@ -105,6 +117,26 @@ export async function liveRuleFacts(deps: BatchDeps, actor: { userId: string }):
 }
 
 const usdc = (minor: string | bigint) => `${formatUsdc(BigInt(minor))} USDC`;
+
+/**
+ * How a change made to a cell on the way in counts. A cell that read like an
+ * instruction or a command and was cleared, or a recipient that had a link or a
+ * formula cut out, no longer says what the file said, so the row is one to
+ * check. Anything else is for information.
+ */
+function noteSeverity(note: CellNote): SheetFlag['severity'] {
+  if (note.code === 'instruction_ignored' || note.code === 'command_removed') return 'confirm';
+  if (note.field === 'recipient' && (note.code === 'link_removed' || note.code === 'formula_removed')) return 'confirm';
+  return 'note';
+}
+
+/** The chosen columns in words: "Recipient: Party. Amount: Settle Total. Reference: Invoice No." */
+function columnsSentence(columns: ColumnNames): string {
+  const parts = [`Recipient: ${columns.recipient.join(' and ')}.`, `Amount: ${columns.amount}.`];
+  if (columns.reference) parts.push(`Reference: ${columns.reference}.`);
+  if (columns.currency) parts.push(`Currency: ${columns.currency}.`);
+  return parts.join(' ');
+}
 
 function reviewFlags(rv: RowReview): SheetFlag[] {
   if (rv.ok) return [];
@@ -135,6 +167,7 @@ export async function readSheetForZeke(
   const owner = actor.role === 'OWNER';
   const facts = owner ? null : opts.ruleFacts === undefined ? await liveRuleFacts(deps, actor) : opts.ruleFacts ? await opts.ruleFacts() : null;
   const notes: SheetFlag[] = [];
+  if (owner) notes.push({ code: 'owner_no_rule', severity: 'note', text: SHEET_COPY.owner_no_rule });
   if (!owner) {
     notes.push({ code: 'staff_batch', severity: 'note', text: SHEET_COPY.staff_batch });
     if (!facts) notes.push({ code: 'rule_unavailable', severity: 'note', text: SHEET_COPY.rule_unavailable });
@@ -145,7 +178,7 @@ export async function readSheetForZeke(
   const rows: SheetCardRow[] = read.rows.map((ing, i) => {
     const rv = review.rows[i];
     const flags: SheetFlag[] = [];
-    for (const n of ing.notes) flags.push({ code: n.code, severity: 'note', text: n.text });
+    for (const n of ing.notes) flags.push({ code: n.code, severity: noteSeverity(n), text: n.text });
     for (const p of ing.problems) flags.push({ code: p.code, severity: 'blocked', text: p.text });
     // A row the cells already refuse has its reasons; the review adds the recipient's.
     if (ing.problems.length === 0) flags.push(...reviewFlags(rv));
@@ -187,6 +220,7 @@ export async function readSheetForZeke(
       line: ing.line,
       recipient: ing.recipient,
       amount: ing.amount,
+      amountDisplay: shownAmount(ing.amount, ing.currency),
       currency: ing.currency,
       reference: ing.reference,
       state,
@@ -203,7 +237,9 @@ export async function readSheetForZeke(
   } else if (review.balance.state === 'unknown') {
     notes.push({ code: 'balance_unknown', severity: 'note', text: SHEET_COPY.balance_unknown });
   }
-  if (read.mappedBy === 'assistant') notes.push({ code: 'mapped_by_assistant', severity: 'note', text: SHEET_COPY.mapped_by_assistant });
+  // Columns a model picked are a guess until the person says they are right: named on the card, and the batch waits for their yes.
+  const columnsGuessed = read.mappedBy === 'assistant';
+  if (columnsGuessed) notes.push({ code: 'mapped_by_assistant', severity: 'confirm', text: SHEET_COPY.mapped_by_assistant, detail: columnsSentence(read.columns) });
 
   const blockedCount = rows.filter((r) => r.state === 'blocked').length;
   const confirmCount = rows.filter((r) => r.state === 'confirm').length;
@@ -211,6 +247,7 @@ export async function readSheetForZeke(
     fileName: safeFileName(opts.fileName),
     source: opts.source,
     mappedBy: read.mappedBy,
+    columns: read.columns,
     ignoredColumns: read.ignoredColumns,
     rows,
     readyCount: rows.filter((r) => r.state === 'ready').length,
@@ -222,7 +259,7 @@ export async function readSheetForZeke(
     totalDebitMinor: review.totalDebitMinor,
     balance: review.balance,
     ready: blockedCount === 0 && rows.length > 0 && !short,
-    needsConfirmation: confirmCount > 0,
+    needsConfirmation: confirmCount > 0 || columnsGuessed,
     notes,
     goesTo: owner ? 'owners_sign' : 'owners_start',
     limit: ZEKE_LIMITATION_TEXT.BATCH,
@@ -241,7 +278,7 @@ export async function readSheetRows(
   input: IngestInput,
   opts: { mapColumns?: ColumnMapper | null },
 ): Promise<
-  | { ok: true; rows: Array<{ line: number; recipient: string; amount: string; reference: string }>; notes: Array<{ line: number; text: string }>; mappedBy: SheetCard['mappedBy']; ignoredColumns: string[] }
+  | { ok: true; rows: Array<{ line: number; recipient: string; amount: string; reference: string }>; notes: Array<{ line: number; text: string }>; mappedBy: SheetCard['mappedBy']; columns: ColumnNames; ignoredColumns: string[] }
   | SheetFailure
 > {
   if (actor.role !== 'OWNER' && actor.role !== 'MAKER' && actor.role !== 'APPROVER') {
@@ -252,8 +289,13 @@ export async function readSheetRows(
   return {
     ok: true,
     rows: toSheetRows(read.rows),
-    notes: read.rows.flatMap((r) => r.notes.map((n) => ({ line: r.line, text: `Row ${r.line}: ${n.text}` }))),
+    notes: read.rows.flatMap((r) => [
+      ...r.notes.map((n) => ({ line: r.line, text: `Row ${r.line}: ${n.text}` })),
+      // A currency the review would only call a bad amount is said in its own words.
+      ...r.problems.filter((p) => p.code === 'currency_not_usdc').map((p) => ({ line: r.line, text: `Row ${r.line}: ${p.text}` })),
+    ]),
     mappedBy: read.mappedBy,
+    columns: read.columns,
     ignoredColumns: read.ignoredColumns,
   };
 }

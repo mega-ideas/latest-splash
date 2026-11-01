@@ -28,9 +28,9 @@
  */
 import readXlsxFile from 'read-excel-file/universal';
 
-import { foldForReading, leetFolded } from '../agent/untrusted-text.ts';
+import { decodeTags, foldForReading, hasHidden, leetFolded, stripHidden } from '../agent/untrusted-text.ts';
 import { parseAmountMinor } from '../transfer/plan.ts';
-import { BATCH_MAX_PAYMENTS, HEADER_ALIASES, PROBLEM_TEXT, norm, problemsOf, type SheetRow } from './sheet.ts';
+import { BATCH_MAX_PAYMENTS, HEADER_ALIASES, PROBLEM_TEXT, hasCurrencyMarker, norm, problemsOf, type SheetRow } from './sheet.ts';
 
 export { looksLikeSheet } from './sheet.ts';
 
@@ -55,7 +55,7 @@ export type IngestInput =
 /** Given header names only. Returns what the model said, unchecked: `ingestSheet` checks it. */
 export type ColumnMapper = (headers: string[]) => Promise<unknown>;
 
-export type CellNoteCode = 'formula_removed' | 'link_removed' | 'command_removed' | 'instruction_ignored' | 'truncated';
+export type CellNoteCode = 'formula_removed' | 'link_removed' | 'command_removed' | 'instruction_ignored' | 'hidden_removed' | 'truncated';
 export type CellNote = { field: 'recipient' | 'amount' | 'reference' | 'currency'; code: CellNoteCode; text: string };
 export type RowProblem = { code: 'recipient_missing' | 'recipient_too_long' | 'bad_amount' | 'reference_too_long' | 'currency_marker' | 'currency_not_usdc'; text: string };
 
@@ -72,8 +72,11 @@ export type IngestedRow = {
 
 export type IngestFailureCode = 'empty' | 'too_large' | 'too_many_rows' | 'too_wide' | 'unreadable' | 'columns_not_understood';
 
+/** The columns the rows were read from, by the names the file gave them. */
+export type ColumnNames = { recipient: string[]; amount: string; reference: string | null; currency: string | null };
+
 export type IngestResult =
-  | { ok: true; rows: IngestedRow[]; mappedBy: 'headers' | 'positions' | 'assistant'; ignoredColumns: string[] }
+  | { ok: true; rows: IngestedRow[]; mappedBy: 'headers' | 'positions' | 'assistant'; columns: ColumnNames; ignoredColumns: string[] }
   | { ok: false; code: IngestFailureCode; error: string };
 
 const fail = (code: IngestFailureCode, error: string): IngestResult => ({ ok: false, code, error });
@@ -83,36 +86,64 @@ export const NOTE_TEXT: Record<CellNoteCode, string> = {
   link_removed: 'A link was removed.',
   command_removed: 'This cell looked like a command, so it was cleared.',
   instruction_ignored: 'This cell read like an instruction to an assistant. It was ignored and cleared.',
+  hidden_removed: 'Hidden characters were removed from this cell.',
   truncated: 'This cell was very long and was cut short.',
 };
 
 export const CURRENCY_NOT_USDC_TEXT = (currency: string) => `Batches pay USDC only, and this row says ${currency || 'another currency'}.`;
+/** The currency cell had something in it that was cleared, so the row cannot be read as USDC. */
+export const CURRENCY_UNREADABLE_TEXT = 'The currency cell could not be read, so this row is not read as USDC. Batches pay USDC only.';
+/** The recipient cell read like an instruction or a command and was cleared. */
+export const RECIPIENT_CLEARED_TEXT = 'The recipient read like an instruction or a command, so it was cleared. Use the wallet address of the saved recipient instead.';
 
 // ─── Cells ──────────────────────────────────────────────────────────────────
 
-/** Control, zero-width and bidirectional characters have no place in a name a person approves. */
-const UNSAFE = /[\u0000-\u001f\u007f-\u009f\u00ad\u200b-\u200f\u2028-\u202e\u2060-\u2069\ufeff]/g;
-
-/** Text that talks to an assistant or about the payment's authority, in phrases. Names and references that merely contain a word like "transfer" or "wire" do not match. */
-const INSTRUCTION_PATTERNS: readonly RegExp[] = [
+/**
+ * Phrases that can only be aimed at an assistant or at the payment's
+ * authority. They hold for every cell, names included. Names and references
+ * that merely contain a word like "transfer" or "wire" do not match.
+ */
+const STRICT_INSTRUCTION_PATTERNS: readonly RegExp[] = [
   /\b(?:ignore|disregard|forget|override|bypass|skip)\b.{0,40}\b(?:previous|prior|above|earlier|all|any|the|these|those|your|every)\b.{0,40}\b(?:instructions?|rules?|checks?|limits?|prompts?|polic(?:y|ies)|approvals?|screening|guidelines?)\b/,
-  /\b(?:0xwal|zeke)\b/,
+  /\b0xwal\b/,
   /\b(?:system|assistant|developer)\s*:/,
   /<\s*\|/,
   /\byou\s+are\s+now\b/,
   /\b(?:from\s+now\s+on|going\s+forward|all\s+future)\b/,
-  /\b(?:please\s+|kindly\s+)?(?:approve|sign|submit|execute|send|release|authori[sz]e|confirm)\b.{0,30}\b(?:this|it|the|all|batch|payment|payments|transaction|transfer|immediately|now)\b/,
-  /\b(?:pay|send|forward|remit|deposit|wire)\s+(?:the\s+)?(?:funds\s+|money\s+)?(?:to|into)\b/,
-  /\b(?:new|updated|changed|revised|different)\s+(?:bank|account|payee|beneficiary|wallet|iban)\b/,
   /\b(?:propose[a-z]+|signproposal|prepareusdctransfer|setassistantname|findsavedrecipient|listsavedrecipients)\b/,
   /\b(?:do\s+not|don'?t|never)\s+(?:tell|mention|show|reveal|warn|inform|alert)\b/,
   /\b(?:tell|ask|make|get|have)\s+(?:the\s+)?(?:assistant|zeke|ai|model|bot|chatbot)\b/,
   /\b(?:as|being)\s+an?\s+(?:ai|assistant|language\s+model)\b/,
 ];
 
-function readsLikeInstruction(text: string): boolean {
+/**
+ * A verb and its object, which is also how a supplier can be called ("Release
+ * Payments Ltd", "Sign All Graphics", "Send It Logistics") and how Zeke can be
+ * addressed. In a reference they hold. In a name they hold only when the cell
+ * reads as an order: it starts with please or kindly, or is a sentence long.
+ */
+const SENTENCE_INSTRUCTION_PATTERNS: readonly RegExp[] = [
+  /\bzeke\b/,
+  /\b(?:please\s+|kindly\s+)?(?:approve|sign|submit|execute|send|release|authori[sz]e|confirm)\b.{0,30}\b(?:this|it|the|all|batch|payment|payments|transaction|transfer|immediately|now)\b/,
+  /\b(?:pay|send|forward|remit|deposit|wire)\s+(?:the\s+)?(?:funds\s+|money\s+)?(?:to|into)\b/,
+  /\b(?:new|updated|changed|revised|different)\s+(?:bank|account|payee|beneficiary|wallet|iban)\b/,
+];
+
+/** Words in a name from which it reads as a sentence rather than a business. */
+const SENTENCE_WORDS = 5;
+
+type CellKind = 'name' | 'text';
+
+function readsLikeInstruction(text: string, kind: CellKind = 'text'): boolean {
   const folded = foldForReading(text);
-  return INSTRUCTION_PATTERNS.some((pattern) => pattern.test(folded) || pattern.test(leetFolded(folded)));
+  const forms = [folded, leetFolded(folded)];
+  const hits = (patterns: readonly RegExp[]) => patterns.some((pattern) => forms.some((form) => pattern.test(form)));
+  if (hits(STRICT_INSTRUCTION_PATTERNS)) return true;
+  if (kind === 'name') {
+    const words = folded.split(/\s+/).filter(Boolean).length;
+    if (words < SENTENCE_WORDS && !/^(?:please|kindly)\b/.test(folded)) return false;
+  }
+  return hits(SENTENCE_INSTRUCTION_PATTERNS);
 }
 
 /** Text a shell, a spreadsheet or a browser could run. */
@@ -154,13 +185,19 @@ export type CleanCell = { text: string; notes: CellNoteCode[] };
  */
 export function sanitizeCell(raw: unknown, field: 'recipient' | 'amount' | 'reference' | 'currency'): CleanCell {
   const notes: CellNoteCode[] = [];
-  let text = cellText(raw).normalize('NFKC').replace(/[\t\n\r\u2028\u2029]/g, ' ').replace(UNSAFE, '').replace(/\s+/g, ' ').trim();
+  const spaced = cellText(raw).normalize('NFKC').replace(/[\t\n\r\u{2028}\u{2029}]/gu, ' ');
+  // Text spelled in hidden characters is read before it is dropped: what a screen does not show, a model may read.
+  const hidden = hasHidden(spaced);
+  let text = stripHidden(spaced).replace(/\s+/g, ' ').trim();
+  if (hidden) notes.push('hidden_removed');
+  const aloud = hidden ? decodeTags(spaced).replace(/\s+/g, ' ').trim() : text;
   if (text.length > INGEST_LIMITS.maxCellChars) {
     text = text.slice(0, INGEST_LIMITS.maxCellChars).trim();
     notes.push('truncated');
   }
   if (isAddress(text)) return { text, notes };
-  if (readsLikeInstruction(text)) return { text: '', notes: [...notes, 'instruction_ignored'] };
+  const kind: CellKind = field === 'recipient' ? 'name' : 'text';
+  if (readsLikeInstruction(aloud, kind)) return { text: '', notes: [...notes, 'instruction_ignored'] };
   if (readsLikeCommand(text)) return { text: '', notes: [...notes, 'command_removed'] };
   if (field === 'amount' || field === 'currency') return { text, notes };
   const noLinks = text.replace(LINK_PATTERN, ' ').replace(/\s+/g, ' ').trim();
@@ -179,20 +216,29 @@ function cellText(value: unknown): string {
   return '';
 }
 
-/** A file name as it may be shown: its last part, letters, digits and a few joiners. */
+/**
+ * A file name as it may be shown and stored (the card header, the batch label):
+ * its last part, letters, digits and a few joiners. A name that is a link, a
+ * host name (a dot followed by letters, as in www.example.com), or reads like an
+ * instruction is not shown at all: the person sees a generic title and the
+ * label is generic too.
+ */
 export function safeFileName(name: unknown): string | null {
   if (typeof name !== 'string') return null;
-  const last = name.split(/[\\/]/).pop() ?? '';
-  const cleaned = last
-    .normalize('NFKC')
-    .replace(UNSAFE, '')
+  const last = (name.split(/[\\/]/).pop() ?? '').normalize('NFKC');
+  const aloud = decodeTags(last);
+  const cleaned = stripHidden(last)
     .replace(/[^\p{L}\p{N} ._()-]/gu, '')
     .replace(/\s+/g, ' ')
     .replace(/^[.\-+= ]+/, '')
     .trim()
     .slice(0, INGEST_LIMITS.maxFileNameChars)
     .trim();
-  return cleaned || null;
+  if (!cleaned) return null;
+  const base = cleaned.replace(/\.(?:csv|tsv|txt|xlsx)$/i, '');
+  if (/\.[a-z]{2,}/i.test(base) || /\b(?:https?|ftp|www)\b/i.test(base)) return null;
+  if (readsLikeInstruction(aloud.replace(/\.(?:csv|tsv|txt|xlsx)$/i, ''), 'name') || readsLikeInstruction(base, 'name') || readsLikeCommand(base)) return null;
+  return cleaned;
 }
 
 // ─── Tables ─────────────────────────────────────────────────────────────────
@@ -343,6 +389,14 @@ function looksLikeAmount(cell: string): boolean {
   return parseAmountMinor(cell) !== null;
 }
 
+/** A cell that is a number, or an amount with a currency beside it: something the row check can judge. */
+function isAmountLike(cell: string): boolean {
+  const text = cell.trim();
+  return parseAmountMinor(text) !== null || /^[-+]?\d[\d,]*(?:\.\d+)?$/.test(text) || hasCurrencyMarker(text);
+}
+
+const isWhole = (cell: string) => /^\d[\d,]*$/.test(cell.trim());
+
 /** The model's answer, checked against the headers and the data. Anything else is no mapping. */
 function checkedMapping(answer: unknown, labels: string[], body: string[][]): Mapping | null {
   if (!answer || typeof answer !== 'object' || Array.isArray(answer)) return null;
@@ -361,9 +415,19 @@ function checkedMapping(answer: unknown, labels: string[], body: string[][]): Ma
   if (new Set(chosen).size !== chosen.length) return null;
   const column = (i: number) => body.map((r) => String(r[i] ?? '').trim()).filter(Boolean);
   const amounts = column(amount);
-  if (amounts.length === 0 || amounts.filter((c) => /\d/.test(c)).length * 2 < amounts.length) return null;
-  if (!amounts.some((c) => looksLikeAmount(c.replace(/,/g, '')) || /\d/.test(c))) return null;
+  // Every amount cell must be an amount: one guess is not allowed to leave a stray cell for the row check to find.
+  if (amounts.length === 0 || !amounts.every(isAmountLike)) return null;
   if ((recipients as number[]).every((i) => column(i).length === 0)) return null;
+  // A column of whole numbers (invoice numbers, ids) is not the money when another column of amounts has cents.
+  if (amounts.every(isWhole)) {
+    const taken = new Set([amount, ...(recipients as number[])]);
+    const rival = labels.some((_, i) => {
+      if (taken.has(i)) return false;
+      const cells = column(i);
+      return cells.length > 0 && cells.every(isAmountLike) && cells.some((c) => /\.\d/.test(c));
+    });
+    if (rival) return null;
+  }
   return { recipient: recipients as number[], amount, reference, currency };
 }
 
@@ -378,7 +442,7 @@ export async function ingestSheet(input: IngestInput, opts: { mapColumns?: Colum
   } else {
     const text = typeof input.text === 'string' ? input.text : '';
     if (text.length > INGEST_LIMITS.maxBytes) return fail('too_large', 'That file is too large to be a batch. A batch is at most 20 payments.');
-    const clean = text.replace(/^﻿/, '');
+    const clean = text.replace(/^\u{feff}/u, '');
     if (!clean.trim()) return fail('empty', 'There is nothing in it. A sheet has a header line (recipient, amount, reference) and one row per payment.');
     table = parseDelimited(clean, detectDelimiter(clean), INGEST_LIMITS.maxScanRows + 1);
   }
@@ -432,11 +496,16 @@ export async function ingestSheet(input: IngestInput, opts: { mapColumns?: Colum
     const recipient = candidates.find((c) => /^0x/i.test(c)) ?? candidates.find((c) => c !== '') ?? '';
     const amount = take(m.amount, 'amount');
     const reference = m.reference === null ? '' : take(m.reference, 'reference');
+    const written = m.currency === null ? '' : cellText(cells[m.currency]).trim();
     const said = m.currency === null ? '' : take(m.currency, 'currency').toUpperCase().slice(0, 12);
-    const currency = said || 'USDC';
+    // Only a currency cell that is truly empty means USDC. One that had something in it which was cleared (a command, an instruction) is not USDC: it is unreadable, and the row is refused.
+    const unreadable = written !== '' && said === '';
+    const currency = unreadable ? '?' : said || 'USDC';
     const line = i + 1;
-    const problems: RowProblem[] = problemsOf({ line, recipient, amount, reference }).map((code) => ({ code, text: PROBLEM_TEXT[code] }));
-    if (currency !== 'USDC') problems.push({ code: 'currency_not_usdc', text: CURRENCY_NOT_USDC_TEXT(currency) });
+    const nameCleared = recipient === '' && notes.some((n) => n.field === 'recipient' && (n.code === 'instruction_ignored' || n.code === 'command_removed'));
+    const problems: RowProblem[] = problemsOf({ line, recipient, amount, reference }).map((code) => ({ code, text: code === 'recipient_missing' && nameCleared ? RECIPIENT_CLEARED_TEXT : PROBLEM_TEXT[code] }));
+    if (unreadable) problems.push({ code: 'currency_not_usdc', text: CURRENCY_UNREADABLE_TEXT });
+    else if (currency !== 'USDC') problems.push({ code: 'currency_not_usdc', text: CURRENCY_NOT_USDC_TEXT(currency) });
     return { line, recipient, amount, currency, reference, notes, problems };
   });
 
@@ -446,7 +515,16 @@ export async function ingestSheet(input: IngestInput, opts: { mapColumns?: Colum
     .map(({ label }) => label)
     .slice(0, 10);
 
-  return { ok: true, rows, mappedBy, ignoredColumns };
+  // A headerless sheet has no names to give: its first row is data, so the columns are named by position.
+  const nameOf = (index: number) => (mappedBy === 'positions' ? `(column ${index + 1})` : labels[index]);
+  const columns: ColumnNames = {
+    recipient: m.recipient.map(nameOf),
+    amount: nameOf(m.amount),
+    reference: m.reference === null ? null : nameOf(m.reference),
+    currency: m.currency === null ? null : nameOf(m.currency),
+  };
+
+  return { ok: true, rows, mappedBy, columns, ignoredColumns };
 }
 
 /**

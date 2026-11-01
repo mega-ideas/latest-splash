@@ -17,6 +17,7 @@ import { stashThreadHandoff } from '../lib/oxwal/thread-handoff';
 import { useOxwalThread } from '../lib/oxwal/use-oxwal-thread';
 import { useZekeDesk } from '../lib/oxwal/use-zeke-desk';
 import OxWalComposer from './oxwal/OxWalComposer';
+import SheetStatus from './oxwal/SheetStatus';
 import ThreadRow, { StreamingRow, ThinkingRow } from './oxwal/ThreadView';
 import ZekeGreeting, { type ZekeGreetingChip } from './oxwal/ZekeGreeting';
 
@@ -310,6 +311,7 @@ export default function FloatingCopilot() {
         </div>
 
         {/* Messages. The greeting is the first of them, its chips inside it. */}
+        <SheetStatus thread={thread} />
         <div
           ref={threadRef}
           className="flex-1 space-y-3 overflow-y-auto p-4"
@@ -348,7 +350,7 @@ export default function FloatingCopilot() {
             onChange={setInput}
             onSubmit={() => send(input)}
             onChipSubmit={(prompt) => send(prompt)}
-            onSheet={(sheet) => void attachSheet(sheet)}
+            onSheet={(sheet) => attachSheet(sheet)}
             chips={[]}
             disabled={isSending}
             assistantName={assistantName}

@@ -17,6 +17,11 @@ export const SHEET_COPY = {
   dismiss: 'Dismiss',
   openBatchPayouts: 'Open Batch payouts',
   confirmLabel: 'I have checked the rows marked Check and want to prepare this batch anyway.',
+  confirmColumnsLabel: 'I have checked that these are the right columns, and the rows marked Check, and want to prepare this batch.',
+  uploadedSheet: 'Uploaded sheet',
+  pastedRows: 'Pasted rows',
+  columnsHeading: 'Columns used',
+  amountHeading: 'Amount (USDC)',
   blockedHelp: 'A batch is signed once, so every row in it must be clear. Fix the sheet or remove the rows marked Cannot be paid, then attach it again.',
   readyHelp: 'Every row is clear. Press Prepare batch and the owners are asked to sign it.',
   readyHelpStaff: 'Every row is clear. Press Prepare batch and the owners are told it is waiting.',
@@ -36,7 +41,8 @@ export const SHEET_COPY = {
   balance_unknown: 'The wallet balance could not be read just now, so Splash cannot say whether it covers this batch.',
   rule_unavailable: 'Your spending rule could not be checked here, so every row waits for your owners.',
   staff_batch: 'A batch waits for your owners. Rows outside your rule say why.',
-  mapped_by_assistant: 'Zeke matched the columns by their names. It read no cell to do it.',
+  mapped_by_assistant: 'Zeke matched the columns by their names. It read no cell to do it. Check that these are the right columns before you go on.',
+  owner_no_rule: 'No spending rule applies to an owner. Every batch still needs the owners’ signatures.',
   ignored_columns: 'Columns that were not used:',
 } as const;
 

@@ -2470,8 +2470,9 @@ Design: `docs/v2/phase3-zeke-batches.md`. Tests: `tests/zeke-sheet-ingest.test.m
 - **A sheet is data, read by the server.** `POST /api/wallet/batches/sheet` reads a
   CSV, pasted rows or an .xlsx by fixed rules (`lib/batch/ingest.ts`). Text in a cell
   that talks to an assistant is ignored and cleared; formulas (also full-width
-  forms), commands, links and hidden or bidirectional characters are removed from
-  what is shown back and passed on; each change is recorded on the row. A cell can
+  forms), commands, links and hidden characters of every kind (control and format
+  characters, variation selectors, fillers, the Unicode tag block, read first so
+  text hidden there is caught) are removed from what is shown back and passed on; each change is recorded on the row. A cell can
   only NAME a recipient: the review matches it to the business's own saved,
   screened recipients, so a sheet cannot introduce a payee, an address or a fee.
 - **Caps.** 256 KB, 200 rows scanned, 40 columns, 400 characters a cell, at most 20

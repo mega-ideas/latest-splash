@@ -13,6 +13,7 @@
  *
  * Pure and client-safe.
  */
+import { stripHidden } from '../agent/untrusted-text.ts';
 import { parseAmountMinor } from '../transfer/plan.ts';
 
 /** Most payments in one batch. One transaction carries them all, and the chain bounds what one transaction may hold. */
@@ -40,11 +41,9 @@ export const HEADER_ALIASES: Record<'recipient' | 'amount' | 'reference', string
 
 export const norm = (key: string) => key.toLowerCase().replace(/[^a-z0-9]/g, '');
 
-/** Control and bidirectional-override characters have no place in a name a person approves. */
-const UNSAFE = /[\u0000-\u001f\u007f​-‏‪-‮⁦-⁩﻿]/g;
-
+/** Hidden, control and bidirectional characters have no place in a name a person approves (see lib/agent/untrusted-text.ts). */
 export function cleanCell(value: unknown): string {
-  return String(value ?? '').replace(UNSAFE, '').replace(/\s+/g, ' ').trim();
+  return stripHidden(String(value ?? '')).replace(/\s+/g, ' ').trim();
 }
 
 /**
@@ -89,6 +88,9 @@ export function sheetRowsFromBody(value: unknown): SheetRow[] {
 /** A currency sign or code next to an amount ("RM 20k", "$5,000", "USD 100"): one convention only, so it is refused, not read. */
 const CURRENCY_MARKER = /(?:^|[^a-z])(?:rm|myr|usd|php|idr|sgd|eur|gbp|thb|vnd)(?:[^a-z]|$)|[$€£¥₱]|\b\d+(?:\.\d+)?\s*[km]\b/i;
 
+/** Whether an amount cell has a currency sign or code beside it. */
+export const hasCurrencyMarker = (amount: string) => CURRENCY_MARKER.test(amount);
+
 export function problemsOf(row: SheetRow): SheetProblem['code'][] {
   const out: SheetProblem['code'][] = [];
   if (!row.recipient) out.push('recipient_missing');
@@ -113,7 +115,7 @@ export function recordsFromCsv(text: string): Array<Record<string, string>> {
   let cell = '';
   let row: string[] = [];
   let quoted = false;
-  const src = String(text ?? '').replace(/^﻿/, '');
+  const src = String(text ?? '').replace(/^\u{feff}/u, '');
   for (let i = 0; i < src.length; i += 1) {
     const ch = src[i];
     if (quoted) {

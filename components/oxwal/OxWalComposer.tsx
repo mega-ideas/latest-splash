@@ -1,7 +1,7 @@
 'use client';
 
 import type { Ref } from 'react';
-import { useId, useRef, useState } from 'react';
+import { useEffect, useId, useRef, useState } from 'react';
 import {
   ArrowRight,
   ArrowUpRight,
@@ -34,7 +34,7 @@ type OxWalComposerProps = {
    * The server reads it and the thread shows it as a table to check (Zeke
    * prepares; the owners approve). A sheet is never put into the message.
    */
-  onSheet?: (sheet: SheetPayload) => void;
+  onSheet?: (sheet: SheetPayload) => void | boolean | Promise<boolean | void>;
   chips?: OxWalComposerChip[];
   disabled?: boolean;
   title?: string;
@@ -92,6 +92,12 @@ export default function OxWalComposer({
   const [parseError, setParseError] = useState<string | null>(null);
 
   const hasValue = value.trim().length > 0;
+  // The box as it is now, for a read that finishes later; and whether a pasted sheet is being read.
+  const valueRef = useRef(value);
+  useEffect(() => {
+    valueRef.current = value;
+  }, [value]);
+  const [readingSheet, setReadingSheet] = useState(false);
 
   async function handleFile(file: File) {
     setParsing(true);
@@ -110,8 +116,16 @@ export default function OxWalComposer({
   function submit() {
     // Rows pasted from a spreadsheet are a sheet, not a question: they go to the sheet reader, never to the model.
     if (onSheet && looksLikeSheet(value)) {
-      onSheet(pastedSheet(value));
-      onChange('');
+      if (readingSheet) return;
+      // The text stays in the box until the sheet has been read: if it was a question after all, or the read failed, nothing the person typed is lost.
+      const pasted = value;
+      setReadingSheet(true);
+      void Promise.resolve(onSheet(pastedSheet(pasted)))
+        .then((read) => {
+          if (read !== false && valueRef.current === pasted) onChange('');
+        })
+        .catch(() => undefined)
+        .finally(() => setReadingSheet(false));
       return;
     }
     onSubmit();

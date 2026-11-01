@@ -266,7 +266,7 @@ export default function BatchFlow() {
               ) : null}
               {step === 2 && readNotes.length > 0 ? (
                 <div role="status" className="mb-4 rounded-xl bg-[#F6F0ED] p-3 text-sm leading-6 text-[#1F4452]">
-                  <p className="font-bold text-[#0c3e48]">Splash cleaned some cells in your file</p>
+                  <p className="font-bold text-[#0c3e48]">What Splash did when it read your file</p>
                   <ul className="mt-1 space-y-0.5">
                     {readNotes.slice(0, 8).map((note) => (
                       <li key={note}>{note}</li>

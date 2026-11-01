@@ -4,6 +4,7 @@ import { useRef, useState } from 'react';
 import Link from 'next/link';
 import { Download, FileSpreadsheet, Plus, Upload } from 'lucide-react';
 
+import { SHEET_COPY } from '@/lib/agent/sheet-copy';
 import { BATCH_MAX_PAYMENTS, type SheetRow } from '@/lib/batch/sheet';
 import { errorText, pastedSheet, readSheetFile, sampleSheetCsv, sendSheet, SheetFileError, type SheetPayload } from '@/lib/batch/file';
 import { QuietButton } from '../transfer/ui';
@@ -16,6 +17,26 @@ import { QuietButton } from '../transfer/ui';
  * business saved. A sheet names people; it never adds one, and nothing in a cell
  * is read as an instruction.
  */
+type ReadBody = {
+  rows?: SheetRow[];
+  notes?: Array<{ text: string }>;
+  mappedBy?: 'headers' | 'positions' | 'assistant';
+  columns?: { recipient: string[]; amount: string; reference: string | null; currency: string | null };
+  ignoredColumns?: string[];
+};
+
+/** What the reader did, in the order a person needs it: columns a model chose first, then columns left out, then cells it cleaned. */
+function readNotes(body: ReadBody): string[] {
+  const out: string[] = [];
+  if (body.mappedBy === 'assistant' && body.columns) {
+    const c = body.columns;
+    const used = [`Recipient: ${c.recipient.join(' and ')}.`, `Amount: ${c.amount}.`, c.reference ? `Reference: ${c.reference}.` : '', c.currency ? `Currency: ${c.currency}.` : ''].filter(Boolean).join(' ');
+    out.push(`${SHEET_COPY.mapped_by_assistant} ${used}`);
+  }
+  if (body.ignoredColumns && body.ignoredColumns.length > 0) out.push(`${SHEET_COPY.ignored_columns} ${body.ignoredColumns.join(', ')}.`);
+  return [...out, ...(body.notes ?? []).map((n) => n.text)];
+}
+
 export default function StepUpload({ onRows }: { onRows: (rows: SheetRow[], notes: string[]) => void }) {
   const [error, setError] = useState<string | null>(null);
   const [pasted, setPasted] = useState('');
@@ -26,9 +47,9 @@ export default function StepUpload({ onRows }: { onRows: (rows: SheetRow[], note
     setError(null);
     setBusy(true);
     try {
-      const answer = await sendSheet<{ rows?: SheetRow[]; notes?: Array<{ text: string }> }>(payload, { review: false });
+      const answer = await sendSheet<ReadBody>(payload, { review: false });
       if (answer.ok && Array.isArray(answer.body?.rows) && answer.body.rows.length > 0) {
-        onRows(answer.body.rows, (answer.body.notes ?? []).map((n) => n.text));
+        onRows(answer.body.rows, readNotes(answer.body));
       } else {
         setError(errorText(answer, 'That sheet could not be read just now. Nothing was sent.'));
       }

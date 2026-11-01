@@ -8,6 +8,7 @@ import { FileText, Layers, RotateCcw, Send, TrendingUp, type LucideIcon } from '
 import { usePhone } from '@/components/dashboard/Device';
 import OxWalComposer from '@/components/oxwal/OxWalComposer';
 import { PhoneMore, PhoneStarters } from '@/components/oxwal/ZekePhone';
+import SheetStatus from '@/components/oxwal/SheetStatus';
 import ThreadRow, { BotAvatar, StreamingRow, ThinkingRow } from '@/components/oxwal/ThreadView';
 import MemWalBehaviorCard from '@/components/MemWalBehaviorCard';
 import ZekeSuggestions from '@/components/oxwal/ZekeSuggestions';
@@ -129,7 +130,7 @@ export default function OxwalDeskPage() {
     onChange: setInput,
     onSubmit: () => ask(input),
     onChipSubmit: ask,
-    onSheet: (sheet: Parameters<typeof attachSheet>[0]) => void attachSheet(sheet),
+    onSheet: (sheet: Parameters<typeof attachSheet>[0]) => attachSheet(sheet),
     chips: [],
     disabled: isSending,
   };
@@ -157,6 +158,7 @@ export default function OxwalDeskPage() {
             New
           </button>
         </header>
+        <SheetStatus thread={thread} />
         <div ref={threadRef} className="min-h-0 flex-1 space-y-4 overflow-y-auto px-4 py-4" aria-live="polite">
           {thread.map((item) => (
             <ThreadRow key={item.id} item={item} onRetry={(prompt) => ask(prompt)} chatApprovals={chatApprovals} clockMs={clockMs} onApprove={(proposal) => void approveInChat(proposal)} sheetActions={sheetActions} />
@@ -246,6 +248,7 @@ export default function OxwalDeskPage() {
             </div>
           </header>
 
+          <SheetStatus thread={thread} />
           <div
             ref={threadRef}
             className="max-h-[calc(100dvh-260px)] min-h-[420px] overflow-y-auto bg-[var(--zeke-paper)] px-4 py-5"
