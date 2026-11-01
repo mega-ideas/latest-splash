@@ -36,6 +36,7 @@ const TEAM_ROUTES = {
   'app/api/team/finance-lead/route.ts': { POST: 'appointFinanceLead', DELETE: 'revokeFinanceLead' },
   'app/api/team/invitations/route.ts': { POST: 'sendInvitation' },
   'app/api/team/invitations/[invitationId]/route.ts': { DELETE: 'withdrawInvitation' },
+  'app/api/team/invitations/[invitationId]/email/route.ts': { POST: 'resendInvitationEmail' },
   'app/api/team/leave/route.ts': { POST: 'requestToLeave', DELETE: 'withdrawLeaveRequest' },
   'app/api/team/leave-requests/[requestId]/approve/route.ts': { POST: 'approveLeaveRequest' },
   'app/api/team/leave-requests/[requestId]/decline/route.ts': { POST: 'declineLeaveRequest' },
@@ -44,6 +45,7 @@ const TEAM_ROUTES = {
 /** Answering an invitation: the person has no membership to check, so these start at the invitee gate instead. */
 const INVITEE_ROUTES = {
   'app/api/team/invitations/mine/route.ts': { GET: null },
+  'app/api/team/invitations/[invitationId]/status/route.ts': { GET: null },
   'app/api/team/invitations/[invitationId]/accept/route.ts': { POST: 'acceptInvitation' },
   'app/api/team/invitations/[invitationId]/decline/route.ts': { POST: 'declineInvitation' },
 };
@@ -112,10 +114,10 @@ test('the team gate reads the business from the session and fails closed without
 test('nothing outside the team routes (and the service itself) calls a team-changing function: a new route cannot skip the rules', () => {
   const names = [
     'addTeamMember', 'changeTeamMemberRole', 'removeTeamMember', 'appointFinanceLead', 'revokeFinanceLead', 'setMemberAccess',
-    'sendInvitation', 'withdrawInvitation', 'acceptInvitation', 'declineInvitation',
+    'sendInvitation', 'withdrawInvitation', 'acceptInvitation', 'declineInvitation', 'resendInvitationEmail', 'deliverInvitationEmail',
     'requestToLeave', 'withdrawLeaveRequest', 'approveLeaveRequest', 'declineLeaveRequest',
   ];
-  const allowed = new Set(Object.keys(TEAM_ROUTES).concat(Object.keys(INVITEE_ROUTES), ['lib/server/team-admin.ts', 'lib/server/team-invitations.ts', 'lib/server/team-leave.ts']));
+  const allowed = new Set(Object.keys(TEAM_ROUTES).concat(Object.keys(INVITEE_ROUTES), ['lib/server/team-admin.ts', 'lib/server/team-invitations.ts', 'lib/server/team-leave.ts', 'lib/server/invitation-email.ts']));
   const offenders = [];
   for (const file of [...walk('app/'), ...walk('lib/'), ...walk('components/')]) {
     if (!/\.(ts|tsx)$/.test(file) || allowed.has(file)) continue;
