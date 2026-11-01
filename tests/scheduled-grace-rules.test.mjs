@@ -278,12 +278,15 @@ test('the panel and the form take the window and the summary from lib/schedule, 
 
 test('the Scheduled tab and History say the window in the same words', () => {
   const tab = read('components/schedule/ScheduledPayments.tsx');
-  assert.match(tab, /WINDOW_HEAD/);
-  assert.match(tab, /WINDOW_TAIL/);
+  assert.match(tab, /<RunWindow startsAt=\{run\.startsAt\}/);
   assert.match(tab, /Stop schedule/);
   const history = read('components/history/HistoryPage.tsx');
-  assert.match(history, /WINDOW_HEAD/);
-  assert.match(history, /WINDOW_TAIL/);
+  assert.match(history, /<RunWindow startsAt=\{entry\.startsAt\}/);
+  // One component says it, from the same words the notices use.
+  const line = read('components/schedule/RunWindow.tsx');
+  assert.match(line, /WINDOW_HEAD/);
+  assert.match(line, /WINDOW_TAIL/);
+  assert.match(line, /<LocalTime value=\{startsAt\} format="time"/, 'the time is the viewer’s own clock');
 });
 
 test('the defaults the owners start from are unchanged', () => {

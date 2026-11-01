@@ -10,9 +10,10 @@ import { call, errorText } from '@/components/transfer/api';
 import { PrimaryButton, QuietButton } from '@/components/transfer/ui';
 import { Loading, Note, Pill } from '@/components/wallet/parts';
 import { formatUsdc } from '@/lib/fees/copy';
-import { MODE_WORDS, RUN_STATE, dueInWords, runIsOpen } from '@/lib/schedule/rules';
+import { GRACE_DEFAULT_MINUTES, MODE_WORDS, RUN_STATE, dueInWords, runIsOpen } from '@/lib/schedule/rules';
 import type { AutomaticStatus, RunView, ScheduleView } from '@/lib/schedule/views';
 import AutomaticPanel from './AutomaticPanel';
+import RunWindow, { useNow, windowIsOpen } from './RunWindow';
 import ScheduleForm from './ScheduleForm';
 
 type Loaded = { schedules: ScheduleView[]; automatic: AutomaticStatus | null; you: { role: string; owner: boolean; financeLead: boolean; canSchedule: boolean } };
@@ -36,6 +37,7 @@ export default function ScheduledPayments() {
   const [notice, setNotice] = useState<{ tone: 'plain' | 'error'; text: string } | null>(null);
   const [busy, setBusy] = useState<string | null>(null);
   const [confirmDelete, setConfirmDelete] = useState<string | null>(null);
+  const [allowanceOpen, setAllowanceOpen] = useState(false);
 
   const load = useCallback(async () => {
     const answer = await call<Loaded>('/api/wallet/schedules');
@@ -123,7 +125,7 @@ export default function ScheduledPayments() {
         </div>
       ) : (
         <>
-          {automatic ? <AutomaticPanel status={automatic} onChanged={() => void load()} /> : null}
+          {automatic ? <AutomaticPanel status={automatic} schedules={data.schedules} allowanceOpen={allowanceOpen} onAllowanceOpen={setAllowanceOpen} onChanged={() => void load()} /> : null}
 
           {data.schedules.length === 0 ? (
             <section className="dash-surface p-8 text-center" aria-label="No schedules yet">
@@ -166,10 +168,14 @@ export default function ScheduledPayments() {
         editing={formFor.editing}
         canAutomatic={canAutomatic}
         autoWhy={autoWhy}
+        graceMinutes={automatic?.graceMinutes ?? GRACE_DEFAULT_MINUTES}
+        allowanceActive={automatic?.allowance.state === 'active'}
         onClose={() => setFormFor({ open: false, editing: null })}
-        onSaved={(text) => {
+        onSaved={(text, saved) => {
           setNotice({ tone: 'plain', text });
           void load();
+          // A schedule that now pays automatically needs the owners' allowance: show what Splash will pay before they are asked to sign it.
+          if (saved.automatic && automatic && automatic.allowance.state !== 'active' && automatic.payer.ready) setAllowanceOpen(true);
         }}
       />
     </div>
@@ -253,7 +259,7 @@ function ScheduleCard({
       {openRuns.length > 0 || pastRuns.length > 0 ? (
         <ul className="mt-3 space-y-2" aria-label={`Runs of ${s.name}`}>
           {[...openRuns, ...pastRuns].map((r) => (
-            <RunLine key={r.id} run={r} canSkip={s.can.skip} busy={busy === `${s.id}:skip`} onSkip={() => onSkip(r.id)} highlight={focus === r.id} />
+            <RunLine key={r.id} run={r} canSkip={s.can.skip} canStop={s.can.stop && active} busy={busy === `${s.id}:skip`} stopping={busy === `${s.id}:stop`} onSkip={() => onSkip(r.id)} onStop={onStop} highlight={focus === r.id} />
           ))}
         </ul>
       ) : null}
@@ -302,8 +308,10 @@ function ScheduleCard({
   );
 }
 
-function RunLine({ run, canSkip, busy, onSkip, highlight }: { run: RunView; canSkip: boolean; busy: boolean; onSkip: () => void; highlight: boolean }) {
+function RunLine({ run, canSkip, canStop, busy, stopping, onSkip, onStop, highlight }: { run: RunView; canSkip: boolean; canStop: boolean; busy: boolean; stopping: boolean; onSkip: () => void; onStop: () => void; highlight: boolean }) {
   const state = RUN_STATE[run.status];
+  // While the warning window is open, Skip and Stop sit right on the run: this is where a notice's link lands.
+  const windowOpen = windowIsOpen(run.startsAt, useNow());
   return (
     <li className={`rounded-xl border p-3 ${highlight ? 'border-[#0d6370] bg-white' : 'border-[#326273]/12 bg-[#fffaf6]'}`}>
       <div className="flex flex-wrap items-center justify-between gap-x-4 gap-y-2">
@@ -328,8 +336,15 @@ function RunLine({ run, canSkip, busy, onSkip, highlight }: { run: RunView; canS
               Skip this run
             </QuietButton>
           ) : null}
+          {windowOpen && canStop ? (
+            <QuietButton type="button" onClick={onStop} disabled={stopping} className="!h-11 !px-3 !text-[13px]">
+              <Square className="h-4 w-4" aria-hidden="true" />
+              Stop schedule
+            </QuietButton>
+          ) : null}
         </div>
       </div>
+      <RunWindow startsAt={run.startsAt} className="mt-1.5 text-[13px] font-bold text-[#0c3e48]" />
       <p className="mt-1.5 text-[13px] leading-5 text-[#326273]">{run.reason?.trim() ? run.reason : state.says}</p>
       {run.payments && run.payments.length > 0 && run.status !== 'paid' ? (
         <ul className="mt-2 space-y-1 text-[13px] text-[#1F4452]">

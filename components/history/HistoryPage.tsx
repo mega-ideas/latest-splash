@@ -7,6 +7,7 @@ import { ArrowUpRight, CalendarClock, Download, FileText, Landmark, Layers, Refr
 import DashPageHeader from '@/components/dashboard/DashPageHeader';
 import DashStat from '@/components/dashboard/DashStat';
 import LocalTime from '@/components/LocalTime';
+import RunWindow from '@/components/schedule/RunWindow';
 import { call, errorText } from '@/components/transfer/api';
 import { QuietButton } from '@/components/transfer/ui';
 import { Loading, Note, Pill } from '@/components/wallet/parts';
@@ -228,6 +229,7 @@ function Row({ entry }: { entry: HistoryEntry }) {
         <div className="min-w-0 flex-1 basis-56">
           <h3 className="truncate text-sm font-bold text-[#0c3e48]">{entry.title}</h3>
           <p className="mt-0.5 text-[13px] text-[#326273]">{entry.detail}</p>
+          <RunWindow startsAt={entry.startsAt} className="mt-0.5 text-[13px] font-bold text-[#0c3e48]" />
           <p className="mt-0.5 flex flex-wrap gap-x-3 text-[13px] text-[#326273]">
             <span><LocalTime value={entry.date} /></span>
             {entry.reference ? <span className="font-mono">{entry.reference}</span> : null}

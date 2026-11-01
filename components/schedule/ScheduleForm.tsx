@@ -7,7 +7,7 @@ import { call, errorText, type SavedRecipient } from '@/components/transfer/api'
 import { Field, Modal, PrimaryButton, QuietButton, Segmented, SelectInput, TextInput } from '@/components/transfer/ui';
 import { newKey, Note } from '@/components/wallet/parts';
 import { formatUsdc } from '@/lib/fees/copy';
-import { ASK_MIN_LEAD_MS, AUTO_MIN_LEAD_MS, CADENCE_WORDS, MODE_WORDS, SCHEDULE_MAX_ITEMS, type Cadence, type ScheduleMode } from '@/lib/schedule/rules';
+import { ASK_MIN_LEAD_MS, AUTO_MIN_LEAD_MS, CADENCE_WORDS, MODE_WORDS, SCHEDULE_MAX_ITEMS, graceWords, type Cadence, type ScheduleMode } from '@/lib/schedule/rules';
 import type { ScheduleView } from '@/lib/schedule/views';
 import { parseAmountMinor } from '@/lib/transfer/plan';
 
@@ -34,12 +34,17 @@ const payable = (r: SavedRecipient) => r.delivery?.deliveryKind === 'SELF_CUSTOD
 type Props = {
   open: boolean;
   onClose: () => void;
-  onSaved: (message: string) => void;
+  /** `automatic` is true when the schedule just saved pays automatically: the page then shows the summary of the allowance. */
+  onSaved: (message: string, saved: { automatic: boolean }) => void;
   editing: ScheduleView | null;
   /** The owner may choose automatic and the scheduled payer is there. */
   canAutomatic: boolean;
   /** Why automatic is not offered, in a sentence. */
   autoWhy: string | null;
+  /** The business's warning window before the first automatic payment, in minutes. */
+  graceMinutes: number;
+  /** The owners' allowance is in force, so saving an automatic schedule needs no new one. */
+  allowanceActive: boolean;
 };
 
 /**
@@ -58,7 +63,7 @@ export default function ScheduleForm(props: Props) {
   );
 }
 
-function Body({ onClose, onSaved, editing, canAutomatic, autoWhy }: Props) {
+function Body({ onClose, onSaved, editing, canAutomatic, autoWhy, graceMinutes, allowanceActive }: Props) {
   const [recipients, setRecipients] = useState<SavedRecipient[] | null>(null);
   const [name, setName] = useState(editing?.name ?? '');
   const [mode, setMode] = useState<ScheduleMode>(editing?.mode ?? 'ask');
@@ -121,7 +126,7 @@ function Body({ onClose, onSaved, editing, canAutomatic, autoWhy }: Props) {
       setError(errorText(answer, 'The schedule was not saved. Nothing was scheduled.'));
       return;
     }
-    onSaved(editing ? 'Saved. The change is in force now.' : mode === 'auto' ? 'Scheduled. Your owners get a notice the day before it is paid.' : 'Scheduled. At the due time Splash prepares it and asks your owners to approve.');
+    onSaved(editing ? 'Saved. The change is in force now.' : mode === 'auto' ? 'Scheduled. Your owners get a notice the day before it is paid.' : 'Scheduled. At the due time Splash prepares it and asks your owners to approve.', { automatic: mode === 'auto' });
     onClose();
   }
 
@@ -143,6 +148,11 @@ function Body({ onClose, onSaved, editing, canAutomatic, autoWhy }: Props) {
           ]}
         />
         <p className="max-w-xl text-[13px] leading-5 text-[#326273]">{MODE_WORDS[mode].blurb}</p>
+        {mode === 'auto' ? (
+          <p className="max-w-xl text-[13px] leading-5 text-[#326273]">
+            {graceWords(graceMinutes)} {allowanceActive ? 'It is paid inside the allowance your owners already signed.' : 'After you save, you check what Splash will pay before your owners sign the allowance.'}
+          </p>
+        ) : null}
         {!canAutomatic ? <Note>{autoWhy ?? 'Only an owner can make a schedule pay automatically.'}</Note> : null}
       </fieldset>
 
