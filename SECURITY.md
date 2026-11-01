@@ -2515,13 +2515,44 @@ authority: the batch is prepared and the owners' quorum signs it.
   buttons in the app, which need an owner signed in: no link in an e-mail or a
   WhatsApp message acts by itself, so a message that is read late or by someone
   else can open the app but not stop or start anything.
+  *What happens when the notice is not delivered.* The window fails closed. The
+  notice is recorded as sent only if it reached at least one owner (the notifier
+  answers how many it reached: an e-mail or WhatsApp message the provider
+  accepted; no transport, no address or a refusing provider reaches no one). When
+  it reached no one the window is closed again and nothing is paid on it; the
+  next cron pass opens a fresh window with its full length, and if no owner can be
+  told for 24 hours the run lapses unpaid. A window that ends with no notice
+  recorded (the runner stopped between opening it and telling anyone) is never
+  paid on: the run is handed back to "ask me first" (`window_not_announced`). A
+  window still open with no notice recorded is opened afresh. Two limits remain:
+  "reached" means a provider accepted the message, not that a person read it, and
+  the first pass can come up to five minutes after the due time (the cron runs
+  every five), so the window is counted from the notice that went out, not from
+  the due time. An owner who sets the window to 0 has chosen no warning at all,
+  and a run then pays at its due time whether or not the day-before or running
+  notice was delivered. The day-before notice is best-effort: nothing waits on it.
 - **A summary the owners read before they sign** is built from the very values the
-  allowance request is built from (one parser, one rule, one summary function; the
-  server checks they agree and tests pin it, including that the network holds the
-  summary's figures after the owners sign). It shows the exact payments, the
-  maximum per payment, the daily and monthly limits, the recipients, the end date,
-  the window and how to stop. It is not a substitute for the signing request the
-  owners see on their own devices.
+  allowance request is built from (one parser, one rule, one summary function; tests
+  pin that the network holds the summary's figures after the owners sign). What the
+  server compares: the request carries a digest of the summary the owner saw (the
+  exact payments with their schedule, amount, fee and reference, how often each
+  schedule runs and how many runs fall before the end, the per-payment, daily and
+  monthly limits, the end day and the window, and what the limits would refuse). The
+  server builds its own from the schedules as they are now and asks nobody to sign
+  when the digests differ: it answers 409 `summary_changed` with the new summary and
+  the owner confirms again. A request with no digest is refused. So a payee added or
+  an amount changed after the page loaded cannot be confirmed unseen. The same text
+  is stored with the signing request and shown to every owner who signs, beside the
+  review decoded from the transaction itself on their device. It is the requester's
+  words and not a substitute for that review; when an allowance already exists the
+  change may be built as a bridge plus a new allowance, and the device's review is
+  what shows that. The end date is a whole UTC day, so a page and a server whose
+  clocks differ name the same end on the same day, and every date on the screen is
+  a UTC date and says so. The summary marks a payment above the most for one
+  payment, a payee never paid before, a run bigger than the daily or monthly limit
+  and a schedule that falls after the end, but it cannot predict how several
+  schedules together use the monthly limit in a month (it says so), and a run is
+  paid whole or handed back whole.
 - **Tenant isolation**: every route takes the business from the session; every
   store read takes the org; the runner works each business with its own context;
   the cross-tenant lists are `ForStaff` and return ids only.

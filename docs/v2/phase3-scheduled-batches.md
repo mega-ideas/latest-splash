@@ -119,10 +119,19 @@ announces the window:
 
 1. `openGraceWindow` sets `payment_schedule_runs.starts_at` = now + GRACE, once
    (`WHERE status = 'scheduled' AND starts_at IS NULL`), and `window_version` =
-   the schedule's version, and frees the lease.
+   the schedule's version. The runner keeps its lease on the run while it tells
+   the owners.
 2. The "starting" notice goes out with that time: "Starts at 14:10 UTC, Skip or
    Stop until then. Nothing has been paid yet." It carries the Skip and Stop
-   buttons. (If the runner stops between 1 and 2, the next pass sends it.)
+   buttons. **The notice is recorded (`notice_running_at`, with the lease
+   released) only if it reached at least one owner** (`confirmGraceNotice`; the
+   notifier answers how many owners it reached). If it reached no one the window
+   is closed again (`closeGraceWindow`), and the next pass opens a fresh one with
+   its full length. A window still open with no notice recorded (the runner
+   stopped between 1 and 2) is closed and opened afresh by the next pass; one that
+   has already ended with no notice recorded is never paid on: the run goes to
+   "ask me first" with `window_not_announced`. If no owner can be told for 24
+   hours the run lapses unpaid.
 3. The run stays `scheduled`. Skip and Stop are exactly what they were for a run
    that has not started: they end it as **skipped, nothing paid**. Passes inside
    the window do nothing.
@@ -157,14 +166,20 @@ Where it is enforced, not just where it is intended:
   time lapses, window or not (a window opened late and ending after that is not
   paid late).
 - **A window of 0 is the old behaviour**: the run pays at the due time, and the
-  notice names no start.
+  notice names no start. It is the owner's choice of no warning, so there is no
+  delivery to wait for.
 - **Production**: a sandbox payer is not a payer there, so the checks hand the
   run back **before** a window is announced. Nothing is promised that could not
   happen.
 
 The Scheduled tab and History say it in one place, one component
 (`components/schedule/RunWindow.tsx`): "Starts at 14:10, Skip or Stop until
-then", in the viewer's own clock, and nothing once the window is over.
+then", in the viewer's own clock, and nothing once the window is over. Whether
+the window is open is decided by the **server's** clock: a run and a History row
+carry `windowOpen` and `serverNowMs`, and the page reads the window by that time
+(its skew from the device clock is measured when the answer arrives), so a device
+whose clock runs fast does not hide the line or the Stop button while the window
+is open.
 
 ### The summary before the owners sign (`lib/schedule/summary.ts`)
 
@@ -173,13 +188,23 @@ An owner switching a schedule to automatic resends its payments (the
 allowance screen then opens by itself, and it has two steps. The second is
 "Check this before your owners sign":
 
-> Splash will pay these 4 payments, up to 2,000 USDC each, from 12 Nov until
-> 10 Feb. Nothing is paid without your limits. You can stop this anytime.
+> Splash will pay these 4 payments each time they fall due, up to 2,000 USDC
+> each, from 12 Nov until 10 Feb (UTC). Nothing is paid without your limits. You
+> can stop this anytime.
 
-below it the exact payments (recipient, masked address, amount, reference), the
-most for one payment, the daily and monthly limits, the recipients, the end date,
-the warning window and how to stop (Skip this run, Stop schedule, Pause all
-automatic payments, taking the allowance back).
+below it how often each schedule runs and how many runs fall before the end, the
+exact payments (recipient, masked address, amount, reference), the most for one
+payment, the daily and monthly limits, the recipients, the end date, the warning
+window and how to stop (Skip this run, Stop schedule, Pause all automatic
+payments, taking the allowance back). It also says what the limits would refuse:
+a payment above the most for one payment, a payee never paid before, a run bigger
+than the daily or monthly limit, and a schedule whose next time falls after the
+end. A run is paid whole or handed back whole, so a schedule with any of these is
+marked, the headline says "up to" and counts the schedules that would come back
+to the owners. It cannot predict how several schedules together use the monthly
+limit across a month, and says so. Every date is a UTC date and says so; the
+allowance ends at midnight UTC after the last of the days asked for, so a page and
+a server whose clocks differ name the same end on the same day.
 
 The figures are not computed on the page. `parseAllowanceInput` reads what was
 typed one way for the page and the server; `allowanceTerms` / `allowanceRule`
@@ -187,10 +212,29 @@ turn it into the rule the owners sign; `automaticSummary` reads the per-payment
 maximum, the monthly cap and the end date from those terms. `requestAllowance`
 builds the summary from the same form and the same clock as the rule, refuses
 (`summary_mismatch`) if they ever disagree, and answers with it. Tests pin that
-the screen's and the server's summaries are identical, and that after the owners
-sign, the network holds exactly the figures the summary showed
+after the owners sign, the network holds exactly the figures the summary showed
 (`tests/scheduled-summary.test.mjs`). The payments listed are those of the
 schedules that pay automatically and are running.
+
+**What the owner confirmed is what the server checks.** The page builds the
+summary in the browser from the schedules it loaded and its clock, so the request
+also carries `summaryDigest`, a SHA-256 of that summary's facts (the payments with
+their schedule, amount, fee, reference and what the limits would refuse, each
+schedule's cadence, runs and size, the three limits, the end and the window). The
+server builds its own summary from the schedules as they are now and compares:
+
+- no digest: 400 `summary_not_confirmed`, nothing asked;
+- a different digest (a payee added, an amount changed, a limit retyped, the UTC
+  day turned): 409 `summary_changed` with `details.summary` and `details.digest`,
+  nothing asked, and the page shows the new summary and asks the owner to confirm
+  again;
+- the same digest: the request is made, and the answer's summary is the same.
+
+**Every signer reads it.** The summary's lines are stored with the signing request
+(`summary.summaryText`), returned in `RequestView.summaryText`, and shown on the
+approvals page (`components/approve/RequestSummary.tsx`) beside the review decoded
+from the transaction on the owner's device. It is the requester's confirmed
+summary and is never a substitute for that review.
 
 ### The checks (`lib/schedule/auto-check.ts`), all of them, over the whole run
 
@@ -323,7 +367,11 @@ boundaries, the summary), `tests/scheduled-grace.test.mjs` (the window end to
 end: to the millisecond, Skip and Stop inside it, Skip racing its end, the
 checks made again at its end, clock edges, once-only, tenants, production),
 `tests/scheduled-summary.test.mjs` (the summary equals the request and the
-chain). Older tests give their business a window of 0, so they stay about the
+chain), `tests/scheduled-summary-confirm.test.mjs` (the digest, the 409 and the
+new summary, the end as a whole UTC day, the text on every signer's request, the
+marks for what the limits refuse and how often it runs, the server's clock for the
+window), `tests/scheduled-grace-delivery.test.mjs` (a notice that reached no one,
+a window that ended with none recorded, the notifier's count). Older tests give their business a window of 0, so they stay about the
 payments.
 
 `tests/scheduled-rules.test.mjs`, `scheduled-auto-check.test.mjs` (every check
