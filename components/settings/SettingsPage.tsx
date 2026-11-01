@@ -23,6 +23,7 @@ import type { TeamWire } from '@/lib/team/view';
 import AboutCard from './AboutCard';
 import ApprovalChannelCard from './ApprovalChannelCard';
 import BillingCard from './BillingCard';
+import LimitsCard from './LimitsCard';
 import OperatingControls, { OperatingControlsUnavailable, useOperatingSettings } from './OperatingControls';
 import PolicyCard from './PolicyCard';
 import RulesSection from './RulesSection';
@@ -32,6 +33,7 @@ import type { StaffChoice } from './RuleForm';
 const SECTIONS: Array<{ id: string; label: string }> = [
   { id: 'team', label: 'Team' },
   { id: 'rules', label: 'Spending rules' },
+  { id: 'limits', label: 'Limits' },
   { id: 'signers', label: 'Signers' },
   { id: 'funding', label: 'Funding sources' },
   { id: 'approvals', label: 'Approvals' },
@@ -80,7 +82,9 @@ export default function SettingsPage({ alerts, billingOn }: { alerts: Governance
 
   const o = overview.data;
   const owner = o?.role === 'OWNER';
-  const nav = SECTIONS.filter((s) => manage || !NEEDS_WALLET.has(s.id));
+  // The limits are the owners' and the Finance lead's to see; they need no wallet, only a business.
+  const limitsVisible = Boolean(people.data?.you.manager);
+  const nav = SECTIONS.filter((s) => (manage || !NEEDS_WALLET.has(s.id)) && (s.id !== 'limits' || limitsVisible));
   if (billingOn) nav.splice(nav.findIndex((s) => s.id === 'alerts') + 1, 0, { id: 'billing', label: 'Billing' });
   const view = spend.data;
   const staff: StaffChoice[] = (charge.data?.members ?? [])
@@ -143,6 +147,7 @@ export default function SettingsPage({ alerts, billingOn }: { alerts: Governance
           ) : (
             <Card id="wallet-note" title="Spending rules, signers and funding">{walletNote()}</Card>
           )}
+          {limitsVisible ? <LimitsCard /> : null}
           {billingOn ? <BillingCard owner={owner === true} /> : null}
           {ops.settings ? <OperatingControls settings={ops.settings} setSettings={ops.setSettings} editable={canEditControls(o?.role)} /> : ops.problem ? <OperatingControlsUnavailable problem={ops.problem} /> : <Card id="controls" title="Operating controls"><Loading label="Reading your controls…" /></Card>}
         </div>

@@ -2912,3 +2912,62 @@ export const scheduledPaymentSettings = pgTable('scheduled_payment_settings', {
   graceMinutes: integer('grace_minutes').notNull().default(10),
   ...timestamps,
 });
+
+/**
+ * A business's limit that is not the standard one (migration 0078). No row for
+ * a kind means the standard limit (lib/limits/rules.ts DEFAULT_LIMITS). Written
+ * when an owner lowers a limit, or when an approved higher limit takes effect.
+ * `value` is USDC minor units for the three amounts and days for `days`.
+ */
+export const businessLimits = pgTable('business_limits', {
+  orgId: text('org_id').notNull().references(() => organizations.id),
+  kind: text('kind').notNull(),
+  value: bigint('value', { mode: 'bigint' }).notNull(),
+  /** raised | lowered */
+  source: text('source').notNull(),
+  /** A user id (an owner), or `system:limits` when the notice ran out. */
+  changedBy: text('changed_by').notNull(),
+  requestId: text('request_id'),
+  updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
+}, (table) => [
+  primaryKey({ columns: [table.orgId, table.kind], name: 'business_limits_pk' }),
+]);
+
+/**
+ * An owner's request to Splash for a higher limit (migration 0078). Staff
+ * approve (or approve a smaller figure) or decline with a reason; an approval
+ * starts a 24 hour notice, and the owner can cancel until it has passed.
+ * pending | approved | declined | cancelled | applied.
+ */
+export const businessLimitRequests = pgTable('business_limit_requests', {
+  id: text('id').primaryKey(),
+  orgId: text('org_id').notNull().references(() => organizations.id),
+  kind: text('kind').notNull(),
+  requestedValue: bigint('requested_value', { mode: 'bigint' }).notNull(),
+  /** What the limit was when it was asked. */
+  currentValue: bigint('current_value', { mode: 'bigint' }).notNull(),
+  reason: text('reason').notNull(),
+  /** The caller's idempotency key: the same key is the same request. */
+  requestKey: text('request_key').notNull(),
+  requestedBy: text('requested_by').notNull(),
+  requestedAt: timestamp('requested_at', { withTimezone: true }).notNull(),
+  status: text('status').notNull().default('pending'),
+  grantedValue: bigint('granted_value', { mode: 'bigint' }),
+  /** `operator:<email>`. */
+  decidedBy: text('decided_by'),
+  decidedAt: timestamp('decided_at', { withTimezone: true }),
+  declineReason: text('decline_reason'),
+  /** decided_at + 24 hours. */
+  effectiveAt: timestamp('effective_at', { withTimezone: true }),
+  appliedAt: timestamp('applied_at', { withTimezone: true }),
+  cancelledBy: text('cancelled_by'),
+  cancelledAt: timestamp('cancelled_at', { withTimezone: true }),
+  approvedNotifiedAt: timestamp('approved_notified_at', { withTimezone: true }),
+  declinedNotifiedAt: timestamp('declined_notified_at', { withTimezone: true }),
+  effectiveNotifiedAt: timestamp('effective_notified_at', { withTimezone: true }),
+  ...timestamps,
+}, (table) => [
+  uniqueIndex('business_limit_requests_key_unique').on(table.orgId, table.requestKey),
+  uniqueIndex('business_limit_requests_one_open').on(table.orgId, table.kind).where(sql`${table.status} in ('pending', 'approved')`),
+  index('business_limit_requests_queue_idx').on(table.status, table.requestedAt),
+]);
