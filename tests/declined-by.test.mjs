@@ -146,6 +146,14 @@ test('every screen that words a declined batch or payment uses the one formatter
   }
 });
 
+test('the batch page never reads a status from the plain table directly: every place goes through statusWords', () => {
+  const flow = code(read('components/batch/BatchFlow.tsx'));
+  const lookups = flow.match(/STATUS_WORDS\[[^\]]*\]/g) ?? [];
+  assert.deepEqual(lookups, ['STATUS_WORDS[b.status]'], 'the one lookup is inside statusWords, which words a declined batch by who declined it');
+  assert.match(flow, /statusWords\(made\.batch\)/, 'the summary beside the approval says who declined too');
+  assert.match(flow, /statusWords\(b\)/, 'and so does the list of batches');
+});
+
 test('the words and the formatter obey the copy rules', () => {
   const words = [
     declinedByLabel({ names: ['Aisha'], unnamed: 0 }),
