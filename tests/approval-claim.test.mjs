@@ -10,36 +10,17 @@ import { consumeApprovalRecord, upsertProposal } from '../lib/db/proposal-repo.t
 import { InMemoryProposalStore } from '../lib/queue/proposal-state.ts';
 import { replayThroughRoute } from '../lib/server/approval-replay.ts';
 import { closeApprovalClaim, resolveApprovalClaim } from '../lib/server/approved-proposal.ts';
-import { subjectDigest } from '../lib/server/step-up.ts';
 import { fiatPaymentSubstance, treasuryMoveSubstance } from '../lib/server/step-up-subjects.ts';
-import { MICRO_DECIMALS, parseMinor } from '../lib/money.ts';
 
 /*
- * A payout run is no longer a kind of proposal, and the helpers that bound its
- * approval were removed with it. The claim itself is general: it binds an
+ * A payout run is no longer a kind of proposal, and the code that bound its
+ * approval was removed with it. The claim itself is general: it binds an
  * approval to WHAT was approved, by a digest of a substance the route names.
- * These three are that mechanism's worked example, kept here as test data.
+ * The tests below call the real claim code with the retired kind and a plain
+ * stand-in substance (the rows and the currency, as written); they do not test
+ * any helper of their own.
  */
-function payableBatchRows(rows) {
-  return rows.filter((row) => {
-    if (!row || typeof row !== 'object') return false;
-    const { name, address, amount } = row;
-    if (!name || !address) return false;
-    try {
-      return parseMinor(amount ?? '0', MICRO_DECIMALS, 'half-up') > 0n;
-    } catch {
-      return false;
-    }
-  });
-}
-const batchTargetCurrency = (payload) => (typeof payload.targetCurrency === 'string' ? payload.targetCurrency : 'PHP');
-function batchPayoutSubstance(payload) {
-  const rows = Array.isArray(payload.rows) ? payload.rows : [];
-  return {
-    rows: payableBatchRows(rows).map(({ name, address, amount }) => ({ name: name ?? null, address: address ?? null, amount: amount ?? null })),
-    targetCurrency: batchTargetCurrency(payload),
-  };
-}
+const batchPayoutSubstance = (payload) => ({ rows: payload.rows ?? [], targetCurrency: payload.targetCurrency ?? null });
 
 /**
  * The approved-proposal claim: `x-splash-approved-proposal: <id>`, which lifts
@@ -82,7 +63,7 @@ function batchBody(overrides = {}) {
 
 /** What the batch route puts on the proposal: the payable rows and the currency. */
 function approvedBatchPayload(body = batchBody()) {
-  return { rows: payableBatchRows(body.rows), targetCurrency: batchTargetCurrency(body) };
+  return { rows: body.rows, targetCurrency: body.targetCurrency ?? null };
 }
 
 /** A single payout as the transfer route stores it (the parsed body). */
@@ -177,77 +158,6 @@ function approvedProposal(store, { kind = 'BATCH_PAYOUT', payload, orgId = 'acme
   if (until === 'SIGNED') return signed;
   return store.transition(proposalId, { type: 'SUBMIT' });
 }
-
-const digest = (substance, payload) => subjectDigest(substance(payload));
-
-// ── What a batch approval covers ────────────────────────────────────────────
-
-test('a batch approval covers the rows the run pays and its currency, not the file around them', () => {
-  const approved = digest(batchPayoutSubstance, approvedBatchPayload());
-
-  // The full file the maker posted — blocked rows, the second factor, the
-  // columns settlement never reads — is the same run.
-  assert.equal(digest(batchPayoutSubstance, batchBody()), approved);
-  assert.equal(digest(batchPayoutSubstance, batchBody({ totp: '654321' })), approved);
-  const body = batchBody();
-  assert.equal(
-    digest(batchPayoutSubstance, {
-      ...body,
-      rows: body.rows.map((row) => ({ ...row, country: 'SG', purpose: 'bonus', memo: 'x' })),
-    }),
-    approved,
-  );
-  // And the approved payload is the same run after the replay's JSON round trip.
-  assert.equal(digest(batchPayoutSubstance, JSON.parse(JSON.stringify(approvedBatchPayload()))), approved);
-  // The route's default corridor is part of what was approved.
-  const noCurrency = batchBody();
-  delete noCurrency.targetCurrency;
-  assert.equal(digest(batchPayoutSubstance, noCurrency), approved);
-});
-
-test('changing who is paid, where, how much, how many or in what currency voids it', () => {
-  const approved = digest(batchPayoutSubstance, approvedBatchPayload());
-  const body = batchBody();
-  const [maria, jose, blocked, zero] = body.rows;
-  const variants = {
-    address: [{ ...maria, address: ADDR_C }, jose, blocked, zero],
-    amount: [{ ...maria, amount: '125000.00' }, jose, blocked, zero],
-    name: [{ ...maria, name: 'Someone Else' }, jose, blocked, zero],
-    'a blocked row made payable': [maria, jose, blocked, { ...zero, amount: '900.00' }],
-    'a payable row dropped': [maria, blocked, zero],
-    'a payable row paid twice': [maria, maria, jose],
-    order: [jose, maria, blocked, zero],
-    // Compared as settlement receives it, so a respelling is a new approval.
-    respelled: [{ ...maria, amount: '12500' }, jose, blocked, zero],
-  };
-  for (const [name, rows] of Object.entries(variants)) {
-    assert.notEqual(digest(batchPayoutSubstance, { ...body, rows }), approved, `${name} must void the approval`);
-  }
-  assert.notEqual(digest(batchPayoutSubstance, batchBody({ targetCurrency: 'MYR' })), approved, 'currency');
-});
-
-test('a payable row is one settlement can pay, and a malformed file never throws', () => {
-  const good = { name: 'Maria Santos', address: ADDR_A, amount: '10.00' };
-  const whole = { name: 'Jose Rizal', address: ADDR_B, amount: 800 };
-  const rows = [
-    null,
-    'row',
-    42,
-    [],
-    { name: 'A', address: ADDR_B, amount: '-5' },
-    { name: 'B', address: ADDR_B, amount: 'abc' },
-    // parseFloat read this as 1.2; settlement refuses it, after the approval.
-    { name: 'C', address: ADDR_B, amount: '1.2.3' },
-    // Rounds to nothing at the micro-USD settlement pays in.
-    { name: 'D', address: ADDR_B, amount: '0.0000001' },
-    // A fractional JSON number has been through a float; settlement refuses it.
-    { name: 'E', address: ADDR_B, amount: 100.5 },
-    good,
-    whole,
-  ];
-  assert.deepEqual(payableBatchRows(rows), [good, whole]);
-  assert.deepEqual(batchPayoutSubstance({ rows: 'not rows' }).rows, []);
-});
 
 // ── The claim, resolved against the store ───────────────────────────────────
 
