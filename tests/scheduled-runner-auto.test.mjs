@@ -49,6 +49,10 @@ const batches = (t) => t.w.db.select().from(schema.walletBatches).where(eq(schem
 /**
  * A business whose owners gave the scheduled payer an allowance, with two
  * recipients it has paid before, and an automatic schedule paying both.
+ *
+ * These tests are about the payments, so the business has no warning window
+ * (0 minutes): a run pays at the due time. The window itself, and every path
+ * through it, is tests/scheduled-grace.test.mjs.
  */
 async function ready({ allowance = {}, items, schedule = {}, world = {} } = {}) {
   const t = await scheduleWorld(world);
@@ -58,6 +62,7 @@ async function ready({ allowance = {}, items, schedule = {}, world = {} } = {}) 
   const made = await S.createSchedule(t.sdeps(), OWNER_ACTOR, sched(t.ids, { mode: 'auto', firstDueAt: FIRST.toISOString(), ...(items ? { items } : {}), ...schedule }));
   assert.equal(made.ok, true, JSON.stringify(made));
   t.schedule = made.schedule;
+  await saveSettings(t.w.db, 'acme', { graceMinutes: 0 }, new Date());
   return t;
 }
 
@@ -459,6 +464,7 @@ test('a payment never seen by the network after it can no longer land is given u
   await u.allowance();
   await u.payBefore(u.ids.a, 1);
   await S.createSchedule(u.sdeps(), OWNER_ACTOR, sched(u.ids, { mode: 'auto', firstDueAt: FIRST.toISOString(), items: [{ recipientId: u.ids.a, amount: '100' }] }));
+  await saveSettings(u.w.db, 'acme', { graceMinutes: 0 }, new Date());
   await u.clock(FIRST);
   const chain = u.w.signing.chain;
   const realExecute = chain.execute;
@@ -503,7 +509,10 @@ test('production: a sandbox payer cannot pay, and nothing is sent to the network
   const out = await runScheduledPayments(runner(t, { env: { NODE_ENV: 'production' }, depsFor: async () => t.sdeps('acme', { env: { NODE_ENV: 'production' } }) }));
   const [run] = await runs(t);
   assert.deepEqual(out.errors, []);
-  assert.equal(run.status, 'failed');
+  // A sandbox payer is not a payer in production: the run is handed back to people (or, if it cannot be prepared either, fails) and nothing is attempted.
+  assert.ok(['waiting_approval', 'failed'].includes(run.status), run.status);
+  assert.match(run.reason, /not switched on for your business/);
+  assert.equal(run.fallback, true);
   const payments = await listRunPayments(t.w.db, 'acme', run.id);
   assert.ok(payments.every((p) => p.status === 'failed' && !String(p.digest ?? '').startsWith('sandbox:') || p.status === 'failed'), 'no sandbox result is recorded as paid');
   assert.ok(!payments.some((p) => p.status === 'paid'));

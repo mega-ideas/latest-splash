@@ -225,7 +225,8 @@ test('two runners working different schedules of one business cannot both pass a
   await t.allowance({ cap: { period: 'month', limitMinor: U(50_000) } });
   await t.payBefore(t.ids.a, 1);
   await t.payBefore(t.ids.b, 1);
-  await saveSettings(t.w.db, 'acme', { dailyCapMinor: U(1_500) }, new Date());
+  // No warning window here: the race is between two runs of one business reaching the same lock together.
+  await saveSettings(t.w.db, 'acme', { dailyCapMinor: U(1_500), graceMinutes: 0 }, new Date());
   const one = ok(await S.createSchedule(t.sdeps(), OWNER_ACTOR, sched(t.ids, { clientKey: 'cap_one_0000001', name: 'One', mode: 'auto', cadence: 'once', firstDueAt: FIRST.toISOString(), items: [{ recipientId: t.ids.a, amount: '900' }] })));
   const two = ok(await S.createSchedule(t.sdeps(), OWNER_ACTOR, sched(t.ids, { clientKey: 'cap_two_0000001', name: 'Two', mode: 'auto', cadence: 'once', firstDueAt: FIRST.toISOString(), items: [{ recipientId: t.ids.b, amount: '900' }] })));
   await t.clock(at(FIRST.getTime() - 20 * HOUR));
