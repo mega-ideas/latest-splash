@@ -265,12 +265,15 @@ export default function BatchFlow() {
                 </div>
               ) : null}
               {step === 2 && readNotes.length > 0 ? (
-                <ul role="status" className="mb-4 space-y-1 rounded-xl bg-[#F6F0ED] p-3 text-sm leading-6 text-[#1F4452]">
-                  {readNotes.slice(0, 8).map((note) => (
-                    <li key={note}>{note}</li>
-                  ))}
-                  {readNotes.length > 8 ? <li>And {readNotes.length - 8} more changes to cells.</li> : null}
-                </ul>
+                <div role="status" className="mb-4 rounded-xl bg-[#F6F0ED] p-3 text-sm leading-6 text-[#1F4452]">
+                  <p className="font-bold text-[#0c3e48]">Splash cleaned some cells in your file</p>
+                  <ul className="mt-1 space-y-0.5">
+                    {readNotes.slice(0, 8).map((note) => (
+                      <li key={note}>{note}</li>
+                    ))}
+                    {readNotes.length > 8 ? <li>And {readNotes.length - 8} more changes to cells.</li> : null}
+                  </ul>
+                </div>
               ) : null}
               {step === 2 ? (
                 <StepReview rows={rows} review={review} stale={stale} checking={checking} error={reviewError} onEdit={edit} onRemove={remove} onAdd={add} onCheck={() => void runReview(rows)} onRemoveProblems={removeProblems} confirmed={confirmed} onConfirm={(change) => setConfirmed((c) => ({ ...c, ...change }))} back={restart} next={() => go(3)} />

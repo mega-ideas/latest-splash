@@ -65,9 +65,11 @@ function Flags({ flags }: { flags: SheetFlag[] }) {
 
 function Payee({ row }: { row: SheetCardRow }) {
   if (!row.payee) return null;
+  const kind = row.payee.kind === 'splash_business' ? 'Business on Splash' : 'Saved recipient';
+  const same = row.payee.name.trim().toLowerCase() === row.recipient.trim().toLowerCase();
   return (
     <span className="block text-[13px] leading-5 text-[var(--ink-muted)]">
-      Saved as {row.payee.name} · <span className="font-mono">{row.payee.masked}</span>
+      {same ? kind : `${kind}: ${row.payee.name}`} <span className="inline-block whitespace-nowrap font-mono">{row.payee.masked}</span>
     </span>
   );
 }
@@ -87,7 +89,7 @@ export default function SheetCard({
   onConfirm: (id: string, confirmed: boolean) => void;
   onDismiss: (id: string) => void;
 }) {
-  const indent = compact ? 'pl-7' : 'pl-8';
+  const indent = compact ? 'pl-7' : 'sm:pl-8';
 
   if (sheet.phase === 'reading') {
     return (
@@ -119,9 +121,11 @@ export default function SheetCard({
   const review = sheet.phase === 'review' ? sheet : null;
   const role = card.goesTo === 'owners_sign' ? 'OWNER' : 'MAKER';
   const canPrepare = !!review && card.ready && (!card.needsConfirmation || review.confirmed) && !review.preparing;
+  // The totals are of the rows that can be paid; when some cannot, say so rather than let the count and the sum disagree.
+  const payable = card.rows.length - card.blockedCount;
   const summary = [
-    `${card.rows.length} ${card.rows.length === 1 ? 'payment' : 'payments'}`,
-    `${usdc(card.totalMinor)} USDC`,
+    `${card.rows.length} ${card.rows.length === 1 ? 'row' : 'rows'}`,
+    card.blockedCount > 0 ? `${usdc(card.totalMinor)} USDC in the ${payable} that can be paid` : `${usdc(card.totalMinor)} USDC`,
     BigInt(card.feeMinor) > 0n ? `Splash fee ${usdc(card.feeMinor)} USDC` : null,
   ].filter(Boolean);
 
@@ -132,7 +136,7 @@ export default function SheetCard({
           <span className="grid h-9 w-9 shrink-0 place-items-center rounded-lg bg-[var(--zeke-tint)]">
             <FileSpreadsheet className="h-[18px] w-[18px] text-[#0d6370]" aria-hidden="true" />
           </span>
-          <div className="min-w-0 flex-1">
+          <div className="min-w-[11rem] flex-1">
             <h3 className="truncate text-sm font-bold text-[#0c3e48]">{card.fileName ?? 'Pasted rows'}</h3>
             <p className="text-[13px] leading-5 text-[var(--ink-muted)] tabular-nums">{summary.join(' · ')}</p>
           </div>
