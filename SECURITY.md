@@ -1039,17 +1039,30 @@ The business's owners run their team, not Splash support
   rate limited, and `tests/team-routes.test.mjs` fails if anything else calls
   the new functions. Nothing is emailed.
 - **Leaving (1 Nov).** Any member can ask to leave; nothing changes until an
-  owner approves (or the Finance lead, for someone below owner who is not in
-  charge and holds neither Add funds nor Withdraw). Nobody decides their own
-  request, so an owner's leaving needs another owner, and the only owner cannot
-  ask. Approving ends access, clears every hold and records the person's
-  addresses in one transaction under the owner lock; then, when an owner
-  approved, the route opens the existing spending-rules revoke
-  (`revokeOrphanedRules`), which the wallet's owners sign on their own devices.
-  Until they sign, the rule still exists on the chain, as after any removal; if
-  it cannot be opened the rule shows as a former member's and the same button
-  takes it back. The code signs nothing. A declined request tells the person so
-  in words. Every step is a trail line (nine new actions, migration 0073).
+  owner approves. Only an owner decides (review of 2 Nov: a Finance lead's
+  approval ended access but could not take the spending rule back, so it left a
+  live rule behind; the lead now sees requests and decides none). Nobody decides
+  their own request, so an owner's leaving needs another owner, and the only
+  owner cannot ask. Approving ends access, clears every hold and records the
+  person's addresses in one transaction under the owner lock; then the route runs
+  `runLeaveFollowUp`: it opens the existing spending-rules revoke
+  (`revokeOrphanedRules`), which the wallet's owners sign on their own devices,
+  reads whether the person is still one of the business wallet's signers
+  (leaving the team does not remove a signer; a change of signers is a separate
+  request the owners sign, and the answer and the approval dialog say so), and
+  writes both outcomes as one trail line (`leave_follow_up`, migration 0075). A
+  rule that outlives its holder also shows as orphaned on the wallet page and in
+  Settings, so a lost follow-up cannot hide it. The code signs nothing. A
+  declined request tells the person so in words on their own page for 14 days.
+  Every step is a trail line (ten new actions, migrations 0073 and 0075).
+- **One business per person (2 Nov review, High).** Two accepts, or an accept
+  and an add, for one person at the same moment could each pass the "not on a
+  business" check under READ COMMITTED and both commit, putting the person on two
+  businesses (authority resolution picks one by row order). `memberships(user_id)`
+  is now unique (migration 0074), and accepting or adding takes a per-person row
+  lock first (`lockPerson`). PGlite serialises transactions, so the race itself
+  is not reproduced in tests; the constraint, the lock order and the stale-read
+  refusal are. Still to do once: a two-connection run on a real Postgres.
 
 ## v2 Phase 3 — Staff payments inside a rule — 2026-11-01
 

@@ -43,7 +43,13 @@ export default function LeaveRequests({ requests, manager, onChanged }: { reques
   return (
     <section aria-labelledby="team-leave-requests" className="space-y-2">
       <h3 id="team-leave-requests" className="text-[13px] font-extrabold text-[#0c3e48]">Requests to leave{requests.length > 0 ? ` (${requests.length})` : ''}</h3>
-      {requests.length > 0 ? <p className="text-[13px] leading-5 text-[#326273]">These people have asked to leave. Until you approve, they keep their access and any spending rule they hold.</p> : null}
+      {requests.length > 0 ? (
+        <p className="text-[13px] leading-5 text-[#326273]">
+          {manager === 'owner'
+            ? 'These people have asked to leave. Until you approve, they keep their access and any spending rule they hold.'
+            : 'These people have asked to leave. An owner decides each request. Until one does, they keep their access and any spending rule they hold.'}
+        </p>
+      ) : null}
       <ul className="space-y-2" aria-label="Requests to leave">
         {requests.map((r) => (
           <li key={r.id} className="space-y-2 rounded-xl bg-[#F6F0ED] px-3 py-2.5 text-sm text-[#1F4452]">

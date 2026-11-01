@@ -148,3 +148,22 @@ test('authority resolution for a person is deterministic: it orders its one memb
   const fn = text.slice(text.indexOf('export async function resolveAuthorityFromDb'), text.indexOf('export async function resolveAuthorityForSession'));
   assert.match(fn, /\.orderBy\(/, 'the read has an ORDER BY so it never depends on row order');
 });
+
+test('the migration stops, with a message, when a person already holds two memberships; it never picks one for them', async () => {
+  const { readdir, readFile } = await import('node:fs/promises');
+  const { PGlite } = await import('@electric-sql/pglite');
+  const client = new PGlite();
+  const dir = new URL('../drizzle/', import.meta.url);
+  const files = (await readdir(dir)).filter((f) => f.endsWith('.sql')).sort();
+  const statements = async (file) => (await readFile(new URL(file, dir), 'utf8')).split('--> statement-breakpoint').map((s) => s.trim()).filter(Boolean);
+  for (const file of files.filter((f) => f < '0074')) for (const s of await statements(file)) await client.exec(s);
+  await client.exec(`INSERT INTO organizations (id, name) VALUES ('acme', 'Acme'), ('northwind', 'Northwind')`);
+  await client.exec(`INSERT INTO users (id, email, name) VALUES ('u-two', 'two@example.test', 'Two')`);
+  await client.exec(`INSERT INTO memberships (id, user_id, org_id, role) VALUES ('m1', 'u-two', 'acme', 'viewer'), ('m2', 'u-two', 'northwind', 'viewer')`);
+  const migration = await statements('0074_one_membership_per_person.sql');
+  await assert.rejects(async () => { for (const s of migration) await client.exec(s); }, /memberships_user_unique: 1 people hold more than one membership/);
+  await client.exec(`DELETE FROM memberships WHERE id = 'm2'`);
+  for (const s of migration) await client.exec(s);
+  await assert.rejects(client.exec(`INSERT INTO memberships (id, user_id, org_id, role) VALUES ('m3', 'u-two', 'northwind', 'viewer')`), /duplicate key|memberships_user_unique/);
+  await client.close();
+});

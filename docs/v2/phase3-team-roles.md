@@ -47,8 +47,8 @@ refused for them without anyone remembering to say so.
 | Send an invitation (viewer, staff, approver) | yes | yes | no |
 | Send an invitation for an owner | yes | no | no |
 | Withdraw an invitation | yes (any) | yes, below owner | no |
-| Decide a request to leave: a viewer, staff member or approver | yes | yes, unless that person is in charge of sign-offs or holds Add funds or Withdraw | no |
-| Decide a request to leave: an owner | yes, another owner's (never their own) | no | no |
+| See the requests to leave | yes | yes | no |
+| Decide a request to leave (anyone) | yes, never their own: an owner's leaving needs another owner | no (an owner decides) | no |
 | Ask to leave | any member (the only owner cannot) | yes, and an owner decides it | any member |
 | Add an owner, or move someone to owner | yes | no | no |
 | Change or remove a viewer, staff or approver | yes | yes, unless that person is in charge of sign-offs or holds Add funds or Withdraw | no |
@@ -148,27 +148,44 @@ Leave this business, any member (every role) can **ask to leave**
   instead of offering the button). **An owner leaving needs another owner**:
   nobody decides their own request (`own_request`).
 - **Who decides** (one rule, `leaveDecisionRefusal` in `lib/team/view.ts`, used
-  by the server and the page): an owner, for anyone but themselves; the **Finance
-  lead** only for a viewer, staff member or approver who is **not in charge of
-  sign-offs and holds neither Add funds nor Withdraw**. The lead cannot approve
-  (or decline) a leave request for anyone in charge, nor for an owner, and not
-  their own. A viewer, staff member or ordinary approver decides nothing.
+  by the server and the page): **an owner alone**, for anyone but themselves
+  (Sky: approval comes from the highest authority). The **Finance lead** sees
+  every request and decides none: approving ends access at once but the lead
+  cannot take the person's spending rule back, so a lead's approval would leave a
+  live rule behind. Everyone else decides nothing. (A first build let the lead
+  approve for people below owner who held nothing granted; the independent
+  review asked for the stricter reading and it is now the only one.)
 - **Approving** runs in one transaction under the owner lock: the membership
   ends (access is gone at once), the place in charge, Finance lead role, Add
   funds and Withdraw access and sign-offs end (`offboardMember`), and the
   person's passkey addresses are recorded in `wallet_offboarded_spenders`.
-- **The rule is taken back through the spending-rules revoke path.** After the
-  transaction commits, when an **owner** approved, the route calls
-  `revokeOrphanedRules` (the same call as Settings, Spending rules, take back
-  the rules of former members): one transaction that revokes the person's
-  allowances and removes them from the policy, **signed by the wallet's owners
-  on their own devices**. The answer says which of three things happened: the
-  request is open, there was nothing to take back, or it could not be opened (no
-  wallet, the chain unreadable). In the last case nothing is lost: the rule shows
-  in Settings as belonging to a former member and the same button takes it back.
-  Until the owners sign, the rule still exists on the chain, as it does after
-  any removal. When the **Finance lead** approves, the rule is left for an owner
-  (the lead cannot take a rule back) and the answer says so.
+- **What follows an approval** (`runLeaveFollowUp`, `lib/server/team-leave-followup.ts`,
+  after the transaction commits; the chain steps are `lib/server/team-leave-rules.ts`):
+  1. **The rule is taken back through the spending-rules revoke path.** The route
+     calls `revokeOrphanedRules` (the same call as Settings, Spending rules, take
+     back the rules of former members): one transaction that revokes the person's
+     allowances and removes them from the policy, **signed by the wallet's owners
+     on their own devices**. The answer says which of three things happened: the
+     request is open, there was nothing to take back, or it could not be opened (no
+     wallet, the chain unreadable, no gas sponsor).
+  2. **A person who leaves is still a signer until the signers are changed.**
+     Leaving the team does not remove anyone from the business wallet's multisig;
+     that is a separate request the owners sign (a change of signers). For an
+     owner who leaves this is the step that matters most. The follow-up reads the
+     wallet's recorded members and says in words whether the person is still a
+     signer, or that Splash could not tell. It opens nothing for this: choosing
+     the new signers and the threshold is the owners' decision. The approval
+     dialog says it before the owner confirms.
+  3. **Every outcome is one trail line**, `leave_follow_up` (migration 0075), with
+     what became of the rule and the signer state, shown in Recent changes in
+     plain words. A throw anywhere is recorded as "not opened" or "unknown", never
+     lost, and a repeat writes no second line.
+  A step that was skipped is not hidden: a rule that outlives its holder reads as
+  orphaned on the wallet page and in Settings (state, not a message), so a
+  follow-up lost between the commit and the call cannot sit unnoticed. Until the
+  owners sign, the rule still exists on the chain, as it does after any removal.
+  The live path was only simulated here (no real transaction is sent from this
+  work); it still needs one run on testnet.
 - **Declining** keeps the person on the team and says so in words on their own
   page: "<name> declined your request to leave. You are still on the team, with
   the same access as before. You can ask again."
@@ -239,7 +256,9 @@ sender), `team_invitation_declined`, `team_invitation_withdrawn` (also when the
 sender stopped managing the team), `team_invitation_expired` (actor
 `system:invitation_expiry`), `leave_requested`, `leave_withdrawn`,
 `leave_approved` (followed by `member_removed` with reason `left`, which the
-page folds into the one sentence) and `leave_declined`. An invitation line keeps
+page folds into the one sentence), `leave_declined` and (migration 0075)
+`leave_follow_up` (what became of the rule, and whether the person is still a
+signer). An invitation line keeps
 a **masked** address (`f***@example.com`), because a trail line can never be
 deleted; the full address lives only in `team_invitations`. A line names
 the actor, the person, and (for a role or access) what. Splash support's grant in
@@ -305,7 +324,33 @@ decline, withdraw, the 7 days, cross-tenant, no token, the trail),
 `tests/team-leave.test.mjs` (ask, last owner, another owner, every hold cleared,
 addresses recorded, the Finance lead's limits, decline in words, replay,
 concurrency, cross-tenant), `tests/team-invite-leave-view.test.mjs` (the one
-decision rule, the words, the copy rules).
+decision rule, the words, the copy rules), `tests/team-leave-followup.test.mjs`
+(the follow-up: order, record, words), `tests/team-one-business.test.mjs` (one
+business per person) and `tests/team-invite-polish.test.mjs`.
+
+## One business per person (migration 0074)
+
+A person belongs to one business at a time. The services check it, but a check
+followed by an insert is not enough: two requests at the same moment cannot see
+each other's uncommitted row under READ COMMITTED, so both used to pass. Now:
+
+- `memberships(user_id)` is **unique** (`memberships_user_unique`), so the
+  database refuses the second row whatever the code checked. The migration stops
+  with a message if any person already holds two memberships; resolve those first
+  (remove the extra membership), then run it again.
+- `lockPerson` (`lib/server/team-admin.ts`) takes a `FOR NO KEY UPDATE` row lock on
+  the person at the start of accepting an invitation and of adding directly, so
+  two such requests for one person run in turn and the second reads the first's
+  row.
+- A refused insert is the plain answer (`already_on_a_business`, or `cannot_add`
+  when adding directly) and nothing is kept. PGlite serialises transactions, so
+  the race itself cannot be shown in tests; they pin the constraint, the order of
+  the lock call, and the stale-read refusal. A two-connection test against a real
+  Postgres still wants running once.
+
+Adding a person directly also closes any open invitation to the same business
+(`team_invitation_withdrawn`, reason `added_directly`). A person's own page stops
+saying "declined" 14 days after a decline.
 
 ## What needs Sebastian (Move)
 

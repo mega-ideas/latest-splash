@@ -28,7 +28,7 @@ import * as schema from '../lib/db/schema.ts';
 import { listAuthorityEvents } from '../lib/server/wallet-authority.ts';
 import { addTeamMember, listTeamActivity } from '../lib/server/team-admin.ts';
 import { acceptInvitation, invitationsFor, sendInvitation } from '../lib/server/team-invitations.ts';
-import { approveLeaveRequest, declineLeaveRequest, leaveStatusOf, requestToLeave } from '../lib/server/team-leave.ts';
+import { declineLeaveRequest, leaveStatusOf, requestToLeave } from '../lib/server/team-leave.ts';
 import { LEAVE_DECLINED_SHOWN_DAYS } from '../lib/team/view.ts';
 
 const T0 = new Date('2026-11-02T09:00:00Z');
