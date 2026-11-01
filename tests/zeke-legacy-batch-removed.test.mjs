@@ -113,7 +113,7 @@ test('an approval of an old payout-run proposal that reaches the executor is rec
 test('migration 0072 closes the payout-run proposals still open, once, and leaves every other proposal and every closed one alone', async () => {
   const sql = read('drizzle/0072_retire_batch_payout_proposals.sql');
   const journal = JSON.parse(read('drizzle/meta/_journal.json'));
-  assert.equal(journal.entries.at(-1).tag, '0072_retire_batch_payout_proposals');
+  assert.ok(journal.entries.some((e) => e.tag === '0072_retire_batch_payout_proposals'), '0072 is journalled');
   assert.doesNotMatch(sql, /\bDROP\b|\bDELETE\b|CASCADE/i, 'nothing is dropped or deleted');
   const { db, client } = await migratedDb();
   const org = 'acme';
