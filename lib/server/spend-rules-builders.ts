@@ -255,6 +255,11 @@ export type StaffPayment = {
   allowance: SharedRef;
   /** The business wallet that funds the allowance. */
   funder: string;
+  /**
+   * The kind the payment declares: 1, a wallet or a Splash business (the default), or 2, an exchange account, which a staff member
+   * pays alone only when an owner has allowed it (lib/server/exchange-alone.ts). The recipient must be tagged that kind on the policy.
+   */
+  kind?: 1 | 2;
   /** 32 bytes: the commitment over the business's payment id (idempotency). */
   paymentRef: Uint8Array;
   recipient: string;
@@ -278,6 +283,7 @@ const SPEND_FEE_CEILING_BPS = 100n;
 const SPEND_BPS_DENOM = 10_000n;
 /** What a recipient tagged a wallet is declared as (A1 §2.3); a rule pays no other kind here. */
 const WALLET_KIND = 1;
+const EXCHANGE_KIND = 2;
 
 /**
  * Open, pay and anchor an intent under the sender's rule, in one PTB the staff
@@ -294,12 +300,16 @@ const WALLET_KIND = 1;
  *   payment_intent::delete_finalized      the finished intent
  *
  * The allowance draws principal + max_fee; the unused part of the fee goes
- * back to the wallet, never to the spender. A recipient tagged an exchange, a
- * bank payout and a cross-chain payment are never built here: the owners pay
- * those from the wallet.
+ * back to the wallet, never to the spender. A recipient tagged an exchange is
+ * built here only as kind 2, which the server asks for only when an owner has
+ * switched on "Can pay exchange accounts alone" for the person; a bank payout
+ * and a cross-chain payment are never built here: the owners pay those from
+ * the wallet.
  */
 export async function staffRulePaymentTx(chain: SpendChain, p: StaffPayment): Promise<Uint8Array> {
   if (p.amountMinor <= 0n) throw new V2BuildError('the amount must be above zero', 'bad_amount');
+  const kind = p.kind ?? WALLET_KIND;
+  if (kind !== WALLET_KIND && kind !== EXCHANGE_KIND) throw new V2BuildError('a rule pays a wallet or an exchange account, never a bank or another chain', 'bad_kind');
   if (p.maxFeeMinor < 0n || p.maxFeeMinor > (p.amountMinor * SPEND_FEE_CEILING_BPS) / SPEND_BPS_DENOM) {
     throw new V2BuildError("the fee bound is below zero or above Splash's 1% ceiling", 'bad_fee');
   }
@@ -337,7 +347,7 @@ export async function staffRulePaymentTx(chain: SpendChain, p: StaffPayment): Pr
       tx.pure.string(p.targetCurrency),
       tx.pure.u64(u64(p.fxRateUsdLocal, 'the rate')),
       tx.pure.vector('u8', Array.from(p.commitment)),
-      tx.pure.u8(WALLET_KIND),
+      tx.pure.u8(kind),
       tx.pure.vector('u8', Array.from(p.railCommitment)),
       tx.pure.u64(u64(p.expiresAtMs, 'the expiry')),
       clock,

@@ -99,7 +99,7 @@ async function oneRecipientAt(deps: ExchangePaymentDeps, address: string): Promi
 }
 
 /** KYB states in which the provider has verified the business and it is not suspended or rejected. */
-const KYB_VERIFIED = new Set(['KYB_PROVIDER_APPROVED', 'KYB_ADMIN_APPROVED', 'ACTIVE']);
+export const KYB_VERIFIED = new Set(['KYB_PROVIDER_APPROVED', 'KYB_ADMIN_APPROVED', 'ACTIVE']);
 
 const DEAD = new Set(['failed', 'expired', 'cancelled']);
 
@@ -118,7 +118,7 @@ async function walletPayment(deps: ExchangePaymentDeps, requestId: unknown) {
   return { ok: true as const, request, recipient, amountMinor, paymentRef: described.intentId ? normalizeSuiAddress(described.intentId) : request.id };
 }
 
-async function payerOf(db: DrizzleDb, orgId: string) {
+export async function payerOf(db: DrizzleDb, orgId: string) {
   const [org] = await db
     .select({
       name: organizations.name,

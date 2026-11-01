@@ -105,7 +105,7 @@ export default function TeamCard({
           {members.map((m) => {
             const row = ruleOf.get(m.userId);
             const controls = rowControls({ manager, youUserId: you.userId }, m);
-            const can = controls.roles.length > 0 || controls.remove || controls.access || controls.financeLead !== null;
+            const can = controls.roles.length > 0 || controls.remove || controls.access || controls.exchangeAlone || controls.financeLead !== null;
             return (
               <li key={m.userId} className="flex flex-wrap items-center gap-x-3 gap-y-1.5 rounded-xl bg-[#F6F0ED] px-3 py-2.5 text-sm text-[#1F4452]">
                 <UserRound className="h-4 w-4 shrink-0 text-[#145d6a]" aria-hidden="true" />
@@ -123,6 +123,7 @@ export default function TeamCard({
                 </span>
                 <span className="basis-full text-[13px] leading-5 text-[#326273]">
                   {access(m)}{' '}
+                  {m.payExchangeAlone ? 'Can pay exchange accounts alone, inside their rule. ' : ''}
                   {walletReady && row?.rule ? `Up to ${row.rule.perPayment} a payment. ${row.rule.state.label}.` : walletReady && row?.canHaveRule ? 'No rule: each payment goes to the owners.' : m.role === 'admin' ? 'Signs for the business wallet once added as a signer.' : m.role === 'viewer' ? 'Reads only.' : ''}
                   {manager === 'finance_lead' && !can && m.userId !== you.userId && m.role !== 'admin' ? ' An owner changes or removes this person.' : ''}
                 </span>

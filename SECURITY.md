@@ -2603,3 +2603,34 @@ Design: `docs/v2/phase3-zeke-batches.md`. Tests: `tests/zeke-sheet-ingest.test.m
 - **Not covered**: a staff member's batch is not paid inside their rule (the owners
   sign every batch); the column mapper has no live-model test; the floating Zeke does
   not carry a sheet card to the Zeke page. No Move change is needed or made.
+
+## v2 Phase 3 - Staff pay an exchange account alone, when an owner allows it - 2026-11-02
+
+Design: `docs/v2/phase3-team-roles.md` ("Can pay exchange accounts alone") and
+`docs/v2/phase3-staff-in-rule.md`. Tests: `tests/exchange-alone-switch.test.mjs`,
+`tests/exchange-alone-payment.test.mjs`, `tests/exchange-alone-ui.test.mjs`.
+
+- **Default deny, on the server, every time.** The owner's per-person switch is
+  read from the database before anything is built and again before every
+  signature (`exchangeAloneOf`, `staffExchangeHold`). A viewer, an owner, a
+  stranger, another business's member and a stale row all read as no. Only an
+  owner can change it, instantly; every change is an append-only trail line.
+- **It widens nothing but the payee kind.** The rule's maximum, cap, dates,
+  second-approval line (all spenders and payments on their way together) and
+  verified recipients still bind, and the recipient must be on the rule as an
+  exchange account. A bank payout and another chain stay the owners'.
+- **What was read is what was recorded, signed and sent.** The message is built
+  on the server; the payment is refused unless the person's confirmation hashes
+  the same as the server's own; the payload is stored append-only in the same
+  step as the payment's claim, bound to the intent id, and its hash is inside
+  the transaction's commitment; the gate re-reads it before each signature and
+  refuses a record that is gone or no longer names the account and amount the
+  bytes pay; the provider's message is made from the stored payload only.
+- **Fails closed.** Production without the Travel Rule provider refuses before
+  anything is built; a sandbox message is no answer in production; no verdict or
+  reference is invented; a business that is not verified, or a recipient missing
+  what the exchange needs, is refused in words.
+- **Not covered**: nothing about the exchange's own decision is promised; the
+  live path (a real provider, a real passkey signing a sponsored kind-2 payment)
+  has not been run, only simulated on the model chain. No Move change is needed
+  or made.

@@ -53,6 +53,7 @@ export async function POST(request: Request) {
       reference: body.reference,
       via: body.via,
       asset: body.asset,
+      exchangeDisclosure: body.exchangeDisclosure,
     },
   );
   if (!result.ok) {
@@ -61,7 +62,7 @@ export async function POST(request: Request) {
     return NextResponse.json(rest, { status, headers: NO_STORE });
   }
   return NextResponse.json(
-    { transfer: result.transfer, signingRequest: result.signingRequest ?? null, ask: result.ask ?? null, plan: result.plan, created: result.created },
+    { transfer: result.transfer, signingRequest: result.signingRequest ?? null, ask: result.ask ?? null, plan: result.plan, created: result.created, ...(result.exchange ? { exchange: result.exchange } : {}) },
     { status: result.created ? 201 : 200, headers: NO_STORE },
   );
 }

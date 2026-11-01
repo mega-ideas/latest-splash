@@ -1,8 +1,11 @@
 import { NextResponse } from 'next/server';
 
 import { resolveAuthorityForSession, UnauthorizedError } from '@/lib/auth/authority';
+import { getDb } from '@/lib/db/client';
 import { requireCustomerRequest } from '@/lib/server/customer-auth';
+import { exchangeAloneOf } from '@/lib/server/exchange-alone';
 import { requireSessionAccount } from '@/lib/server/session-account';
+import type { DrizzleDb } from '@/lib/server/wallet-signing-store';
 import { orgMemberWalletAddresses } from '@/lib/server/wallet-deps';
 import { liveWalletContext } from '@/lib/server/wallet-deps';
 import { readSpendingRules } from '@/lib/server/spend-rules';
@@ -41,7 +44,9 @@ export async function GET(request: Request) {
 
   // Whether this server can carry out a payment under a staff rule is a fact about this business right now, not a constant: it needs
   // splash_spend's ids, a gas sponsor and a registered wallet. Until all three are true the page sends such a payment to the owners.
-  const base = { role: authority.role, orgId: authority.orgId, staffRulePaymentsWired: false };
+  // An owner's switch for this person, read now (default off): whether they may pay an exchange account alone inside their rule.
+  const payExchangeAlone = authority.role === 'OWNER' || authority.role === 'VIEWER' ? false : await exchangeAloneOf(getDb() as unknown as DrizzleDb, authority.orgId, authority.userId);
+  const base = { role: authority.role, orgId: authority.orgId, staffRulePaymentsWired: false, payExchangeAlone };
   const live = await liveWalletContext(authority.orgId);
   if (!live.ok) {
     const walletState = live.status === 409 ? 'none' : live.status === 503 ? 'off' : 'unavailable';

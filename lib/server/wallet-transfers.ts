@@ -43,21 +43,39 @@ import { createHash, randomUUID } from 'node:crypto';
 import { and, desc, eq, gte, inArray, isNull, sql } from 'drizzle-orm';
 import { normalizeSuiAddress } from '@mysten/sui/utils';
 
-import { suppliers, walletApprovalAsks, walletSigningRequests, walletTransfers } from '../db/schema.ts';
+import { suppliers, walletApprovalAsks, walletSigningRequests, walletTransferDisclosures, walletTransfers } from '../db/schema.ts';
+import { disclosureText, type DisclosureText } from '../compliance/exchange-disclosure.ts';
+import type { TravelRuleProvider } from '../compliance/sumsub.ts';
+import { parseSignedPartners, type PartnerId } from '../partners/signed-partners.ts';
 import { validClientKey } from '../funding/wallet-funding.ts';
 import { moveDeliveryOf, MOVE_KIND, type DeliveryKind } from '../recipients/wallet-recipients.ts';
 import { FEE_CEILING_BPS, BPS_DENOM } from '../fees/schedule.ts';
 import { approvalPlan, approvalReasonLines, APPROVAL_REASON_TEXT, SETTLE_WINDOW_MS, U64_MAX, type ApprovalPlan, type ApprovalReason, type InFlight, type PlanPayee } from '../transfer/plan.ts';
 import { openStaffRulePayment, readStaffRule, type SpendContext, type StaffRuleRead } from './spend-rules.ts';
 import { askOwnersToApprove, type ApprovalAsk, type AskNotifier, type AskPolicy } from './payment-approval-asks.ts';
+import {
+  attachSigningRequest,
+  buildExchangeDisclosure,
+  paymentRefHex,
+  readStoredDisclosure,
+  sendStoredExchangeMessage as sendMessage,
+  storeExchangeDisclosure,
+  travelRuleProviderFor,
+  type ExchangeMessageState,
+} from './exchange-disclosure.ts';
 import { recipientPayable, requestWalletPayment, type WalletContext, type WalletMembers } from './business-wallet.ts';
 import type { PaymentRecorder } from './payment-record.ts';
 import { readRequestForSigner, type RequestView } from './wallet-signing.ts';
 import { askDeclinerOf, declinersOfRequests, endedByPeople, type DrizzleDb } from './wallet-signing-store.ts';
 import type { Decliners } from '../team/declined-by.ts';
 
-export type TransferFailure = { ok: false; status: number; code: string; error: string; feeMinor?: string; reasons?: ApprovalReason[] };
-const fail = (status: number, code: string, error: string, more: { feeMinor?: string; reasons?: ApprovalReason[] } = {}): TransferFailure => ({ ok: false, status, code, error, ...more });
+/** The message a staff member must read again, with the hash to confirm. */
+export type DisclosureShown = { hash: string; text: DisclosureText };
+export type TransferFailure = { ok: false; status: number; code: string; error: string; feeMinor?: string; reasons?: ApprovalReason[]; disclosure?: DisclosureShown };
+const fail = (status: number, code: string, error: string, more: { feeMinor?: string; reasons?: ApprovalReason[]; disclosure?: DisclosureShown } = {}): TransferFailure => ({ ok: false, status, code, error, ...more });
+
+/** Said when a staff member is not allowed to pay an exchange account alone. */
+export const EXCHANGE_ALONE_OFF_TEXT = 'Paying an exchange account alone is turned off for you. An owner can turn it on in Settings; until then the owners send this payment, with its Travel Rule message.';
 
 /** How long the owners have to sign before the quote behind the payment lapses. */
 export const TRANSFER_SETTLE_WINDOW_MS = SETTLE_WINDOW_MS;
@@ -91,6 +109,12 @@ export type TransferDeps = {
   staffSigner?: (userId: string) => Promise<{ publicKey: string; address: string } | null>;
   /** How long a second request on a key waits for the first to finish before answering "in progress" (default 3 s). */
   claimWaitMs?: number;
+  /** May this staff member or approver pay an exchange account alone, right now? An owner's switch, read from the database (lib/server/exchange-alone.ts). Absent means no. */
+  payExchangeAlone?: (userId: string) => Promise<boolean>;
+  /** The Travel Rule provider. Absent: the environment's, which in production without Sumsub's Travel Rule configured refuses. */
+  travelRule?: () => TravelRuleProvider;
+  /** The partners whose agreement is signed, so the message names an exchange only when it may. Absent: the environment's SIGNED_PARTNERS. */
+  signedPartners?: ReadonlySet<PartnerId>;
 };
 
 export type PayeeInput = { kind: 'recipient'; recipientId?: string } | { kind: 'splash_business'; businessId?: string };
@@ -111,6 +135,8 @@ export type TransferInput = {
   via?: unknown;
   /** The asset the payment moves. Absent means USDC, the only asset a payment moves (D6); anything else is refused. */
   asset?: unknown;
+  /** Staff paying an exchange account alone: `{ purpose, confirmedHash }`, the purpose they picked and the hash of the message they read. */
+  exchangeDisclosure?: unknown;
 };
 
 export type TransferStatus = 'awaiting_signatures' | 'asked_owners' | 'on_the_way' | 'settled' | 'failed' | 'declined' | 'expired' | 'withdrawn';
@@ -142,7 +168,7 @@ export type TransferPlan = { route: 'owners_sign' | 'staff_rule' | 'ask_owners';
 
 export type CreateTransferResult =
   | TransferFailure
-  | { ok: true; created: boolean; transfer: TransferView; signingRequest: RequestView | null; ask: ApprovalAsk | null; plan: TransferPlan };
+  | { ok: true; created: boolean; transfer: TransferView; signingRequest: RequestView | null; ask: ApprovalAsk | null; plan: TransferPlan; exchange?: { travelRule: ExchangeMessageState } };
 
 const digits = (value: unknown): bigint | null => {
   const s = typeof value === 'number' && Number.isSafeInteger(value) ? String(value) : typeof value === 'string' ? value.trim() : '';
@@ -451,8 +477,10 @@ export async function createTransfer(deps: TransferDeps, actor: { userId: string
   // Staff: does the payment fit their rule? Read from the chain now, judged by the rule the page showed (plan.ts), before anything is stored.
   const via = input.via === 'rule' ? 'rule' : input.via === 'ask' ? 'ask' : null;
   let staff: StaffDecision | null = null;
+  // An owner's switch, read now from the database: default deny. It only widens what the rule allows, and only for an exchange account.
+  const exchangeAlone = actor.role !== 'OWNER' && resolved.payeeKind === 'exchange' ? await exchangeAloneNow(deps, actor.userId) : false;
   if (actor.role !== 'OWNER') {
-    const decided = await decideStaff(deps, actor, { resolved, address, amount, maxFee, via });
+    const decided = await decideStaff(deps, actor, { resolved, address, amount, maxFee, via, exchangeAlone, exchangeDisclosure: input.exchangeDisclosure, clientKey });
     if ('ok' in decided) return decided;
     staff = decided;
   }
@@ -463,7 +491,7 @@ export async function createTransfer(deps: TransferDeps, actor: { userId: string
   }
 
   const id = `wtr_${randomUUID()}`;
-  const paymentRef = sha(`splash-transfer|${deps.orgId}|${clientKey}`);
+  const paymentRef = Buffer.from(paymentRefHex(deps.orgId, clientKey), 'hex');
   const now = deps.now();
   let route: 'owners_sign' | 'asked_owners' | 'staff_rule' = actor.role === 'OWNER' ? 'owners_sign' : staff?.kind === 'rule' ? 'staff_rule' : 'asked_owners';
   const claim = {
@@ -498,9 +526,11 @@ export async function createTransfer(deps: TransferDeps, actor: { userId: string
       const outcome = await deps.db.transaction(async (tx) => {
         await tx.execute(sql`select pg_advisory_xact_lock(hashtext(${`staff-rule:${deps.orgId}`}))`);
         const flight = await inFlightFor(tx as unknown as DrizzleDb, deps, actor.userId, address, underRule.read.readAtMs);
-        const plan = planFor(deps, actor, { resolved, address, amount, maxFee, read: underRule.read, inFlight: flight });
+        const plan = planFor(deps, actor, { resolved, address, amount, maxFee, read: underRule.read, inFlight: flight, exchangeAlone });
         if (plan.route !== 'staff_rule') return { plan, flight };
         await tx.insert(walletTransfers).values(claim);
+        // The message the person confirmed is kept in the same step as the payment's claim: one never exists without the other.
+        if (underRule.exchange) await storeExchangeDisclosure(tx as unknown as DrizzleDb, { orgId: deps.orgId, transferId: id, built: underRule.exchange.built, confirmedBy: actor.userId, now });
         return { plan: null, flight };
       });
       if (outcome.plan) {
@@ -570,8 +600,10 @@ export async function createTransfer(deps: TransferDeps, actor: { userId: string
     }
 
     if (underRule && route === 'staff_rule') {
-      // Inside the rule: one transaction, signed by this person's own passkey. The declared kind is the wallet tag the owners verified.
-      const declared = 1;
+      // Inside the rule: one transaction, signed by this person's own passkey. The declared kind is the tag the owners verified:
+      // a wallet, or an exchange account when an owner allowed this person to pay one alone.
+      const declared: 1 | 2 = underRule.exchange ? 2 : 1;
+      const exchangeHash = underRule.exchange ? [underRule.exchange.built.hash] : [];
       const opened = await openStaffRulePayment(await spendOf(deps) as SpendContext, {
         orgId: deps.orgId,
         userId: actor.userId,
@@ -583,7 +615,9 @@ export async function createTransfer(deps: TransferDeps, actor: { userId: string
           amountMinor: amount,
           targetCurrency: 'USDC',
           fxRateUsdLocal: 1_000_000n,
-          commitment: new Uint8Array(sha(JSON.stringify(['splash-transfer-commitment', deps.orgId, id, address, amount.toString(), maxFee.toString(), declared]))),
+          kind: declared,
+          // For an exchange account the commitment on chain covers the hash of the message the person confirmed.
+          commitment: new Uint8Array(sha(JSON.stringify(['splash-transfer-commitment', deps.orgId, id, address, amount.toString(), maxFee.toString(), declared, ...exchangeHash]))),
           railCommitment: new Uint8Array(sha(`splash-transfer-rail|${declared}`)),
           expiresAtMs,
           maxFeeMinor: maxFee,
@@ -594,8 +628,16 @@ export async function createTransfer(deps: TransferDeps, actor: { userId: string
       });
       if (opened.ok) {
         await deps.db.update(walletTransfers).set({ signingRequestId: opened.request.id, updatedAt: deps.now() }).where(eq(walletTransfers.id, id));
+        let exchange: { travelRule: ExchangeMessageState } | undefined;
+        if (underRule.exchange) {
+          // The message goes to the provider now, made from the payload just kept and nothing else. If it does not go, the payment cannot be signed
+          // (the signing gate needs it with the provider), the person is told, and it can be sent again.
+          await attachSigningRequest(deps.db, { orgId: deps.orgId, transferId: id, signingRequestId: opened.request.id });
+          const travelRule = await sendMessage({ db: deps.db, orgId: deps.orgId, now: deps.now, provider: underRule.exchange.provider }, underRule.exchange.built.disclosure, { signingRequestId: opened.request.id, createdBy: actor.userId });
+          exchange = { travelRule };
+        }
         const row = (await getByKey(deps, clientKey)) as Row;
-        return { ok: true as const, created: true, transfer: await viewOf(deps, row), signingRequest: opened.request, ask: null, plan: { route: 'staff_rule' as const, reasons: [], lines: [] } };
+        return { ok: true as const, created: true, transfer: await viewOf(deps, row), signingRequest: opened.request, ask: null, plan: { route: 'staff_rule' as const, reasons: [], lines: [] }, ...(exchange ? { exchange } : {}) };
       }
       if (opened.code !== 'staff_gas_share_used') {
         await release();
@@ -604,6 +646,8 @@ export async function createTransfer(deps: TransferDeps, actor: { userId: string
       // Staff payments together have used their share of the day's network-fee allowance. That is not the person's fault and
       // not an error: the owners are asked instead (a person who insisted on paying alone is told, and nothing is kept).
       const lines = [APPROVAL_REASON_TEXT.staff_gas_share_used];
+      // The owners send their own message, so nothing the person confirmed is kept for a payment that is no longer theirs.
+      if (underRule.exchange) await deps.db.delete(walletTransferDisclosures).where(eq(walletTransferDisclosures.transferId, id));
       if (via === 'rule') {
         await release();
         return fail(429, 'staff_gas_share_used', `${lines[0]} Nothing was sent. Ask the owners to approve it instead.`, { reasons: ['staff_gas_share_used'] });
@@ -653,7 +697,7 @@ export async function createTransfer(deps: TransferDeps, actor: { userId: string
 // ─── A staff member's payment: inside the rule, or the owners ──────────────
 
 type StaffDecision =
-  | { kind: 'rule'; read: StaffRuleRead; signer: { publicKey: string; address: string } }
+  | { kind: 'rule'; read: StaffRuleRead; signer: { publicKey: string; address: string }; exchange: { built: BuiltDisclosure; provider: TravelRuleProvider } | null }
   | { kind: 'ask'; reasons: ApprovalReason[]; lines: string[] };
 
 /** The chain client for this business's spending rules, or null: none configured, or one made for another business. */
@@ -665,7 +709,7 @@ async function spendOf(deps: TransferDeps): Promise<SpendContext | null> {
 function planFor(
   deps: TransferDeps,
   actor: { role: string },
-  c: { resolved: Resolved; address: string; amount: bigint; maxFee: bigint; read: StaffRuleRead; inFlight?: InFlight },
+  c: { resolved: Resolved; address: string; amount: bigint; maxFee: bigint; read: StaffRuleRead; inFlight?: InFlight; exchangeAlone?: boolean },
 ): ApprovalPlan {
   const now = deps.now().getTime();
   const payee: PlanPayee =
@@ -682,6 +726,7 @@ function planFor(
     asset: 'USDC',
     nowMs: BigInt(now),
     settleByMs: BigInt(now + TRANSFER_SETTLE_WINDOW_MS),
+    exchangeAlone: c.exchangeAlone === true,
     ...(c.inFlight ? { inFlight: c.inFlight } : {}),
   });
 }
@@ -701,7 +746,7 @@ const outsideRuleText = (lines: string[]) => `${lines.join(' ')} Nothing was sen
 async function decideStaff(
   deps: TransferDeps,
   actor: { userId: string; role: string },
-  c: { resolved: Resolved; address: string; amount: bigint; maxFee: bigint; via: 'rule' | 'ask' | null },
+  c: { resolved: Resolved; address: string; amount: bigint; maxFee: bigint; via: 'rule' | 'ask' | null; exchangeAlone: boolean; exchangeDisclosure: unknown; clientKey: string },
 ): Promise<StaffDecision | TransferFailure> {
   const ask = (reasons: ApprovalReason[]): StaffDecision => ({ kind: 'ask', reasons, lines: reasons.map((r) => APPROVAL_REASON_TEXT[r]) });
   if (c.via === 'ask') return { kind: 'ask', reasons: [], lines: [] };
@@ -715,7 +760,7 @@ async function decideStaff(
     if (c.via === 'rule') return fail(read.status >= 500 ? read.status : 502, 'rule_unreadable', 'Your spending rule could not be read from the chain, so nothing was sent. Try again in a moment, or ask the owners to approve this payment.');
     return ask(['policy_unreadable']);
   }
-  const plan = planFor(deps, actor, { resolved: c.resolved, address: c.address, amount: c.amount, maxFee: c.maxFee, read: read.read });
+  const plan = planFor(deps, actor, { resolved: c.resolved, address: c.address, amount: c.amount, maxFee: c.maxFee, read: read.read, exchangeAlone: c.exchangeAlone });
   if (plan.route === 'blocked') return fail(403, 'cannot_pay', linesFor(plan, read.read, c.amount, deps.now(), c.maxFee).join(' '), { reasons: plan.reasons });
   if (plan.route === 'ask_owners') {
     const lines = linesFor(plan, read.read, c.amount, deps.now(), c.maxFee);
@@ -734,10 +779,131 @@ async function decideStaff(
     if (c.via === 'rule') return fail(503, 'no_sponsor', 'Paying under a rule needs Splash to cover the network fee, and that is not set up here, so nothing was sent. Ask the owners to approve this payment instead.');
     return ask(['staff_rule_not_wired']);
   }
-  // The recipient is a fresh CLEAR here and a proven wallet the supplier holds, as it must be for the owners' own payment.
-  const screened = await recipientPayable(deps.ctx, deps.orgId, c.address, 1, actor.userId);
+  // The recipient is a fresh CLEAR here and a proven wallet (or a confirmed exchange account) the supplier holds, as it must be for the owners' own payment.
+  const screened = await recipientPayable(deps.ctx, deps.orgId, c.address, c.resolved.kind, actor.userId);
   if (screened) return fail(screened.status, screened.code, screened.error);
-  return { kind: 'rule', read: read.read, signer };
+  if (c.resolved.payeeKind !== 'exchange') return { kind: 'rule', read: read.read, signer, exchange: null };
+
+  // An exchange account paid alone: the Travel Rule provider must be there (in production no sandbox stands in), and the person must have
+  // read and confirmed exactly the message the server would send. Nothing is built, stored or sent before both.
+  const provider = travelRuleProviderFor(deps);
+  if (!provider.ok) return fail(provider.status, provider.code, provider.error);
+  const checked = await confirmedDisclosure(deps, actor, { resolved: c.resolved, address: c.address, amount: c.amount, clientKey: c.clientKey, confirmation: c.exchangeDisclosure });
+  if ('ok' in checked && !checked.ok) return checked;
+  return { kind: 'rule', read: read.read, signer, exchange: { built: checked as BuiltDisclosure, provider: provider.provider } };
+}
+
+type BuiltDisclosure = { disclosure: import('../compliance/exchange-disclosure.ts').ExchangeDisclosure; canonical: string; hash: string; applicantId: string };
+
+/** The owner's switch for this person, now. No switch wired means no. */
+async function exchangeAloneNow(deps: TransferDeps, userId: string): Promise<boolean> {
+  return deps.payExchangeAlone ? (await deps.payExchangeAlone(userId)) === true : false;
+}
+
+const signedOf = (deps: TransferDeps): ReadonlySet<PartnerId> => deps.signedPartners ?? parseSignedPartners((deps.env ?? process.env).SIGNED_PARTNERS);
+
+/** The message for a payment from what the server holds, for this business and this saved recipient only. */
+async function buildDisclosureFor(
+  deps: TransferDeps,
+  actor: { userId: string },
+  c: { resolved: Resolved; address: string; amount: bigint; clientKey: string; purpose: unknown },
+): Promise<({ ok: true } & BuiltDisclosure) | TransferFailure> {
+  const members = await deps.walletMembers();
+  if (!members.ok) return fail(members.status, members.code, members.error);
+  const [row] = c.resolved.recipientId
+    ? await deps.db.select().from(suppliers).where(and(eq(suppliers.orgId, deps.orgId), eq(suppliers.id, c.resolved.recipientId))).limit(1)
+    : [];
+  if (!row) return fail(404, 'recipient_not_found', 'No such recipient.');
+  const built = await buildExchangeDisclosure(deps.db, {
+    orgId: deps.orgId,
+    clientKey: c.clientKey,
+    actor,
+    recipient: {
+      legalName: row.legalName || row.name,
+      registrationNumber: row.registrationNumber ?? null,
+      country: row.addressCountry || row.country || null,
+      town: row.addressCity ?? null,
+      street: row.addressLine1 ?? null,
+      postCode: row.addressPostalCode ?? null,
+      exchangeId: row.exchangeId ?? null,
+      address: c.address,
+    },
+    amountMinor: c.amount,
+    walletAddress: members.address,
+    purpose: c.purpose,
+  });
+  return built.ok ? built : fail(built.status, built.code, built.error);
+}
+
+/** The person confirmed what the server would send: their purpose, and the hash of the text they read. Anything else is read again. */
+async function confirmedDisclosure(
+  deps: TransferDeps,
+  actor: { userId: string },
+  c: { resolved: Resolved; address: string; amount: bigint; clientKey: string; confirmation: unknown },
+): Promise<BuiltDisclosure | TransferFailure> {
+  const given = (c.confirmation && typeof c.confirmation === 'object' ? c.confirmation : null) as { purpose?: unknown; confirmedHash?: unknown } | null;
+  if (!given || typeof given.confirmedHash !== 'string') {
+    return fail(409, 'exchange_disclosure_required', 'Read what will be shared with the exchange and confirm it first. Nothing was sent and nothing was built.');
+  }
+  const built = await buildDisclosureFor(deps, actor, { resolved: c.resolved, address: c.address, amount: c.amount, clientKey: c.clientKey, purpose: given.purpose });
+  if (!built.ok) return built;
+  if (built.hash !== given.confirmedHash) {
+    return fail(409, 'exchange_disclosure_changed', 'What will be shared with the exchange changed since you read it. Read it again and confirm. Nothing was sent.', { disclosure: { hash: built.hash, text: disclosureText(built.disclosure, signedOf(deps)) } });
+  }
+  return built;
+}
+
+/**
+ * What a staff member is shown before paying an exchange account alone: the message, in plain words, and the hash to confirm it
+ * with. Built on the server from what it holds; stores nothing and shares nothing. Refused for a person who is not allowed, for an
+ * owner (the owners send their own) and where the Travel Rule provider is not configured.
+ */
+export async function previewExchangeDisclosure(
+  deps: TransferDeps,
+  actor: { userId: string; role: string },
+  input: { clientKey: unknown; payee: PayeeInput; amountMinor: unknown; purpose: unknown },
+): Promise<({ ok: true; disclosure: BuiltDisclosure['disclosure']; text: DisclosureText; hash: string }) | TransferFailure> {
+  if (actor.role === 'OWNER') return fail(409, 'owners_send_their_own', 'The owners send their own Travel Rule message when they pay an exchange account. This message is for staff who pay alone.');
+  if (actor.role !== 'MAKER' && actor.role !== 'APPROVER') return fail(403, 'cannot_pay', 'Viewers can look at payments but cannot make them.');
+  const clientKey = validClientKey(input.clientKey);
+  if (!clientKey) return fail(400, 'idempotency_key_required', 'An intent id (8 to 80 letters, digits, - or _) is needed.');
+  const amount = digits(input.amountMinor);
+  if (amount === null || amount <= 0n) return fail(400, 'bad_amount', 'Say how much USDC to pay: an amount above zero.');
+  if (!(await exchangeAloneNow(deps, actor.userId))) return fail(409, 'exchange_alone_off', EXCHANGE_ALONE_OFF_TEXT);
+  const provider = travelRuleProviderFor(deps);
+  if (!provider.ok) return fail(provider.status, provider.code, provider.error);
+  const members = await deps.walletMembers();
+  if (!members.ok) return fail(members.status, members.code, members.error);
+  const resolved = await resolvePayee(deps, input.payee);
+  if ('ok' in resolved) return resolved;
+  if (resolved.payeeKind !== 'exchange') return fail(409, 'not_an_exchange_recipient', 'This recipient is not saved as an exchange account, so there is no Travel Rule message to confirm.');
+  const built = await buildDisclosureFor(deps, actor, { resolved, address: normalizeSuiAddress(resolved.address), amount, clientKey, purpose: input.purpose });
+  if (!built.ok) return built;
+  return { ok: true, disclosure: built.disclosure, text: disclosureText(built.disclosure, signedOf(deps)), hash: built.hash };
+}
+
+/**
+ * Send the stored message for a staff member's own payment again (its signing request id): when the provider could not be reached the
+ * first time. It is made from the payload kept with the payment and nothing else, goes once, and only for the person who made the
+ * payment, while the owner's switch is still on. Another business's, or another person's, payment reads as absent.
+ */
+export async function sendStoredExchangeMessage(
+  deps: TransferDeps,
+  actor: { userId: string; role: string },
+  input: { signingRequestId: string },
+): Promise<{ ok: true; travelRule: ExchangeMessageState } | TransferFailure> {
+  const [transfer] = await deps.db
+    .select({ id: walletTransfers.id, requestedBy: walletTransfers.requestedBy, route: walletTransfers.route })
+    .from(walletTransfers)
+    .where(and(eq(walletTransfers.orgId, deps.orgId), eq(walletTransfers.signingRequestId, input.signingRequestId)))
+    .limit(1);
+  const stored = transfer && transfer.requestedBy === actor.userId && transfer.route === 'staff_rule' ? await readStoredDisclosure(deps.db, deps.orgId, { signingRequestId: input.signingRequestId }) : null;
+  if (!stored) return fail(404, 'not_found', 'No such payment.');
+  if (!(await exchangeAloneNow(deps, actor.userId))) return fail(409, 'exchange_alone_off', EXCHANGE_ALONE_OFF_TEXT);
+  const provider = travelRuleProviderFor(deps);
+  if (!provider.ok) return fail(provider.status, provider.code, provider.error);
+  const travelRule = await sendMessage({ db: deps.db, orgId: deps.orgId, now: deps.now, provider: provider.provider }, stored.payload, { signingRequestId: input.signingRequestId, createdBy: actor.userId });
+  return { ok: true, travelRule };
 }
 
 /**

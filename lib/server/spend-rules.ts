@@ -825,7 +825,7 @@ export async function openStaffRulePayment(
     signer: { kind: 'single', userId: input.userId, publicKey: toBase64(key.toSuiBytes()) },
     gasMode: 'sponsored',
     staffPay,
-    staffPayment: { spender: signerAddress, recipient: input.payment.recipient, amountMinor: input.payment.amountMinor, maxFeeMinor: input.payment.maxFeeMinor, policyId: staffPay.policyId, allowanceId: staffPay.allowanceId },
+    staffPayment: { spender: signerAddress, recipient: input.payment.recipient, amountMinor: input.payment.amountMinor, maxFeeMinor: input.payment.maxFeeMinor, policyId: staffPay.policyId, allowanceId: staffPay.allowanceId, kind: input.payment.kind ?? 1 },
   });
 }
 

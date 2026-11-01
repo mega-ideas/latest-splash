@@ -6,7 +6,7 @@ import { call, errorText } from '@/components/transfer/api';
 import { Field, Modal, PrimaryButton, QuietButton, SelectInput } from '@/components/transfer/ui';
 import { Note } from '@/components/wallet/parts';
 import type { MembershipRole } from '@/lib/membership-roles';
-import { FINANCE_LEAD_NAME, ROLE_NAME, ROLE_SENTENCE, holdsGrantedAuthority, roleChangeNote, rowControls, type FundsAccessKind, type Manager, type TeamMemberWire } from '@/lib/team/view';
+import { EXCHANGE_ALONE_LABEL, EXCHANGE_ALONE_WORDS, FINANCE_LEAD_NAME, ROLE_NAME, ROLE_SENTENCE, holdsGrantedAuthority, roleChangeNote, rowControls, type MemberAccessKind, type Manager, type TeamMemberWire } from '@/lib/team/view';
 
 /**
  * One person on the team: their role, what they may do with Add funds and
@@ -60,12 +60,13 @@ export default function MemberDialog({
 
   const saveRole = () => run('role', () => call(base, { method: 'PATCH', body: { role: chosen } }), `${member!.name} is now ${ROLE_NAME[chosen]}.`, () => setRole(null));
   // A switch stays focusable while it saves (aria-disabled, not disabled): a keyboard or screen-reader user keeps their place, and a second press is ignored until the answer is in.
-  const setAccess = (access: FundsAccessKind, allowed: boolean) => {
+  const setAccess = (access: MemberAccessKind, allowed: boolean) => {
     if (busy !== null) return;
-    return run(access, () => call(`${base}/access`, { method: 'PUT', body: { access, allowed } }), `${allowed ? 'Allowed' : 'Stopped'}: ${access === 'add_funds' ? 'Add funds' : 'Withdraw'} for ${member!.name}.`);
+    const what = access === 'add_funds' ? 'Add funds' : access === 'withdraw' ? 'Withdraw' : EXCHANGE_ALONE_LABEL;
+    return run(access, () => call(`${base}/access`, { method: 'PUT', body: { access, allowed } }), `${allowed ? 'Allowed' : 'Stopped'}: ${what} for ${member!.name}.`);
   };
   // Giving Withdraw moves money out of the business, so it asks first. Taking any access back does not.
-  const switchAccess = (access: FundsAccessKind, allowed: boolean) => {
+  const switchAccess = (access: MemberAccessKind, allowed: boolean) => {
     if (busy !== null) return;
     if (access === 'withdraw' && allowed) {
       setConfirmWithdraw(true);
@@ -81,7 +82,7 @@ export default function MemberDialog({
     run('lead', () => call('/api/team/finance-lead', appoint ? { body: { userId: member!.userId } } : { method: 'DELETE' }), appoint ? `${member!.name} is the ${FINANCE_LEAD_NAME}.` : `${member!.name} is no longer the ${FINANCE_LEAD_NAME}.`);
   const remove = () => run('remove', () => call(base, { method: 'DELETE' }), `${member!.name} was removed.`, () => { setConfirmRemove(false); onClose(); });
 
-  const nothing = controls.roles.length === 0 && !controls.remove && !controls.access && controls.financeLead === null;
+  const nothing = controls.roles.length === 0 && !controls.remove && !controls.access && !controls.exchangeAlone && controls.financeLead === null;
   const ownersOnly = nothing && manager === 'finance_lead' && member.userId !== youUserId && holdsGrantedAuthority(member);
   const roleNote = roleChangeNote(chosen);
 
@@ -94,7 +95,7 @@ export default function MemberDialog({
             {member.userId === youUserId
               ? 'You cannot change or remove yourself. Another owner can.'
               : ownersOnly
-                ? 'This person is in charge of sign-offs or can add funds or withdraw. An owner changes or removes them, after taking that access back.'
+                ? 'This person is in charge of sign-offs, can add funds or withdraw, or can pay exchange accounts alone. An owner changes or removes them, after taking that access back.'
                 : 'Only an owner can change this person.'}
           </Note>
         ) : null}
@@ -142,6 +143,27 @@ export default function MemberDialog({
                 </div>
               </div>
             ) : null}
+          </section>
+        ) : null}
+
+        {controls.exchangeAlone ? (
+          <section className="space-y-2" aria-labelledby="md-exchange">
+            <h3 id="md-exchange" className="text-[13px] font-extrabold text-[#0c3e48]">Exchange accounts</h3>
+            <ul className="list-disc space-y-1 pl-5 text-[13px] leading-5 text-[#326273]">
+              {EXCHANGE_ALONE_WORDS.map((line) => (
+                <li key={line}>{line}</li>
+              ))}
+            </ul>
+            <label className="flex min-h-11 cursor-pointer items-center gap-3 rounded-xl bg-[#F6F0ED] px-3 text-sm font-semibold text-[#1F4452]">
+              <input
+                type="checkbox"
+                className="h-5 w-5 shrink-0 accent-[#0d6370]"
+                checked={member.payExchangeAlone}
+                aria-disabled={busy !== null}
+                onChange={(e) => switchAccess('pay_exchange_alone', e.target.checked)}
+              />
+              {EXCHANGE_ALONE_LABEL}
+            </label>
           </section>
         ) : null}
 

@@ -96,6 +96,7 @@ export function fallbackFor(reason: ApprovalReason): FallbackCode {
       return 'above_approval_line';
     case 'owners_pay_this_kind':
     case 'exchange_needs_owners':
+    case 'exchange_not_verified_as_exchange':
     case 'wrong_asset':
       return 'exchange_or_bank';
     case 'policy_unreadable':

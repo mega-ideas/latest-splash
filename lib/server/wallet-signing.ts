@@ -174,7 +174,7 @@ export type ShapeContext = {
    * for it (who sends it, the payee, the amount, the fee bound, the policy and
    * the allowance), which the bytes must say and nothing more.
    */
-  staffPayment?: { spender: string; recipient: string; amountMinor: bigint; maxFeeMinor: bigint; policyId: string; allowanceId: string };
+  staffPayment?: { spender: string; recipient: string; amountMinor: bigint; maxFeeMinor: bigint; policyId: string; allowanceId: string; /** 1 (a wallet, the default) or 2 (an exchange account an owner allowed this person to pay alone). */ kind?: 1 | 2 };
   /** A withdrawal: the beneficiary commitment (hex) the intent must carry. */
   beneficiaryRef?: string;
   /** A withdrawal or a test deposit: the exact principal (minor units). */
@@ -373,8 +373,9 @@ export function assertPurposeShape(purpose: SigningPurpose, d: WalletTxDescripti
       if (BigInt(p.maxFeeMinor) !== stored.maxFeeMinor) bad('it allows another Splash fee from the one shown');
       if (BigInt(bound.withdrawalMinor) !== BigInt(o.amountMinor) + BigInt(p.maxFeeMinor)) bad('it draws more or less than the amount and the fee bound');
       if (BigInt(p.settleByMs) > BigInt(o.expiresAtMs)) bad('the quote outlives the intent');
-      // A rule pays a recipient tagged a wallet (A1 §2.3). An exchange, a bank payout and another chain are the owners'.
-      if (o.kind !== 1 || o.beneficiaryRef !== '') bad('a rule pays a wallet or a Splash business, never an exchange, a bank or another chain');
+      // A rule pays a recipient tagged a wallet (A1 §2.3), or an exchange account when an owner allowed this person to (kind 2, named by
+      // the server, never by the bytes). A bank payout and another chain are the owners' whatever the switch says.
+      if (o.kind !== (stored.kind ?? 1) || o.beneficiaryRef !== '') bad('a rule pays a wallet or a Splash business, or an exchange account an owner allowed, never a bank or another chain');
       return;
     }
     case 'spend_approval': {

@@ -11,6 +11,7 @@ import { inFlightForPayee } from '@/lib/transfer/context';
 import { refusalAsksOwners, viaFor } from '@/lib/transfer/send';
 import PhoneBar from '@/components/dashboard/PhoneBar';
 import { call, errorText, type SigningView } from './api';
+import ExchangeDisclosure, { type ExchangeConfirmation } from './ExchangeDisclosure';
 import SignPanel from './SignPanel';
 import { PrimaryButton, QuietButton } from './ui';
 import type { Made, Quote, StepProps } from './flow';
@@ -51,6 +52,9 @@ export default function StepReview({ flow, ctx, balance, reload, back, made, onM
   const [addressChecked, setAddressChecked] = useState(false);
   /** The server's words when it would not take this as a payment under the person's rule: the one way on is to ask the owners, with the same intent id. */
   const [askInstead, setAskInstead] = useState<string | null>(null);
+  /** An exchange account paid alone: what the person read and confirmed (the purpose and the hash of the message), and a nudge to read it again when the server says it changed. */
+  const [exchangeConfirm, setExchangeConfirm] = useState<ExchangeConfirmation | null>(null);
+  const [disclosureNonce, setDisclosureNonce] = useState(0);
   const chosen = flow.chosen;
   const amount = parseAmountMinor(flow.amountText);
 
@@ -137,6 +141,8 @@ export default function StepReview({ flow, ctx, balance, reload, back, made, onM
         policy: ctx.policy,
         runningTotalMinor: counted ? BigInt(counted) : 0n,
         asset: 'USDC',
+        // An owner's switch for this person, as the server reads it (default off): the same question the server asks.
+        exchangeAlone: ctx.payExchangeAlone === true,
         // What is already on its way counts, as it does on the server: the page and the server answer the same question.
         inFlight: inFlightForPayee(ctx.inFlight, address),
         ...(now ? { nowMs: BigInt(now), settleByMs: BigInt(now + SETTLE_WINDOW_MS) } : {}),
@@ -177,13 +183,29 @@ export default function StepReview({ flow, ctx, balance, reload, back, made, onM
       return;
     }
     const payee = chosen.kind === 'splash_business' ? { kind: 'splash_business', businessId: chosen.businessId } : { kind: 'recipient', recipientId: chosen.recipientId };
-    const answer = await call<{ transfer?: { id: string; route: 'owners_sign' | 'asked_owners' | 'staff_rule' }; signingRequest?: SigningView | null; ask?: { id: string } | null; plan?: { reasons: string[]; lines: string[] }; feeMinor?: string; code?: string }>('/api/wallet/transfers', {
+    const answer = await call<{ transfer?: { id: string; route: 'owners_sign' | 'asked_owners' | 'staff_rule' }; signingRequest?: SigningView | null; ask?: { id: string } | null; plan?: { reasons: string[]; lines: string[] }; exchange?: Made['exchange']; feeMinor?: string; code?: string }>('/api/wallet/transfers', {
       key: flow.intentKey,
       // A page that said "within your spending rule" asks to pay alone: if the server finds it is not, it says why instead of quietly asking the owners.
       // Once it has said why, the same button asks the owners, with the same intent id (nothing was stored by the refusal).
-      body: { payee, amountMinor: amount.toString(), maxFeeMinor: maxFee, reference: flow.reference || undefined, asset: 'USDC', via: viaFor(plan?.route, askInstead !== null) },
+      body: {
+        payee,
+        amountMinor: amount.toString(),
+        maxFeeMinor: maxFee,
+        reference: flow.reference || undefined,
+        asset: 'USDC',
+        via: viaFor(plan?.route, askInstead !== null),
+        // An exchange account paid alone: the message the person read, as the server will check it.
+        ...(needsDisclosure && exchangeConfirm ? { exchangeDisclosure: exchangeConfirm } : {}),
+      },
     });
     setSending(false);
+    if (answer.status === 409 && answer.body?.code === 'exchange_disclosure_changed') {
+      // What would be shared changed after it was read (an amount, an address, a detail of the business): read it again before paying.
+      setSendError(errorText(answer, 'What will be shared with the exchange changed. Read it again and confirm. Nothing was sent.'));
+      setExchangeConfirm(null);
+      setDisclosureNonce((n) => n + 1);
+      return;
+    }
     if (answer.status === 409 && answer.body?.code === 'fee_changed') {
       setSendError('Splash’s fee changed since it was shown. Check the new fee below, then approve again.');
       void load();
@@ -201,18 +223,21 @@ export default function StepReview({ flow, ctx, balance, reload, back, made, onM
       setSendError(errorText(answer, 'The payment was not sent. Nothing left your wallet.'));
       return;
     }
-    onMade({ ref: transfer.id, route: transfer.route, signing: answer.body?.signingRequest ?? null, askId: answer.body?.ask?.id ?? null, plan: answer.body?.plan, expected: { recipient: quote.payee?.address ?? null, amountMinor: amount.toString(), maxFeeMinor: maxFee, payeeName: chosen.name } });
+    onMade({ ref: transfer.id, route: transfer.route, signing: answer.body?.signingRequest ?? null, askId: answer.body?.ask?.id ?? null, plan: answer.body?.plan, ...(answer.body?.exchange ? { exchange: answer.body.exchange } : {}), expected: { recipient: quote.payee?.address ?? null, amountMinor: amount.toString(), maxFeeMinor: maxFee, payeeName: chosen.name } });
   }
 
   const feeLine = quote ? (quote.feesOn ? `${formatUsdc(quote.feeMinor)} USDC` : 'None charged yet') : '';
   const ownerRoute = plan?.route === 'owners_sign';
   // A payment the server would not take under the rule is the owners' to approve, and the person asks them with the same button.
   const ruleRoute = plan?.route === 'staff_rule' && askInstead === null;
+  /** Paying an exchange account alone: the person reads and confirms what is shared with the exchange before they pay. */
+  const needsDisclosure = ruleRoute && chosen?.kind === 'recipient' && chosen.deliveryKind === 'EXCHANGE';
 
   if (made) {
     return (
       <div className="space-y-5">
         <h2 className="text-[22px] font-extrabold text-[#0c3e48]">{made.route === 'owners_sign' ? 'Approve the payment' : made.route === 'staff_rule' ? 'Sign your payment' : 'Sent to your owners'}</h2>
+        {made.exchange?.travelRule ? <ExchangeMessageState state={made.exchange.travelRule} signingId={made.signing?.id ?? null} /> : null}
         {made.signing ? (
           <SignPanel initial={made.signing} expected={made.expected} onExecuted={onExecuted} onRestart={onRestart} />
         ) : (
@@ -242,7 +267,7 @@ export default function StepReview({ flow, ctx, balance, reload, back, made, onM
         <ArrowLeft className="h-4 w-4" aria-hidden="true" />
         Back
       </QuietButton>
-      <PrimaryButton type="button" className={stickyActions ? 'min-h-14 flex-1 text-base' : undefined} disabled={!quote || lapsed || sending || (quote.payee?.recentlyAdded === true && !addressChecked) || plan?.route === 'blocked' || !plan || (balance.state === 'ok' && quote !== null && balance.usdcMinor < quote.totalDebitMinor)} onClick={() => void send()}>
+      <PrimaryButton type="button" className={stickyActions ? 'min-h-14 flex-1 text-base' : undefined} disabled={!quote || lapsed || sending || (needsDisclosure && !exchangeConfirm) || (quote.payee?.recentlyAdded === true && !addressChecked) || plan?.route === 'blocked' || !plan || (balance.state === 'ok' && quote !== null && balance.usdcMinor < quote.totalDebitMinor)} onClick={() => void send()}>
         {sending ? 'Sending…' : ownerRoute ? 'Approve and collect signatures' : ruleRoute ? 'Pay now' : 'Ask the owners to approve'}
       </PrimaryButton>
     </>
@@ -330,6 +355,17 @@ export default function StepReview({ flow, ctx, balance, reload, back, made, onM
         </section>
       ) : null}
 
+      {needsDisclosure && chosen?.kind === 'recipient' && amount !== null ? (
+        <ExchangeDisclosure
+          recipientId={chosen.recipientId}
+          amountMinor={amount.toString()}
+          intentKey={flow.intentKey}
+          refreshKey={disclosureNonce}
+          onConfirmation={setExchangeConfirm}
+          onRefused={setAskInstead}
+        />
+      ) : null}
+
       {sendError ? <p role="alert" className="flex items-start gap-2 text-sm font-medium text-[var(--error)]"><CircleAlert className="mt-0.5 h-4 w-4 shrink-0" aria-hidden="true" />{sendError}</p> : null}
 
       <div className={stickyActions ? undefined : 'flex flex-col-reverse gap-2 border-t border-[#326273]/10 pt-4 sm:flex-row sm:items-center sm:justify-between'}>
@@ -342,6 +378,28 @@ export default function StepReview({ flow, ctx, balance, reload, back, made, onM
           actions
         )}
       </div>
+    </div>
+  );
+}
+
+/** Whether the exchange's Travel Rule message has gone, and, if it has not, the way to send it again. The payment cannot be signed until it has. */
+function ExchangeMessageState({ state, signingId }: { state: { state: 'sent' | 'not_sent'; text: string }; signingId: string | null }) {
+  const [again, setAgain] = useState<{ state: 'sent' | 'not_sent'; text: string } | null>(null);
+  const [busy, setBusy] = useState(false);
+  const shown = again ?? state;
+  async function resend() {
+    if (!signingId) return;
+    setBusy(true);
+    const answer = await call<{ travelRule?: { state: 'sent' | 'not_sent'; text: string } }>(`/api/wallet/transfers/${encodeURIComponent(signingId)}/exchange-message`, { body: {} });
+    setBusy(false);
+    setAgain(answer.body?.travelRule ?? { state: 'not_sent', text: errorText(answer, 'The message could not be sent. Nothing left your wallet.') });
+  }
+  return (
+    <div role="status" className={`space-y-2 rounded-2xl border p-4 text-sm leading-6 text-[#1F4452] ${shown.state === 'sent' ? 'border-[#326273]/15 bg-white' : 'border-[var(--warn)] bg-[var(--warn-bg)]'}`}>
+      <p>{shown.text}</p>
+      {shown.state === 'not_sent' && signingId ? (
+        <QuietButton type="button" disabled={busy} onClick={() => void resend()}>{busy ? 'Sending…' : 'Send the message again'}</QuietButton>
+      ) : null}
     </div>
   );
 }

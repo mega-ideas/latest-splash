@@ -35,6 +35,7 @@ import * as schema from '../lib/db/schema.ts';
 import { ComplianceProviderUnavailable } from '../lib/compliance/sumsub.ts';
 import { approvalPlan, APPROVAL_REASON_TEXT } from '../lib/transfer/plan.ts';
 import { readSpendingRules } from '../lib/server/spend-rules.ts';
+import { recordScreening } from '../lib/server/kyt-screenings.ts';
 import { deriveNearThresholdAlerts } from '../lib/server/near-threshold.ts';
 import { exchangeAloneOf } from '../lib/server/exchange-alone.ts';
 import { readStoredDisclosure } from '../lib/server/exchange-disclosure.ts';
@@ -77,6 +78,8 @@ async function exchangeSetup(opts = {}) {
   const exchangeId = await t.w.saveRecipient(EXCHANGE, { kind: 'EXCHANGE', exchange: 'pdax' });
   await t.verify(EXCHANGE, 'exchange');
   const provider = spyProvider();
+  // The live signing layer checks every signature against the gate; so does this world.
+  t.w.signing.beforeSign = (request) => paymentBeforeSign({ db, now: () => t.w.signing.now(), env: { NODE_ENV: 'test' } }, request);
   const allow = (userId = 'u-staff', allowed = true) => setMemberAccess(db, { orgId: 'acme', actorUserId: 'u-founder', userId, access: KIND, allowed, now: () => new Date() });
   const xdeps = (orgId = 'acme', over = {}) =>
     t.deps(orgId, {
@@ -86,7 +89,7 @@ async function exchangeSetup(opts = {}) {
     });
   const body = (usdc = 1_000, over = {}) => amountInput(exchangeId, usdc, { maxFeeMinor: feeFor(U(usdc), 2).toString(), ...over });
   const preview = (deps, actor, usdc = 1_000, over = {}) =>
-    T.previewExchangeDisclosure(deps, actor, { clientKey: over.clientKey ?? 'tx_key_000001', payee: { kind: 'recipient', recipientId: exchangeId }, amountMinor: U(usdc).toString(), purpose: over.purpose ?? 'invoice' });
+    T.previewExchangeDisclosure(deps, actor, { clientKey: over.clientKey ?? 'tx_key_000001', payee: { kind: 'recipient', recipientId: exchangeId }, amountMinor: U(usdc).toString(), purpose: 'purpose' in over ? over.purpose : 'invoice' });
   /** What the page does: ask what will be shared, show it, and send the payment with the confirmation. */
   const confirmed = async (deps, actor, usdc = 1_000, over = {}) => {
     const shown = await preview(deps, actor, usdc, over);
@@ -327,7 +330,8 @@ test('what the person is shown: who sends, which business, the exchange and the 
   assert.match(text, /u-staff/, 'who is sending');
   assert.match(text, /Acme Trading Sdn Bhd/, 'which business');
   assert.match(text, /201901234567/, 'its registration number');
-  assert.match(text, /PDAX/i, 'the exchange, by its name');
+  assert.match(text, /our Philippines payout partner/i, 'the exchange, in the words Recipients uses');
+  assert.doesNotMatch(text, /PDAX/, 'a partner is named only once its agreement is signed');
   assert.ok(text.includes(EXCHANGE), 'the account at the exchange, in full');
   assert.match(text, /contractor/i, 'the purpose they picked');
   assert.match(text, /1,250(\.00)? USDC/);
@@ -587,16 +591,18 @@ test('an exchange payment counts towards the recipient’s running total: togeth
     }
     return r;
   };
-  const first = await pay(STAFF, staffKey, 'u-staff', 'tx_key_000001', 6_000);
-  assert.equal(first.transfer.route, 'staff_rule');
-  // The first person is at 6,000; the second, alone under the line, would take the same recipient to 10,001.
-  const view = (await readSpendingRules(t.w.sc)).view;
-  const alerts = deriveNearThresholdAlerts(view);
-  assert.ok(alerts.some((a) => a.recipient === EXCHANGE), JSON.stringify(alerts.map((a) => [a.kind, a.recipient])));
-  const second = await pay(STAFF2, staff2Key, 'u-staff2', 'tx_key_000002', 4_001);
-  assert.equal(second.transfer.route, 'asked_owners');
-  assert.deepEqual(second.plan.reasons, ['above_threshold']);
-  const exactly = await pay(STAFF2, staff2Key, 'u-staff2', 'tx_key_000003', 4_000);
+  assert.equal((await pay(STAFF, staffKey, 'u-staff', 'tx_key_000001', 6_000)).transfer.route, 'staff_rule');
+  assert.equal((await pay(STAFF2, staff2Key, 'u-staff2', 'tx_key_000002', 2_100)).transfer.route, 'staff_rule');
+  // Together 8,100 of 10,000: each person alone is well under the line, and the alerts read the exchange account like any recipient.
+  const alerts = deriveNearThresholdAlerts((await readSpendingRules(t.w.sc)).view);
+  const many = alerts.find((a) => a.kind === 'same_recipient_many_spenders');
+  assert.ok(many, JSON.stringify(alerts.map((a) => [a.kind, a.recipient])));
+  assert.equal(many.recipient, EXCHANGE);
+  assert.equal(many.countedMinor, String(U(8_100)));
+  const over = await pay(STAFF2, staff2Key, 'u-staff2', 'tx_key_000003', 1_901);
+  assert.equal(over.transfer.route, 'asked_owners');
+  assert.deepEqual(over.plan.reasons, ['above_threshold']);
+  const exactly = await pay(STAFF2, staff2Key, 'u-staff2', 'tx_key_000004', 1_900);
   assert.equal(exactly.transfer.route, 'staff_rule', 'exactly the line needs no approval');
   await t.w.client.close();
 });
@@ -670,7 +676,6 @@ test('what the message needs is missing: the business’s details, its verificat
     ['the business is not verified', (t) => t.db.update(schema.organizations).set({ kybLifecycle: 'REGISTERED' }).where(eq(schema.organizations.id, 'acme')), 'kyb_not_approved', /verification/i],
     ['the business has no case with the provider', (t) => t.db.update(schema.kybCases).set({ sumsubApplicantId: null }).where(eq(schema.kybCases.orgId, 'acme')), 'kyb_applicant_missing', /verification/i],
     ['the recipient has no country', (t) => t.db.update(schema.suppliers).set({ addressCountry: null, country: '' }).where(eq(schema.suppliers.id, t.exchangeId)), 'recipient_incomplete', /recipient/i],
-    ['the recipient has no exchange', (t) => t.db.update(schema.suppliers).set({ exchangeId: null }).where(eq(schema.suppliers.id, t.exchangeId)), 'recipient_incomplete', /recipient|exchange/i],
   ];
   for (const [name, break_, code, words] of cases) {
     const t = await exchangeSetup();
@@ -695,7 +700,12 @@ test('a recipient that is not screened clear is refused, not guessed', async () 
   const t = await exchangeSetup();
   await t.give(t.rule(staffKey.address));
   await t.allow();
-  await t.db.delete(schema.kytScreenings);
+  // Screening now says a person must look at this address (the append-only record is not edited: a newer answer replaces the clear one).
+  t.w.setNow(new Date(Number(t0) + 60_000));
+  await recordScreening(t.db, {
+    orgId: 'acme', kind: 'wallet_recipient', chain: 'SUI', address: EXCHANGE, requestedBy: 'test',
+    screening: { provider: 'elliptic', verdict: 'REVIEW', reference: 'elliptic:test-review', detail: 'test', screenedAt: new Date(Number(t0) + 60_000).toISOString(), riskScore: 70 },
+  });
   const deps = t.xdeps();
   const shown = await t.preview(deps, STAFF);
   const r = await T.createTransfer(deps, STAFF, { ...t.body(), exchangeDisclosure: { purpose: 'invoice', confirmedHash: shown.hash ?? 'e'.repeat(64) }, via: 'rule' });

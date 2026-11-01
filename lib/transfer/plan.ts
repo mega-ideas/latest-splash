@@ -29,9 +29,14 @@
  *
  * A bank payout and USDC to another chain are the owners' to pay (the payout
  * route instructs the partner first; a cross-chain payment is never on a
- * spending rule), and so is an exchange account (its Travel Rule message is
- * sent first), so staff always ask for those. A payment in anything but USDC
- * is refused for everyone (D6): no rule pays it and the owners do not either.
+ * spending rule), so staff always ask for those. An exchange account is the
+ * owners' too, unless an owner has switched on "Can pay exchange accounts
+ * alone" for that person (`exchangeAlone`, off by default): then it is judged
+ * by the person's rule like any other payee, with one more requirement, that
+ * the recipient is on the rule as an EXCHANGE account. The switch widens
+ * nothing else: the per-payment maximum, the cap, the dates and the verified
+ * recipients still bind. A payment in anything but USDC is refused for
+ * everyone (D6): no rule pays it and the owners do not either.
  *
  * The page runs this to say why; the server runs the same function before it
  * builds a staff member's transaction (lib/server/wallet-transfers.ts), so a
@@ -99,6 +104,7 @@ export type ApprovalReason =
   | 'above_threshold'
   | 'owners_pay_this_kind'
   | 'exchange_needs_owners'
+  | 'exchange_not_verified_as_exchange'
   | 'wrong_asset'
   | 'too_many_open'
   | 'staff_gas_share_used'
@@ -157,6 +163,8 @@ export function approvalPlan(input: {
   nowMs?: bigint;
   settleByMs?: bigint;
   inFlight?: InFlight;
+  /** An owner lets this person pay an exchange account alone (migration 0077). Absent means no. */
+  exchangeAlone?: boolean;
 }): ApprovalPlan {
   const thresholdMinor = input.policy ? BigInt(input.policy.secondApprovalThresholdMinor) : DEFAULT_SECOND_APPROVAL_MINOR;
   if (input.asset !== undefined && input.asset.toUpperCase() !== 'USDC') return { route: 'blocked', needsOwnerApproval: false, reasons: ['wrong_asset'], thresholdMinor };
@@ -165,7 +173,8 @@ export function approvalPlan(input: {
 
   const ask = (reasons: ApprovalReason[], renewsAtMs?: string | null): ApprovalPlan => ({ route: 'ask_owners', needsOwnerApproval: true, reasons, thresholdMinor, ...(renewsAtMs !== undefined ? { renewsAtMs } : {}) });
   if (input.payee.kind === 'bank' || (input.payee.kind === 'wallet' && input.payee.wallet === 'cross_chain')) return ask(['owners_pay_this_kind']);
-  if (input.payee.kind === 'wallet' && input.payee.wallet === 'exchange') return ask(['exchange_needs_owners']);
+  const exchangePayee = input.payee.kind === 'wallet' && input.payee.wallet === 'exchange';
+  if (exchangePayee && input.exchangeAlone !== true) return ask(['exchange_needs_owners']);
   const { rule, policy } = input;
   if (!rule) return ask(['no_rule']);
   if (rule.status === 'expired') return ask(['rule_expired']);
@@ -197,7 +206,9 @@ export function approvalPlan(input: {
     const address = input.payee.address ? safeNormalise(input.payee.address) : null;
     const listed = address ? policy.recipients.find((r) => safeNormalise(r.address) === address) : undefined;
     if (!listed) reasons.push('recipient_not_on_rule');
-    else if (listed.tag === 'exchange') reasons.push('exchange_needs_owners');
+    // An exchange account is paid alone only when the rule holds it as an exchange account; a wallet is never paid as one tagged an exchange.
+    else if (exchangePayee && listed.tag !== 'exchange') reasons.push('exchange_not_verified_as_exchange');
+    else if (!exchangePayee && listed.tag === 'exchange') reasons.push('exchange_needs_owners');
     if ((input.runningTotalMinor ?? 0n) + flight.recipientMinor + input.amountMinor > thresholdMinor) reasons.push('above_threshold');
   }
   if (reasons.length > 0) return ask(reasons, reasons.includes('cap_used_up') || reasons.includes('over_cap') ? (rule.renewsAtMs ?? null) : undefined);
@@ -245,7 +256,8 @@ export const APPROVAL_REASON_TEXT: Record<ApprovalReason, string> = {
   recipient_not_on_rule: 'This recipient is not on your rule’s list of verified recipients.',
   above_threshold: 'With what was already paid to this recipient, the total is above the amount an owner must approve.',
   owners_pay_this_kind: 'Bank payouts and USDC to another chain are paid by the owners.',
-  exchange_needs_owners: 'Payments to an exchange account need a Travel Rule message first, so the owners send them.',
+  exchange_needs_owners: 'Paying an exchange account alone is turned off for you. An owner can turn it on in Settings; until then the owners send this payment, with its Travel Rule message.',
+  exchange_not_verified_as_exchange: 'This account is on your rule’s list, but not as an exchange account, so this payment needs the owners.',
   wrong_asset: 'Payments are made in USDC only.',
   too_many_open: `You already have ${STAFF_OPEN_LIMIT} payments waiting to be signed, so this one needs the owners.`,
   staff_gas_share_used: 'Your business has used the network-fee allowance for staff payments for today, so this one needs the owners.',

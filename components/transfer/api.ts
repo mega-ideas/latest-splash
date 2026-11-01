@@ -42,6 +42,8 @@ export type Context = {
   /** Payments already asked for that the chain has not counted: the caller's own cap and open payments, and everyone's towards each recipient. */
   inFlight?: InFlightWire;
   staffRulePaymentsWired: boolean;
+  /** An owner lets this person pay an exchange account alone, inside their rule. Absent means no. */
+  payExchangeAlone?: boolean;
 };
 
 export type SigningView = {

@@ -49,8 +49,9 @@ five commands from the staff member's own passkey address:
 4. `audit_anchor::anchor` with the receipt
 5. `payment_intent::delete_finalized`
 
-It always declares kind WALLET (the tag the owners verified after the payee's
-ownership proof). A rule pays no exchange, bank or other chain.
+It declares kind WALLET (the tag the owners verified after the payee's
+ownership proof), or kind EXCHANGE for an exchange account an owner allowed
+this person to pay alone. A rule pays no bank or other chain.
 
 ## Who checks what
 
@@ -75,7 +76,10 @@ them has to be right alone.
 | Cap window used up | ask, `cap_used_up` with when it renews | 409 |
 | Cap too small for this one | ask, `over_cap` with what is left | 409 |
 | Recipient not on the rule | ask, `recipient_not_on_rule` | 409 |
-| Exchange account | ask, `exchange_needs_owners` (its Travel Rule message goes first) | 409 |
+| Exchange account, "Can pay exchange accounts alone" off for this person (the default) | ask, `exchange_needs_owners` | 409 |
+| Exchange account, switch on, but the rule holds the account as a wallet | ask, `exchange_not_verified_as_exchange` | 409 |
+| Exchange account, switch on, the rule fits, but the Travel Rule message was not confirmed or changed since it was read | none: 409 `exchange_disclosure_required` / `exchange_disclosure_changed`, nothing stored | same |
+| Exchange account, switch on, no Travel Rule provider configured in production, or the business is not verified | ask (the page hands the person to the owners) | 503 `travel_rule_not_configured` / 409 `originator_incomplete`, `kyb_not_approved`, `kyb_applicant_missing` |
 | Running total above the second-approval threshold (every spender's payments to this recipient, and every staff payment on its way to it, together) | ask, `above_threshold` | 409 |
 | Three payments already waiting to be signed | ask, `too_many_open` | 409 `outside_rule` |
 | Staff payments have used their 20% of the day's network-fee allowance | ask, `staff_gas_share_used` | 429 `staff_gas_share_used` |
@@ -182,9 +186,14 @@ a request can be read and signed only by its signer, and the person who asked.
   from the wallet. The `approve_payout` route for an intent a staff member
   opened (`docs/v2/phase2-spending-rules.md`) stays as built; opening and
   sharing an intent for it from Transfer is not built.
-- **An exchange account is not paid under a rule.** Its Travel Rule message is
-  sent first and is keyed to the payment; owners send it. A rule pays wallets
-  the supplier holds and has proven.
+- **An exchange account is paid under a rule only when an owner allows it.**
+  Owner's switch "Can pay exchange accounts alone", per person, off by default,
+  instant to change (`docs/v2/phase3-team-roles.md`, "Can pay exchange accounts
+  alone"). With it on, the payment is declared kind 2 (EXCHANGE), the recipient
+  must be on the rule as an exchange account, every limit of the rule still
+  binds, and the staff member first reads and confirms the Travel Rule message,
+  which the server stores with the payment and sends from. A rule otherwise pays
+  wallets the supplier holds and has proven.
 - **A bank payout and USDC to another chain** are the owners' (unchanged).
 - **No testnet run.** The five-command PTB, in particular `pay_intent` taking
   an `AllowanceWithdrawal` input and an empty `Option<PayoutApproval>` made by

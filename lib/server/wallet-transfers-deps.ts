@@ -15,6 +15,7 @@ import { organizations } from '@/lib/db/schema';
 import { parseSignedPartners } from '@/lib/partners/signed-partners';
 import { corePackageOriginalIdFor } from '@/lib/payouts/withdrawal-rules';
 import { currentWalletMembers } from '@/lib/server/business-wallet';
+import { exchangeAloneOf } from '@/lib/server/exchange-alone';
 import { makePaymentRecorder } from '@/lib/server/payment-record';
 import { sealAdapter } from '@/lib/server/seal';
 import { splashControlledAddresses } from '@/lib/payouts/withdrawal-rules';
@@ -107,6 +108,8 @@ export function transferDepsFor(route: WalletRouteLike, env: NodeJS.ProcessEnv =
       const mine = (await orgMemberWalletAddresses(db, orgId)).find((m) => m.userId === userId && m.canSign);
       return mine ? { publicKey: mine.publicKey, address: mine.address } : null;
     },
+    // An owner's switch, read from the database each time (lib/server/exchange-alone.ts): default deny.
+    payExchangeAlone: (userId) => exchangeAloneOf(db, orgId, userId),
   };
 }
 

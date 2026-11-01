@@ -2653,6 +2653,29 @@ export const walletTransfers = pgTable('wallet_transfers', {
   index('wallet_transfers_org_requester_idx').on(table.orgId, table.requestedBy),
 ]);
 
+/**
+ * The message a staff member read and confirmed before paying an exchange
+ * account alone (migration 0077): the exact payload, the exact text it was
+ * hashed from, bound to the intent id and the payment. Never rewritten.
+ */
+export const walletTransferDisclosures = pgTable('wallet_transfer_disclosures', {
+  id: text('id').primaryKey(),
+  orgId: text('org_id').notNull().references(() => organizations.id),
+  transferId: text('transfer_id').notNull().references(() => walletTransfers.id, { onDelete: 'cascade' }),
+  intentId: text('intent_id').notNull(),
+  paymentRef: text('payment_ref').notNull(),
+  signingRequestId: text('signing_request_id'),
+  payload: jsonb('payload').notNull(),
+  canonical: text('canonical').notNull(),
+  payloadHash: text('payload_hash').notNull(),
+  confirmedBy: text('confirmed_by').notNull(),
+  confirmedAt: timestamp('confirmed_at', { withTimezone: true }).notNull(),
+}, (table) => [
+  uniqueIndex('wallet_transfer_disclosures_transfer_unique').on(table.orgId, table.transferId),
+  uniqueIndex('wallet_transfer_disclosures_intent_unique').on(table.orgId, table.intentId),
+  index('wallet_transfer_disclosures_request_idx').on(table.orgId, table.signingRequestId),
+]);
+
 /** A link made to share a receipt (migration 0064). Only the token's hash is kept. */
 export const paymentReceiptShares = pgTable('payment_receipt_shares', {
   id: text('id').primaryKey(),

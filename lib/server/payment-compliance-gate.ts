@@ -15,6 +15,14 @@
  *                 business screened the address as an exchange recipient,
  *                 or when a message was already started for the payment,
  *                 so sending it as kind WALLET does not avoid the check.
+ *   Exchange alone  a staff member's payment to an exchange account under
+ *                 their rule (kind EXCHANGE, purpose staff_rule_payment) is
+ *                 signed only while an owner's switch "Can pay exchange
+ *                 accounts alone" is still on for that person (read now, so
+ *                 an owner who turns it off stops a payment already opened),
+ *                 and only with the message the person confirmed still on
+ *                 record and still matching the bytes: the account and the
+ *                 amount the transaction pays (lib/server/exchange-disclosure.ts).
  *   Recipient     the saved recipient's own rule (v2 §4.7,
  *                 lib/server/wallet-recipients.ts walletDeliveryGate): kind
  *                 WALLET only to a proven, owner-approved wallet the
@@ -36,6 +44,8 @@ import { kytScreenings } from '../db/schema.ts';
 import type { KytProvider } from '../compliance/kyt.ts';
 import type { WalletTxDescription } from '../wallet/wallet-tx-describe.ts';
 import { paymentOfDescription } from './controls-evidence.ts';
+import { exchangeAloneOf } from './exchange-alone.ts';
+import { disclosureMismatch, readStoredDisclosure } from './exchange-disclosure.ts';
 import { recipientScreeningGate } from './kyt-screenings.ts';
 import { isProductionRuntime } from './runtime-mode.ts';
 import { walletDeliveryGate } from './wallet-recipients.ts';
@@ -117,6 +127,23 @@ export async function travelRuleHold(
   return { code: 'travel_rule_missing', error: 'This payment goes to an exchange: send its Travel Rule message first, then sign.' };
 }
 
+/**
+ * A staff member's exchange payment under their rule: the owner's switch is still on, and the message the person
+ * confirmed is still on record and still says what the bytes pay. Null lets the signature through.
+ */
+export async function staffExchangeHold(db: DrizzleDb, request: StoredRequest): Promise<GateRefusal | null> {
+  if (!(await exchangeAloneOf(db, request.orgId, request.requestedBy))) {
+    return { code: 'exchange_alone_off', error: 'An owner has not allowed you to pay exchange accounts on your own, or has turned it off, so this payment is not signed. Ask an owner to turn it on in Settings, or to approve the payment.' };
+  }
+  const row = await readStoredDisclosure(db, request.orgId, { signingRequestId: request.id });
+  if (!row) return { code: 'disclosure_missing', error: 'This payment has no record of the message shared with the exchange, so it is not signed. Start the payment again and confirm the message.' };
+  const summary = (request.summary ?? null) as { description?: WalletTxDescription } | null;
+  const paid = paymentOfDescription(summary?.description);
+  const wrong = !paid || !paid.recipient ? 'the transaction does not say what it pays' : disclosureMismatch(row, { recipient: paid.recipient, amountMinor: paid.amountMinor });
+  if (wrong) return { code: 'disclosure_mismatch', error: 'The message shared with the exchange does not match this payment, so it is not signed. Nothing has left your wallet. Start the payment again.' };
+  return null;
+}
+
 /** Before each signature on a payment: null lets the signature through. */
 export async function paymentBeforeSign(deps: PaymentGateDeps, request: StoredRequest): Promise<GateRefusal | null> {
   if (request.purpose !== 'wallet_payment' && request.purpose !== 'spend_approval' && request.purpose !== 'staff_rule_payment') return null;
@@ -132,6 +159,10 @@ export async function paymentBeforeSign(deps: PaymentGateDeps, request: StoredRe
   if (payment.kind !== null || request.purpose === 'wallet_payment') {
     const delivery = await walletDeliveryGate(deps.db, request.orgId, payment.recipient, payment.kind, { stage: 'sign' });
     if (delivery) return { code: delivery.code, error: delivery.error };
+  }
+  if (request.purpose === 'staff_rule_payment' && payment.kind === EXCHANGE_KIND) {
+    const exchange = await staffExchangeHold(deps.db, request);
+    if (exchange) return exchange;
   }
   // A rule payment to an exchange is held the same way: its message is kept under the intent's id.
   return travelRuleHold(deps.db, request, payment, deps.env);

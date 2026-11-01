@@ -362,6 +362,144 @@ threshold rule that counts the Finance lead differently from an owner), that is
 a Move change and Sebastian approves every file under `move/`. Today the role is
 Splash's, not the chain's.
 
+## Can pay exchange accounts alone
+
+Sky's decision (2 Nov): staff may pay an **exchange account** alone, but only
+when an owner allows it for that person, and the owner can change it at any
+time.
+
+| What | Where |
+|---|---|
+| The switch (stored per member) | `wallet_member_access`, kind `pay_exchange_alone` (migration 0077); `exchangeAloneOf` in `lib/server/exchange-alone.ts`; granted and taken back by `setMemberAccess` |
+| The words | `EXCHANGE_ALONE_LABEL`, `EXCHANGE_ALONE_WORDS` in `lib/team/view.ts` |
+| Settings → Team → Manage | the switch in `components/team/MemberDialog.tsx`; `PUT /api/team/members/:id/access { access: 'pay_exchange_alone', allowed }` |
+| Honoured before anything is built | `createTransfer` (`lib/server/wallet-transfers.ts`) and the plan (`exchangeAlone` in `lib/transfer/plan.ts`) |
+| Honoured again before every signature | `staffExchangeHold` in `lib/server/payment-compliance-gate.ts` |
+| The Travel Rule message | `lib/compliance/exchange-disclosure.ts` (pure), `lib/server/exchange-disclosure.ts`, `POST /api/wallet/transfers/exchange-disclosure`, `components/transfer/ExchangeDisclosure.tsx` |
+
+**The switch.** Off for everyone. Migration 0077 only widens the allowed kinds
+and adds a table: nothing is granted to anyone already on the team (a test
+reads every migration for an insert into `wallet_member_access`). Only an owner
+turns it on or off; the Finance lead, the person themselves, an approver and
+another business's owner are refused (`owner_only` or `not_allowed`, or 404 for
+a person of another business). **It is instant**: an owner's own change, so no
+notice, no cooldown and no second signature; taking it back in the same second
+it was given works. It is for staff and approvers: a viewer cannot hold it
+(`cannot_hold_access`), and an owner has no use for it (`not_needed`: the
+owners' payments are signed by the owners together). Every change is a
+`member_access_granted` or `member_access_revoked` line on the append-only
+trail, in words: "Asha let Ben pay exchange accounts alone." Moving the person
+to viewer, or removing them, ends it and says so (the same path as Add funds
+and Withdraw). A person who holds it is one an owner granted something to, so
+only an owner changes their role or removes them.
+
+**What it widens, and nothing else.** It only lets an exchange account be judged
+by the person's spending rule like any other recipient. The rule's per-payment
+maximum, cap, start and end dates and second-approval line (counted across
+every person and every payment on its way) all still bind, and the recipient
+must be on the rule as an **exchange** account: one the owners tagged an
+exchange after the exchange confirmed it. A wallet is never paid as an
+exchange account and an exchange account is never paid as a wallet. A bank
+payout and USDC to another chain stay the owners', whatever the switch says.
+With the switch off, or with a rule that does not hold the account as an
+exchange, the payment goes to the owners with the reason in plain words
+(`exchange_needs_owners`, `exchange_not_verified_as_exchange`); a person who
+insisted on paying alone is refused with 409 `outside_rule` and nothing is
+stored. The owners' own payments to an exchange are unchanged.
+
+**It is read on the server, every time.** `createTransfer` asks
+`exchangeAloneOf` (default deny: a viewer, an owner, a stranger, another
+business's member and a stale row all read as no) before it builds anything.
+The signing gate asks again before **each** signature, so an owner who turns it
+off stops a payment the person already opened: the signature is refused with
+`exchange_alone_off`, nothing moves, and turning it on again lets the same
+payment through. The page never decides: it reads `payExchangeAlone` from
+`GET /api/wallet/transfers/context` only to plan the same way.
+
+### The Travel Rule message
+
+Before the staff member signs, Transfer shows what will be shared with the
+exchange and asks them to confirm it.
+
+1. **Show.** `POST /api/wallet/transfers/exchange-disclosure` (the payment's
+   Idempotency-Key is the intent id) builds the message **on the server**:
+   who is sending (the signed-in person's name), the business (the name and
+   registration number the provider verified, not the editable profile, and its
+   wallet), the beneficiary and its country, the exchange and the account at it
+   (the saved recipient's own), the amount, and the purpose the person picks
+   from a short fixed list. It returns the words, the structured rows and the
+   sha256 of the exact text. It stores nothing and shares nothing. Anything the
+   message needs that is missing (the business's registered country, its KYB
+   approval or case with the provider, the recipient's name, country or
+   exchange, the person's own name, a purpose from the list) is refused with a
+   plain reason and nothing is built. An exchange is named only when its
+   agreement is signed (`SIGNED_PARTNERS`); otherwise it is described as
+   Recipients describes it.
+2. **Confirm.** The person reads it, ticks "I have read this and it is right",
+   and pays. The payment carries `{ purpose, confirmedHash }`. The server builds
+   its own message again and compares: a different hash (an amount, an address,
+   a detail of the business changed since) is 409 `exchange_disclosure_changed`
+   with the new message to read; none is 409 `exchange_disclosure_required`. The
+   fee shown is passed as `max_fee` exactly as for every payment, and an
+   exchange payment takes the EXCHANGE fee kind (kind 2) computed on chain.
+3. **Store.** The exact payload and the exact text it was hashed from are
+   written to `wallet_transfer_disclosures` **in the same step as the payment's
+   claim**, bound to the intent id (`intent_id`, `payment_ref`), the transfer
+   and, once it exists, the signing request. A trigger refuses any rewrite. The
+   hash is also inside the transaction's `commitment`, so what is on chain
+   covers it.
+4. **Send.** Once the signing request is open the Travel Rule message is sent
+   to the provider, **made from the stored payload and nothing else**
+   (`travelRuleInputFromDisclosure`): the business as originator, the beneficiary
+   at its exchange, the amount, and a purpose that begins with who sent it.
+   Replays and races make one message (`sendTravelRule` is once per payment).
+   If the provider cannot be reached the payment is still open but cannot be
+   signed (the gate needs the message with the provider), the page says so, and
+   "Send the message again" (`POST /api/wallet/transfers/:request/exchange-message`)
+   sends it again from the stored payload, once.
+5. **Check at the signature.** Before each signature the gate reads the stored
+   message back: it must still hash to its hash, be the payload it carries, be
+   for this intent id, and name the account and the amount the transaction pays.
+   A record that is gone is `disclosure_missing`, one that does not match is
+   `disclosure_mismatch`; neither is signed.
+
+**Fails closed.** In production without Sumsub's Travel Rule configured the
+preview and the payment are refused (503 `travel_rule_not_configured`) and
+nothing is built, stored or shown as sent; a sandbox message on file is refused
+at the signature in production (`travel_rule_missing`). No verdict, reference
+or message is made up. The recipient must still be a fresh screening CLEAR,
+the same screening gate as every payment. Where the provider or the business's
+verification is missing the page hands the person to asking the owners, who
+send their own message.
+
+**Replay and tenants.** The intent id answers only the person who made the
+payment (another member gets 409 `idempotency_key_reused` and sees nothing); a
+second send with another purpose still answers the payment already made and
+changes what was shared by nothing. Another business reads none of it: the
+stored message, the switch and the recipient are absent (404/409), and a
+person cannot send another person's message again.
+
+**What this is not.** Nothing here claims the exchange will accept the
+payment. The first payment to an account still waits for the exchange's
+confirmation, and a message the exchange puts on hold or rejects holds or
+refuses the signature as before.
+
+### Tests
+
+`tests/exchange-alone-switch.test.mjs` (the switch: default, owner-only,
+instant, trail, tenants, role changes), `tests/exchange-alone-payment.test.mjs`
+(switch off, on, on then off mid-flow, the rule still binds, the message, the
+payload bound to the intent id, replay and races, the gate, fail-closed,
+cross-tenant, second-approval and alerts) and `tests/exchange-alone-ui.test.mjs`
+(the words, the wiring and the migration).
+
+### What needs Sebastian (Move)
+
+Nothing. `splash_spend::create_intent` already takes kind 2 for a recipient the
+owners tagged an exchange and refuses any other kind
+(`E_WRONG_DELIVERY_KIND`); `pay_intent` derives the kind and the fee on chain.
+No file under `move/` changed.
+
 ## Release note: existing staff and approvers start without Add funds and Withdraw
 
 Sky decided (1 Nov): **day one for existing staff and approvers is that they do

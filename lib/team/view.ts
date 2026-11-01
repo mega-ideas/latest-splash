@@ -13,6 +13,8 @@ export const FINANCE_LEAD_NAME = 'Finance lead';
 
 export type Manager = 'owner' | 'finance_lead' | null;
 export type FundsAccessKind = 'add_funds' | 'withdraw';
+/** Everything an owner can switch on for a staff member or an approver. */
+export type MemberAccessKind = FundsAccessKind | 'pay_exchange_alone';
 
 /** One person on the team, as the team route sends it to someone who manages the team. */
 export type TeamMemberWire = {
@@ -24,6 +26,8 @@ export type TeamMemberWire = {
   inCharge: boolean;
   addFunds: boolean;
   withdraw: boolean;
+  /** An owner lets this person pay an exchange account alone, inside their spending rule. */
+  payExchangeAlone: boolean;
 };
 
 export type TeamActivityWire = { id: string; action: string; createdAt: string; actorName: string; subjectName: string | null; summary: string };
@@ -203,33 +207,45 @@ export function roleChoicesFor(manager: Manager): MembershipRole[] {
   return [];
 }
 
+/** The switch's name, and what it means, in the words an owner reads under Manage. */
+export const EXCHANGE_ALONE_LABEL = 'Can pay exchange accounts alone';
+export const EXCHANGE_ALONE_WORDS: readonly string[] = [
+  'This lets the person pay an exchange account on their own, with their own passkey, inside their spending rule. It is off until you turn it on.',
+  'It adds nothing to the rule: the limit for one payment, the cap, the end date and the list of verified recipients still apply, and the exchange account must be on the rule as an exchange account.',
+  'Before they sign, they read and confirm what is shared with the exchange (the Travel Rule message): who is sending, which business, the exchange and account, and the purpose they choose.',
+  'You can turn it off at any time and it stops at once, even for a payment they have already started.',
+];
+
 export type RowControls = {
   roles: MembershipRole[];
   remove: boolean;
   /** Add funds and Withdraw switches: an owner's to give, to staff and approvers. */
   access: boolean;
+  /** The "Can pay exchange accounts alone" switch: an owner's to give, to staff and approvers. */
+  exchangeAlone: boolean;
   financeLead: 'appoint' | 'take_back' | null;
 };
 
-const NONE: RowControls = { roles: [], remove: false, access: false, financeLead: null };
+const NONE: RowControls = { roles: [], remove: false, access: false, exchangeAlone: false, financeLead: null };
 
 /** Is this staff member or approver in charge of sign-offs, or granted Add funds or Withdraw? Only an owner moves or removes them. */
-export function holdsGrantedAuthority(row: Pick<TeamMemberWire, 'role' | 'inCharge' | 'addFunds' | 'withdraw'>): boolean {
-  return row.role !== 'admin' && row.role !== 'viewer' && (row.inCharge || row.addFunds || row.withdraw);
+export function holdsGrantedAuthority(row: Pick<TeamMemberWire, 'role' | 'inCharge' | 'addFunds' | 'withdraw'> & { payExchangeAlone?: boolean }): boolean {
+  return row.role !== 'admin' && row.role !== 'viewer' && (row.inCharge || row.addFunds || row.withdraw || Boolean(row.payExchangeAlone));
 }
 
 /** What the signed-in manager is offered on one person's row. */
-export function rowControls(ctx: { manager: Manager; youUserId: string }, row: Pick<TeamMemberWire, 'userId' | 'role' | 'financeLead' | 'inCharge' | 'addFunds' | 'withdraw'>): RowControls {
+export function rowControls(ctx: { manager: Manager; youUserId: string }, row: Pick<TeamMemberWire, 'userId' | 'role' | 'financeLead' | 'inCharge' | 'addFunds' | 'withdraw'> & { payExchangeAlone?: boolean }): RowControls {
   if (!ctx.manager || row.userId === ctx.youUserId) return NONE;
   if (ctx.manager === 'finance_lead') {
     // Never an owner, and never someone an owner put in charge or gave Add funds or Withdraw: ending that is the owners'.
     if (row.role === 'admin' || holdsGrantedAuthority(row)) return NONE;
-    return { roles: roleChoicesFor('finance_lead'), remove: true, access: false, financeLead: null };
+    return { roles: roleChoicesFor('finance_lead'), remove: true, access: false, exchangeAlone: false, financeLead: null };
   }
   return {
     roles: roleChoicesFor('owner'),
     remove: true,
     access: row.role === 'maker' || row.role === 'checker',
+    exchangeAlone: row.role === 'maker' || row.role === 'checker',
     financeLead: row.financeLead ? 'take_back' : row.role === 'checker' ? 'appoint' : null,
   };
 }
@@ -329,9 +345,9 @@ export function activitySummary(e: { action: string; detail: unknown; actorName:
     case 'finance_lead_revoked':
       return `${e.actorName} took the ${FINANCE_LEAD_NAME} role back from ${who}.`;
     case 'member_access_granted':
-      return `${e.actorName} let ${who} ${d.access === 'withdraw' ? 'withdraw' : 'add funds'}.`;
+      return `${e.actorName} let ${who} ${d.access === 'withdraw' ? 'withdraw' : d.access === 'pay_exchange_alone' ? 'pay exchange accounts alone' : 'add funds'}.`;
     case 'member_access_revoked':
-      return `${e.actorName} stopped ${who} ${d.access === 'withdraw' ? 'withdrawing' : 'adding funds'}.`;
+      return `${e.actorName} stopped ${who} ${d.access === 'withdraw' ? 'withdrawing' : d.access === 'pay_exchange_alone' ? 'paying exchange accounts alone' : 'adding funds'}.`;
     case 'person_in_charge_appointed':
       return `${e.actorName} put ${who} in charge of signing off moves.`;
     case 'person_in_charge_revoked':

@@ -540,6 +540,13 @@
       "when": 1795132800000,
       "tag": "0076_grace_window",
       "breakpoints": true
+    },
+    {
+      "idx": 77,
+      "version": "7",
+      "when": 1795219200000,
+      "tag": "0077_pay_exchange_alone",
+      "breakpoints": true
     }
   ]
 }

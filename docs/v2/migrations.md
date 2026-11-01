@@ -47,3 +47,11 @@ select status, count(*) from proposals where kind = 'BATCH_PAYOUT' group by stat
 
 The code no longer has the kind (docs/v2/phase3-zeke-batches.md); a payout run is
 made from a sheet in the wallet batch flow.
+
+## `0077_pay_exchange_alone`
+
+Adds the access kind `pay_exchange_alone` to `wallet_member_access` (the check
+constraint is dropped and re-added with the third kind) and a new table,
+`wallet_transfer_disclosures`, with a trigger that refuses any rewrite except
+setting the signing request id once. It inserts nothing: no existing member is
+given the switch. Safe to run again.

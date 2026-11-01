@@ -19,6 +19,11 @@ const ASKABLE: Array<[number, string]> = [
   [503, 'no_sponsor'],
   [502, 'rule_unreadable'],
   [429, 'staff_gas_share_used'],
+  // Paying an exchange account alone needs the Travel Rule provider and a verified business: where either is missing the owners can still be asked.
+  [503, 'travel_rule_not_configured'],
+  [409, 'originator_incomplete'],
+  [409, 'kyb_not_approved'],
+  [409, 'kyb_applicant_missing'],
 ];
 
 export function refusalAsksOwners(status: number, code: string | undefined): boolean {

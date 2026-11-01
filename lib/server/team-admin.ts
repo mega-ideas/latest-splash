@@ -50,7 +50,7 @@ import { and, desc, eq, inArray, isNull } from 'drizzle-orm';
 import { GrantRefusedError, grantMembership } from '../auth/authority.ts';
 import { memberships, teamInvitations, users, walletAuthorityEvents, walletFinanceLeads, walletMemberAccess, walletPersonsInCharge } from '../db/schema.ts';
 import { isMembershipRole, type MembershipRole } from '../membership-roles.ts';
-import { TEAM_ACTIONS, activitySummary, maskEmail, type FundsAccessKind, type Manager, type TeamActivityWire, type TeamMemberWire } from '../team/view.ts';
+import { TEAM_ACTIONS, activitySummary, maskEmail, type MemberAccessKind, type Manager, type TeamActivityWire, type TeamMemberWire } from '../team/view.ts';
 import { endFinanceLead, endMemberHolds, memberRole, offboardMember, passkeyAddressesOf, recordAuthorityEvent } from './wallet-authority.ts';
 import type { DrizzleDb } from './wallet-signing-store.ts';
 
@@ -59,8 +59,10 @@ export type TeamFailure = { ok: false; status: number; code: string; error: stri
 export const fail = (status: number, code: string, error: string): TeamFailure => ({ ok: false, status, code, error });
 const clock = (now?: Clock) => (now ?? (() => new Date()))();
 
-export const FUNDS_ACCESS_KINDS: readonly FundsAccessKind[] = ['add_funds', 'withdraw'];
-const isAccessKind = (v: unknown): v is FundsAccessKind => typeof v === 'string' && (FUNDS_ACCESS_KINDS as readonly string[]).includes(v);
+export const FUNDS_ACCESS_KINDS: readonly MemberAccessKind[] = ['add_funds', 'withdraw'];
+/** Everything an owner can switch on for a person: Add funds, Withdraw, and paying an exchange account alone. */
+export const MEMBER_ACCESS_KINDS: readonly MemberAccessKind[] = ['add_funds', 'withdraw', 'pay_exchange_alone'];
+const isAccessKind = (v: unknown): v is MemberAccessKind => typeof v === 'string' && (MEMBER_ACCESS_KINDS as readonly string[]).includes(v);
 
 const NOT_ALLOWED = (what: string) => fail(403, 'not_allowed', `Only an owner or the Finance lead can ${what}.`);
 const OWNER_ONLY = (what: string) => fail(403, 'owner_only', `Only an owner can ${what}.`);
@@ -365,7 +367,7 @@ export async function setMemberAccess(
   const manager = await teamManager(db, input.orgId, input.actorUserId);
   const refused = ownerOnly(manager, 'give or take away Add funds and Withdraw');
   if (refused) return refused;
-  if (!isAccessKind(input.access)) return fail(400, 'bad_access', 'Choose Add funds or Withdraw.');
+  if (!isAccessKind(input.access)) return fail(400, 'bad_access', 'Choose Add funds, Withdraw or Can pay exchange accounts alone.');
   const access = input.access;
   const role = await memberRole(db, input.orgId, input.userId);
   if (role === null) return fail(404, 'not_a_member', 'No such member of this business.');
@@ -382,8 +384,9 @@ export async function setMemberAccess(
     return { ok: true, changed: true };
   }
 
-  if (role === 'admin') return fail(409, 'not_needed', 'An owner can already add funds and withdraw.');
-  if (role === 'viewer') return fail(409, 'cannot_hold_access', 'A viewer cannot add funds or withdraw. Change their role first.');
+  const exchange = access === 'pay_exchange_alone';
+  if (role === 'admin') return fail(409, 'not_needed', exchange ? 'An owner’s payments are signed by the owners together, so this switch is for staff and approvers.' : 'An owner can already add funds and withdraw.');
+  if (role === 'viewer') return fail(409, 'cannot_hold_access', exchange ? 'A viewer cannot pay anyone. Change their role first.' : 'A viewer cannot add funds or withdraw. Change their role first.');
   const inserted = await db
     .insert(walletMemberAccess)
     .values({ id: `wma_${randomUUID()}`, orgId: input.orgId, userId: input.userId, access, grantedBy: input.actorUserId, grantedAt: now })
@@ -428,6 +431,7 @@ export async function listTeam(db: DrizzleDb, orgId: string): Promise<TeamMember
         inCharge: charge.has(r.userId) && staff,
         addFunds: owner || (staff && Boolean(mine?.has('add_funds'))),
         withdraw: owner || (staff && Boolean(mine?.has('withdraw'))),
+        payExchangeAlone: staff && Boolean(mine?.has('pay_exchange_alone')),
       };
     })
     .sort((a, b) => a.name.localeCompare(b.name) || a.userId.localeCompare(b.userId));
