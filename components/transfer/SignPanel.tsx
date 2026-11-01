@@ -15,6 +15,7 @@ import { groupAddress } from '@/lib/transfer/addresses';
 import { signingItems } from '@/lib/wallet-page/actions';
 import { differsFromApproved, differsFromApprovedBatch, type ApprovedPayment } from '@/lib/transfer/approved';
 import { call, errorText, type SigningView } from './api';
+import ExchangeMessage from './ExchangeMessage';
 import type { Made } from './flow';
 import { PrimaryButton, QuietButton } from './ui';
 
@@ -222,6 +223,9 @@ export default function SignPanel({ initial, expected = null, expectedBatch = nu
           </li>
         ))}
       </ul>
+
+      {/* A staff member's exchange payment: whether its Travel Rule message has gone, read from the server each time the payment is shown, with the way to send it again. */}
+      {underRule && !finished && !dead && view.you.requested ? <ExchangeMessage signingId={view.id} /> : null}
 
       {!finished && !dead && view.you.mustSign && !view.you.signed ? (
         review ? (

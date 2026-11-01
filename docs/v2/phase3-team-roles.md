@@ -434,7 +434,11 @@ exchange and asks them to confirm it.
    exchange, the person's own name, a purpose from the list) is refused with a
    plain reason and nothing is built. An exchange is named only when its
    agreement is signed (`SIGNED_PARTNERS`); otherwise it is described as
-   Recipients describes it.
+   Recipients describes it ("Exchange you saved this account at: our Philippines
+   payout partner"), which is one for one with the exchange the provider is told
+   by id. The last row, "Payment details as sent", is the exact string the
+   provider receives: "Sent by NAME: purpose", the name cut at 40 characters.
+   Sharing the staff member's name there needs Sky's confirmation.
 2. **Confirm.** The person reads it, ticks "I have read this and it is right",
    and pays. The payment carries `{ purpose, confirmedHash }`. The server builds
    its own message again and compares: a different hash (an amount, an address,
@@ -456,12 +460,30 @@ exchange and asks them to confirm it.
    If the provider cannot be reached the payment is still open but cannot be
    signed (the gate needs the message with the provider), the page says so, and
    "Send the message again" (`POST /api/wallet/transfers/:request/exchange-message`)
-   sends it again from the stored payload, once.
+   sends it again from the stored payload, once. The state is read from the
+   provider's own row each time the payment is shown (`GET` on the same route,
+   `ExchangeMessage` in the signing panel), so it survives a reload and a
+   replayed send; a replay that confirms another purpose says which purpose the
+   exchange was already told.
 5. **Check at the signature.** Before each signature the gate reads the stored
-   message back: it must still hash to its hash, be the payload it carries, be
-   for this intent id, and name the account and the amount the transaction pays.
-   A record that is gone is `disclosure_missing`, one that does not match is
-   `disclosure_mismatch`; neither is signed.
+   message back and compares it with the decoded bytes: it must still hash to
+   its hash, be the payload it carries, and be for this payment; the
+   transaction must pay the account and the amount it names, carry the payment
+   reference it is bound to, and carry the commitment the gate derives again
+   from the business, the transfer, the account, the amount, the fee bound, the
+   kind (2) and the stored hash (`transferCommitmentHex`). The describer shows
+   the reference and the commitment of a payment opened under a rule
+   (`open_intent.paymentRef`, `open_intent.commitment`; TypeScript only, no
+   Move change). A record that is gone is `disclosure_missing`, one that does
+   not match is `disclosure_mismatch`; neither is signed.
+6. **The switch is asked last, too.** After the signing request is opened and
+   immediately before the message goes, the switch is read again. If an owner
+   turned it off meanwhile, the message is not sent, the request is withdrawn,
+   and the payment is the owners' (or, for a person who insisted on paying
+   alone, refused in words with nothing kept). The claim itself reads the switch
+   inside the business's lock, on its own connection, so a stale first read never
+   decides the route. At the signature the switch is the first question, so the
+   reason a person reads is the owner's switch, whatever else is also missing.
 
 **Fails closed.** In production without Sumsub's Travel Rule configured the
 preview and the payment are refused (503 `travel_rule_not_configured`) and
@@ -490,8 +512,13 @@ refuses the signature as before.
 instant, trail, tenants, role changes), `tests/exchange-alone-payment.test.mjs`
 (switch off, on, on then off mid-flow, the rule still binds, the message, the
 payload bound to the intent id, replay and races, the gate, fail-closed,
-cross-tenant, second-approval and alerts) and `tests/exchange-alone-ui.test.mjs`
-(the words, the wiring and the migration).
+cross-tenant, second-approval and alerts), `tests/exchange-alone-ui.test.mjs`
+(the words, the wiring and the migration) and
+`tests/exchange-alone-review-fixes.test.mjs` (the switch flipping between the
+first read, the claim and the send; the payment reference and the commitment
+checked against the bytes; the message state after a replay or reload; the
+purpose a replay already shared; a Splash business on a rule; the reason at the
+signature; the words on screen).
 
 ### What needs Sebastian (Move)
 

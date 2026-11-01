@@ -28,7 +28,7 @@ import { createHash } from 'node:crypto';
 import { readFileSync } from 'node:fs';
 import test from 'node:test';
 
-import { and, eq } from 'drizzle-orm';
+import { eq } from 'drizzle-orm';
 import { normalizeSuiAddress } from '@mysten/sui/utils';
 
 import * as schema from '../lib/db/schema.ts';
@@ -216,8 +216,9 @@ test('a kept message that was swapped for another that still names the same acco
   // Another payment reference, in the payload and in the row, hashed consistently: the reference in the bytes does not match it.
   const otherRef = `0x${'5a'.repeat(32)}`;
   assert.equal((await rewrite({ ...stored.payload, paymentRef: otherRef }, { paymentRef: otherRef }))?.code, 'disclosure_mismatch');
-  // Put back, it is signable again.
-  assert.equal((await rewrite(stored.payload, { paymentRef: stored.paymentRef })), null);
+  // Put back exactly as it was kept, it is signable again.
+  await t.db.update(schema.walletTransferDisclosures).set({ payload: stored.payload, canonical: stored.canonical, payloadHash: stored.payloadHash, paymentRef: stored.paymentRef }).where(eq(schema.walletTransferDisclosures.id, stored.id));
+  assert.equal(await t.gateOf(r.signingRequest.id), null);
   await t.w.client.exec('ALTER TABLE wallet_transfer_disclosures ENABLE TRIGGER USER');
   await t.w.client.close();
 });
@@ -308,10 +309,10 @@ test('a retry with another purpose answers the payment already made and says whi
   assert.equal(first.created, true);
   const other = await T.createTransfer(deps, STAFF, { ...request, exchangeDisclosure: { purpose: 'refund', confirmedHash: 'a'.repeat(64) } });
   assert.equal(other.created, false);
-  assert.match(other.exchange.travelRule.text, /Paying a supplier invoice/, 'what was shared');
-  assert.match(other.exchange.travelRule.text, /A refund to a customer/, 'what the retry asked for');
+  assert.match(other.exchange.notice, /Paying a supplier invoice/, 'what was shared');
+  assert.match(other.exchange.notice, /A refund to a customer/, 'what the retry asked for');
   const same = await T.createTransfer(deps, STAFF, request);
-  assert.doesNotMatch(same.exchange.travelRule.text, /A refund to a customer/);
+  assert.equal(same.exchange.notice, undefined);
   assert.equal(t.provider.sent.length, 1);
   await t.w.client.close();
 });
@@ -321,12 +322,14 @@ test('a retry with another purpose answers the payment already made and says whi
 test('a Splash business on a person’s rule is refused up front like any wallet that is not saved, not opened and sponsored and then refused at signing', async () => {
   const t = await exchangeSetup();
   await t.give(t.rule(staffKey.address));
-  await t.verify(NORTH_WALLET);
+  // The chain would not tag a Splash business address as a wallet without an ownership proof, so it is put on the rule in the model chain directly:
+  // the test is about what the server does if one ever is.
+  for (const p of t.w.spend.policies.values()) p.recipients.push({ domain: 8, address: NORTH_WALLET, kind: 1 });
   await t.w.screenClear(NORTH_WALLET);
   const deps = t.xdeps('acme', { businessWallet: async (id) => (id === 'northwind' ? { ok: true, name: 'Northwind Traders', wallet: NORTH_WALLET, country: 'PH' } : null) });
   const r = await T.createTransfer(deps, STAFF, { clientKey: 'tx_key_000011', payee: { kind: 'splash_business', businessId: 'northwind' }, amountMinor: U(500).toString(), maxFeeMinor: feeFor(U(500), 0).toString(), via: 'rule' });
   assert.equal(r.ok, false, JSON.stringify(r));
-  assert.deepEqual([r.status, r.code], [409, 'recipient_not_saved']);
+  assert.deepEqual([r.status, r.code, r.reasons], [409, 'recipient_not_saved', undefined], JSON.stringify(r));
   assert.equal((await t.requests()).length, 0, 'no request was opened or sponsored');
   assert.equal((await t.transfers()).length, 0);
   await t.w.client.close();
@@ -367,9 +370,8 @@ const message = (over = {}) => ({
 test('the exchange is shown as the recipient picker shows it (the exchange the person saved the account at), and its real name once its agreement is signed', () => {
   const picked = EXCHANGE_OPTIONS.find((o) => o.id === 'pdax').label;
   const rows = disclosureText(message()).rows;
-  const row = rows.find((r) => /exchange/i.test(r.label) && !/account/i.test(r.label));
+  const row = rows.find((r) => /saved this account at/i.test(r.label));
   assert.ok(row, JSON.stringify(rows.map((r) => r.label)));
-  assert.match(row.label, /saved this account at/i);
   assert.equal(row.value, picked, 'the same words the person chose it by');
   const signed = disclosureText(message(), new Set(['pdax'])).rows.find((r) => /saved this account at/i.test(r.label));
   assert.equal(signed.value, 'PDAX');
@@ -397,24 +399,13 @@ test('the page treats only a refused purpose as the person’s to fix; any other
 
 // ─── 9. The case the red tests had and the green ones dropped ──────────────
 
-test('a recipient saved without its exchange cannot be paid as an exchange account: refused in words, nothing built', async () => {
+test('a recipient saved as an exchange account without its exchange cannot exist: the database refuses it, so the message never has to guess', async () => {
   const t = await exchangeSetup();
-  await t.give(t.rule(staffKey.address));
-  await t.allow();
-  const { request } = await t.confirmed(t.xdeps(), STAFF);
-  await t.db.update(schema.suppliers).set({ exchangeId: null }).where(eq(schema.suppliers.id, t.exchangeId));
-  const r = await T.createTransfer(t.xdeps(), STAFF, { ...request, via: 'rule' });
-  assert.equal(r.ok, false, JSON.stringify(r));
-  assert.match(r.error, /recipient|exchange/i);
-  assert.equal((await t.transfers()).length, 0);
-  await nothingLeft(t);
-  const shown = await t.preview(t.xdeps(), STAFF);
-  assert.equal(shown.ok, false);
+  await assert.rejects(() => t.db.update(schema.suppliers).set({ exchangeId: null }).where(eq(schema.suppliers.id, t.exchangeId)), (e) => /suppliers_exchange_check/.test(String(e.cause?.message ?? e.message)));
   await t.w.client.close();
 });
 
 test('every switch read in the server is the same one: the live wiring reads it from the database and the claim reads it inside the lock', () => {
   const transfers = read('lib/server/wallet-transfers.ts');
   assert.match(transfers, /pg_advisory_xact_lock[\s\S]*exchangeAloneOf\(tx/, 'read under the lock, on the claim’s own connection');
-  void and;
 });

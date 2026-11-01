@@ -237,7 +237,8 @@ export default function StepReview({ flow, ctx, balance, reload, back, made, onM
     return (
       <div className="space-y-5">
         <h2 className="text-[22px] font-extrabold text-[#0c3e48]">{made.route === 'owners_sign' ? 'Approve the payment' : made.route === 'staff_rule' ? 'Sign your payment' : 'Sent to your owners'}</h2>
-        {made.exchange?.travelRule ? <ExchangeMessageState state={made.exchange.travelRule} signingId={made.signing?.id ?? null} /> : null}
+        {/* A replayed send says which purpose the exchange was already told; the message state itself is shown by the signing panel, which reads it each time. */}
+        {made.exchange?.notice ? <p role="status" className="rounded-2xl border border-[var(--warn)] bg-[var(--warn-bg)] p-4 text-sm leading-6 text-[#1F4452]">{made.exchange.notice}</p> : null}
         {made.signing ? (
           <SignPanel initial={made.signing} expected={made.expected} onExecuted={onExecuted} onRestart={onRestart} />
         ) : (
@@ -378,28 +379,6 @@ export default function StepReview({ flow, ctx, balance, reload, back, made, onM
           actions
         )}
       </div>
-    </div>
-  );
-}
-
-/** Whether the exchange's Travel Rule message has gone, and, if it has not, the way to send it again. The payment cannot be signed until it has. */
-function ExchangeMessageState({ state, signingId }: { state: { state: 'sent' | 'not_sent'; text: string }; signingId: string | null }) {
-  const [again, setAgain] = useState<{ state: 'sent' | 'not_sent'; text: string } | null>(null);
-  const [busy, setBusy] = useState(false);
-  const shown = again ?? state;
-  async function resend() {
-    if (!signingId) return;
-    setBusy(true);
-    const answer = await call<{ travelRule?: { state: 'sent' | 'not_sent'; text: string } }>(`/api/wallet/transfers/${encodeURIComponent(signingId)}/exchange-message`, { body: {} });
-    setBusy(false);
-    setAgain(answer.body?.travelRule ?? { state: 'not_sent', text: errorText(answer, 'The message could not be sent. Nothing left your wallet.') });
-  }
-  return (
-    <div role="status" className={`space-y-2 rounded-2xl border p-4 text-sm leading-6 text-[#1F4452] ${shown.state === 'sent' ? 'border-[#326273]/15 bg-white' : 'border-[var(--warn)] bg-[var(--warn-bg)]'}`}>
-      <p>{shown.text}</p>
-      {shown.state === 'not_sent' && signingId ? (
-        <QuietButton type="button" disabled={busy} onClick={() => void resend()}>{busy ? 'Sending…' : 'Send the message again'}</QuietButton>
-      ) : null}
     </div>
   );
 }

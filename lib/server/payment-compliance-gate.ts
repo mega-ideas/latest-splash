@@ -22,7 +22,10 @@
  *                 an owner who turns it off stops a payment already opened),
  *                 and only with the message the person confirmed still on
  *                 record and still matching the bytes: the account and the
- *                 amount the transaction pays (lib/server/exchange-disclosure.ts).
+ *                 amount the transaction pays, the payment reference it
+ *                 carries and the commitment it carries, derived again from
+ *                 the stored hash (lib/server/exchange-disclosure.ts). The
+ *                 switch is asked first, so it is the reason a person reads.
  *   Recipient     the saved recipient's own rule (v2 §4.7,
  *                 lib/server/wallet-recipients.ts walletDeliveryGate): kind
  *                 WALLET only to a proven, owner-approved wallet the
@@ -132,16 +135,27 @@ export async function travelRuleHold(
  * confirmed is still on record and still says what the bytes pay. Null lets the signature through.
  */
 export async function staffExchangeHold(db: DrizzleDb, request: StoredRequest): Promise<GateRefusal | null> {
-  if (!(await exchangeAloneOf(db, request.orgId, request.requestedBy))) {
-    return { code: 'exchange_alone_off', error: 'An owner has not allowed you to pay exchange accounts on your own, or has turned it off, so this payment is not signed. Ask an owner to turn it on in Settings, or to approve the payment.' };
-  }
+  const off = await exchangeAloneHold(db, request);
+  if (off) return off;
   const row = await readStoredDisclosure(db, request.orgId, { signingRequestId: request.id });
   if (!row) return { code: 'disclosure_missing', error: 'This payment has no record of the message shared with the exchange, so it is not signed. Start the payment again and confirm the message.' };
   const summary = (request.summary ?? null) as { description?: WalletTxDescription } | null;
   const paid = paymentOfDescription(summary?.description);
-  const wrong = !paid || !paid.recipient ? 'the transaction does not say what it pays' : disclosureMismatch(row, { recipient: paid.recipient, amountMinor: paid.amountMinor });
+  const open = summary?.description?.actions?.find((a) => a.type === 'open_intent');
+  const bytes = open && open.type === 'open_intent' ? open : null;
+  // The bytes must be this payment: the account and the amount, the payment reference the message is bound to, and the commitment that covers its hash.
+  const wrong =
+    !paid || !paid.recipient || !bytes
+      ? 'the transaction does not say what it pays'
+      : disclosureMismatch(row, { recipient: paid.recipient, amountMinor: paid.amountMinor, paymentRef: bytes.paymentRef ?? null, commitment: bytes.commitment ?? null, maxFeeMinor: paid.maxFeeMinor, kind: bytes.kind });
   if (wrong) return { code: 'disclosure_mismatch', error: 'The message shared with the exchange does not match this payment, so it is not signed. Nothing has left your wallet. Start the payment again.' };
   return null;
+}
+
+/** The owner's switch for the person who made the payment, read now. Null when it is on. */
+async function exchangeAloneHold(db: DrizzleDb, request: StoredRequest): Promise<GateRefusal | null> {
+  if (await exchangeAloneOf(db, request.orgId, request.requestedBy)) return null;
+  return { code: 'exchange_alone_off', error: 'An owner has not allowed you to pay exchange accounts on your own, or has turned it off, so this payment is not signed. Ask an owner to turn it on in Settings, or to approve the payment.' };
 }
 
 /** Before each signature on a payment: null lets the signature through. */
@@ -149,6 +163,11 @@ export async function paymentBeforeSign(deps: PaymentGateDeps, request: StoredRe
   if (request.purpose !== 'wallet_payment' && request.purpose !== 'spend_approval' && request.purpose !== 'staff_rule_payment') return null;
   const payment = paymentOfRequest(request);
   if (!payment) return { code: 'not_a_payment', error: 'The request does not describe a payment Splash can check, so it is not signed.' };
+  // The owner's switch is the first question for a staff member's exchange payment: it is the reason the person is told, whatever else is also missing.
+  if (request.purpose === 'staff_rule_payment' && payment.kind === EXCHANGE_KIND) {
+    const off = await exchangeAloneHold(deps.db, request);
+    if (off) return off;
+  }
   const screened = await recipientScreeningGate(
     { db: deps.db, orgId: request.orgId, now: deps.now(), kyt: deps.kyt ?? null, ...(deps.maxAgeMs ? { maxAgeMs: deps.maxAgeMs } : {}), requestedBy: 'splash:before-sign', ...(deps.env ? { env: deps.env } : {}) },
     payment.recipient,

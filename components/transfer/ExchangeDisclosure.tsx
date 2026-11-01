@@ -56,7 +56,7 @@ export default function ExchangeDisclosure({
     let live = true;
     setLoading(true);
     /* eslint-enable react-hooks/set-state-in-effect */
-    void call<{ text?: DisclosureText; hash?: string; error?: string }>('/api/wallet/transfers/exchange-disclosure', {
+    void call<{ text?: DisclosureText; hash?: string; error?: string; code?: string }>('/api/wallet/transfers/exchange-disclosure', {
       key: intentKey,
       body: { payee: { kind: 'recipient', recipientId }, amountMinor, purpose },
     }).then((answer) => {
@@ -65,8 +65,9 @@ export default function ExchangeDisclosure({
       if (!answer.ok || !answer.body?.text || !answer.body.hash) {
         const reason = errorText(answer, 'The message for the exchange could not be made. Nothing was sent.');
         setProblem(reason);
-        // A purpose that was not accepted is the person's to change; anything else hands them to the owners.
-        if (answer.status !== 400) onRefused(reason);
+        // Only a purpose that was not accepted is the person's to change here. Anything else (the switch, the provider, a missing detail, a bad
+        // amount or intent id) is not theirs to fix on this screen, so they are handed to asking the owners.
+        if (answer.body?.code !== 'bad_purpose') onRefused(reason);
         return;
       }
       setText(answer.body.text);

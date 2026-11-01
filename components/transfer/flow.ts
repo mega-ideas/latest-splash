@@ -49,7 +49,7 @@ export type Made = {
   /** What the server decided and why, in plain words: for a payment sent to the owners, the reasons it came to them. */
   plan?: { reasons: string[]; lines: string[] };
   /** A staff member's exchange payment: whether the Travel Rule message has gone to the provider, in words. */
-  exchange?: { travelRule: { state: 'sent' | 'not_sent'; text: string } };
+  exchange?: { travelRule: { state: 'sent' | 'not_sent'; text: string }; /** A replayed send that confirmed another purpose: which purpose the exchange was already told. */ notice?: string };
   /** What the person approved on the Review step: the signing screen checks the transaction's bytes against it. */
   expected: { recipient: string | null; amountMinor: string; maxFeeMinor: string; payeeName: string } | null;
 };

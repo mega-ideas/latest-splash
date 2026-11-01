@@ -166,6 +166,12 @@ export type WalletAction =
       expiresAtMs: string;
       /** Opened by a staff member under their rule (`splash_spend::create_intent`), on this policy. */
       underRule?: { policy: string };
+      /**
+       * Under a rule only: the payment reference (32 bytes, hex without 0x) and the commitment (hex without 0x) the bytes carry,
+       * so the signing gate can compare them with the message kept for the payment instead of taking its word for it.
+       */
+      paymentRef?: string;
+      commitment?: string;
     }
   | {
       type: 'pay_intent';
@@ -665,7 +671,7 @@ export function describeWalletTransaction(input: Uint8Array | string, expect: Wa
         const amount = pure(a[6], bcs.u64(), 'the amount');
         const targetCurrency = pure(a[7], bcs.string(), 'the target currency');
         const fx = pure(a[8], bcs.u64(), 'the rate');
-        pure(a[9], bcs.vector(bcs.u8()), 'the commitment');
+        const commitment = pure(a[9], bcs.vector(bcs.u8()), 'the commitment');
         const kind = pure(a[10], bcs.u8(), 'the kind');
         pure(a[11], bcs.vector(bcs.u8()), 'the rail commitment');
         const expiresAt = pure(a[12], bcs.u64(), 'the expiry');
@@ -681,6 +687,8 @@ export function describeWalletTransaction(input: Uint8Array | string, expect: Wa
           beneficiaryRef: toHex(new Uint8Array(beneficiaryRef)),
           expiresAtMs: String(expiresAt),
           underRule: { policy },
+          paymentRef: toHex(new Uint8Array(paymentRef)),
+          commitment: toHex(new Uint8Array(commitment)),
         });
         return;
       }

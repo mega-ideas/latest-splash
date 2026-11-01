@@ -2608,13 +2608,21 @@ Design: `docs/v2/phase3-zeke-batches.md`. Tests: `tests/zeke-sheet-ingest.test.m
 
 Design: `docs/v2/phase3-team-roles.md` ("Can pay exchange accounts alone") and
 `docs/v2/phase3-staff-in-rule.md`. Tests: `tests/exchange-alone-switch.test.mjs`,
-`tests/exchange-alone-payment.test.mjs`, `tests/exchange-alone-ui.test.mjs`.
+`tests/exchange-alone-payment.test.mjs`, `tests/exchange-alone-ui.test.mjs`,
+`tests/exchange-alone-review-fixes.test.mjs`.
 
 - **Default deny, on the server, every time.** The owner's per-person switch is
-  read from the database before anything is built and again before every
-  signature (`exchangeAloneOf`, `staffExchangeHold`). A viewer, an owner, a
-  stranger, another business's member and a stale row all read as no. Only an
-  owner can change it, instantly; every change is an append-only trail line.
+  read from the database before anything is built, again inside the payment's
+  claim (on the claim's own connection, under the business's lock), again
+  immediately before the Travel Rule message goes, and before every signature
+  (`exchangeAloneOf`, `staffExchangeHold`). An owner who turns it off after the
+  first read stops the message and the payment: the request just opened is
+  withdrawn and the owners are asked (or the person, who insisted on paying
+  alone, is told in words and nothing is kept). What is not covered: an owner's
+  change that lands after the message has already gone cannot recall it; it stops
+  the signature. A viewer, an owner, a stranger, another business's member and a
+  stale row all read as no. Only an owner can change it, instantly; every change
+  is an append-only trail line.
 - **It widens nothing but the payee kind.** The rule's maximum, cap, dates,
   second-approval line (all spenders and payments on their way together) and
   verified recipients still bind, and the recipient must be on the rule as an
@@ -2623,13 +2631,32 @@ Design: `docs/v2/phase3-team-roles.md` ("Can pay exchange accounts alone") and
   on the server; the payment is refused unless the person's confirmation hashes
   the same as the server's own; the payload is stored append-only in the same
   step as the payment's claim, bound to the intent id, and its hash is inside
-  the transaction's commitment; the gate re-reads it before each signature and
-  refuses a record that is gone or no longer names the account and amount the
-  bytes pay; the provider's message is made from the stored payload only.
+  the transaction's commitment. The gate re-reads it before each signature and
+  compares it with the decoded bytes: the stored text still hashes to its hash;
+  the account and the amount the transaction pays; the payment reference the
+  bytes carry (the one the message is bound to); and the commitment the bytes
+  carry, which the gate derives again from the business, the transfer, the
+  account, the amount, the fee bound, the kind and the stored hash
+  (`transferCommitmentHex`). A record that is gone, or a transaction that does
+  not carry the payment reference and the commitment, is refused. The
+  provider's message is made from the stored payload only.
 - **Fails closed.** Production without the Travel Rule provider refuses before
   anything is built; a sandbox message is no answer in production; no verdict or
   reference is invented; a business that is not verified, or a recipient missing
   what the exchange needs, is refused in words.
+- **What the person is shown is what is sent.** The confirmation lists every
+  field of the message, the exchange as Recipients names it (its role until its
+  agreement is signed, its name after), and the payment details exactly as the
+  provider receives them ("Sent by NAME: purpose", the name cut at 40
+  characters). The provider is told the exchange by its id; the words on screen
+  map one for one to that id. The staff member's name is shared with the exchange
+  in those payment details: this wants Sky's confirmation. Nothing in the send
+  path (`lib/server/exchange-disclosure.ts`, `lib/server/travel-rule-transfers.ts`,
+  `lib/compliance/sumsub.ts`) logs it or sends it to analytics. A message that did not go is read from the
+  provider's own row each time the payment is shown (GET
+  `/api/wallet/transfers/:request/exchange-message`), so it can be sent again
+  after a reload; a replay that confirms another purpose says which purpose the
+  exchange was already told.
 - **Not covered**: nothing about the exchange's own decision is promised; the
   live path (a real provider, a real passkey signing a sponsored kind-2 payment)
   has not been run, only simulated on the model chain. No Move change is needed

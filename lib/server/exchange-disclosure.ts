@@ -40,7 +40,7 @@ import {
 } from '../compliance/sumsub.ts';
 import { canonicalDisclosure, exchangePurpose, purposeTextOf, type ExchangeDisclosure } from '../compliance/exchange-disclosure.ts';
 import { KYB_VERIFIED, payerOf } from './exchange-payment-compliance.ts';
-import { sendTravelRule } from './travel-rule-transfers.ts';
+import { readTravelRuleTransfer, sendTravelRule } from './travel-rule-transfers.ts';
 import type { DrizzleDb } from './wallet-signing-store.ts';
 
 export type DisclosureRefusal = { ok: false; status: number; code: string; error: string };
@@ -213,11 +213,31 @@ export async function readStoredDisclosure(
 }
 
 /**
- * Does the record still match the bytes? The stored text must still hash to its
- * hash and be the payload it carries, and it must name the recipient and the
- * amount the transaction pays. Null when it does.
+ * The commitment a Transfer payment carries on chain: the business, the payment, the account, the amount, the fee bound and the
+ * declared kind, and, for an exchange payment, the hash of the message the person confirmed. Made when the payment is built and
+ * made again by the signing gate from the bytes, so the two can be compared.
  */
-export function disclosureMismatch(row: StoredDisclosure, paid: { recipient: string; amountMinor: string | bigint }): string | null {
+export function transferCommitmentHex(input: { orgId: string; transferId: string; address: string; amountMinor: string | bigint; maxFeeMinor: string | bigint; kind: number; messageHash?: string }): string {
+  return sha256Hex(
+    JSON.stringify(['splash-transfer-commitment', input.orgId, input.transferId, normalizeSuiAddress(input.address), input.amountMinor.toString(), input.maxFeeMinor.toString(), input.kind, ...(input.messageHash ? [input.messageHash] : [])]),
+  );
+}
+
+const hexOf = (value: string): string => value.toLowerCase().replace(/^0x/, '');
+
+/**
+ * Does the record still match the bytes? The stored text must still hash to its
+ * hash and be the payload it carries, and the bytes must be the payment it was
+ * made for: the account and the amount the transaction pays, the payment
+ * reference the bytes carry (the one the message is bound to) and the
+ * commitment the bytes carry (which covers the hash of this very message, the
+ * fee bound and the kind). A transaction that does not carry them does not
+ * match. Null when it does.
+ */
+export function disclosureMismatch(
+  row: StoredDisclosure,
+  paid: { recipient: string; amountMinor: string | bigint; paymentRef?: string | null; commitment?: string | null; maxFeeMinor?: string | bigint | null; kind?: number | null },
+): string | null {
   const payload = row.payload;
   if (!payload || typeof payload !== 'object') return 'the kept message cannot be read';
   if (sha256Hex(row.canonical) !== row.payloadHash) return 'the kept message does not match its hash';
@@ -231,6 +251,10 @@ export function disclosureMismatch(row: StoredDisclosure, paid: { recipient: str
   if (payload.intentId !== row.intentId || payload.paymentRef !== row.paymentRef) return 'the kept message is not for this payment';
   if (normalizeSuiAddress(payload.beneficiary.accountReference) !== normalizeSuiAddress(paid.recipient)) return 'the kept message names another account than the one paid';
   if (payload.amountMinor !== paid.amountMinor.toString()) return 'the kept message names another amount than the one paid';
+  if (!paid.paymentRef || hexOf(normalizeSuiAddress(paid.paymentRef)) !== hexOf(normalizeSuiAddress(row.paymentRef))) return 'the payment reference in the transaction is not the one the kept message is bound to';
+  if (!paid.commitment || paid.maxFeeMinor === null || paid.maxFeeMinor === undefined || paid.kind === null || paid.kind === undefined) return 'the transaction does not carry the commitment to the kept message';
+  const expected = transferCommitmentHex({ orgId: row.orgId, transferId: row.transferId, address: paid.recipient, amountMinor: paid.amountMinor, maxFeeMinor: paid.maxFeeMinor, kind: paid.kind, messageHash: row.payloadHash });
+  if (hexOf(paid.commitment) !== expected) return 'the commitment in the transaction does not cover the kept message';
   return null;
 }
 
@@ -270,6 +294,20 @@ export function travelRuleInputFromDisclosure(
 
 export type ExchangeMessageState = { state: 'sent' | 'not_sent'; status?: string; text: string };
 
+const SENT_TEXT = 'The Travel Rule message is with the provider. You can sign once the exchange has what it needs.';
+const NOT_SENT_TEXT = 'The Travel Rule message has not been sent yet. You cannot sign until it is. Nothing has left your wallet.';
+
+/**
+ * Where the Travel Rule message of a payment stands, from the provider's own row for it (kept under the signing request's id).
+ * Read again whenever the payment is shown, so a person who reloads, or whose first answer was lost, still sees whether it went
+ * and, if it did not, can send it again.
+ */
+export async function exchangeMessageStateOf(db: DrizzleDb, orgId: string, signingRequestId: string): Promise<ExchangeMessageState> {
+  const row = await readTravelRuleTransfer(db, orgId, signingRequestId);
+  if (row?.providerRef) return { state: 'sent', status: row.status, text: SENT_TEXT };
+  return { state: 'not_sent', text: NOT_SENT_TEXT };
+}
+
 /**
  * Send the stored message to the provider, once. A repeat answers the message
  * already sent. A refusal or a failure leaves the payment unsignable (the gate
@@ -295,7 +333,7 @@ export async function sendStoredExchangeMessage(
   }
   const sent = await sendTravelRule({ db: deps.db, provider: deps.provider, orgId: deps.orgId, now: deps.now }, { ...message, signingRequestId: input.signingRequestId, createdBy: input.createdBy });
   if (sent.ok) {
-    return { state: 'sent', status: sent.transfer.status, text: 'The Travel Rule message is with the provider. You can sign once the exchange has what it needs.' };
+    return { state: 'sent', status: sent.transfer.status, text: SENT_TEXT };
   }
   return { state: 'not_sent', text: `The Travel Rule message has not been sent yet: ${sent.error} You cannot sign until it is. Nothing has left your wallet.` };
 }

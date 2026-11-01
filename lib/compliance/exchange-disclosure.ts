@@ -115,10 +115,13 @@ export function disclosureText(d: ExchangeDisclosure, signed: ReadonlySet<Partne
     { label: 'From the business', value: `${d.business.legalName}${reg(d.business.registrationNumber)}, ${place(d.business)}` },
     { label: 'Business wallet', value: d.business.walletAddress },
     { label: 'To', value: `${d.beneficiary.legalName}${reg(d.beneficiary.registrationNumber)}, ${place(d.beneficiary)}` },
-    { label: 'Exchange', value: exchange },
+    // The words Recipients uses for the exchange the person chose when they saved the account: one for one with the exchange the provider is told.
+    { label: 'Exchange you saved this account at', value: exchange },
     { label: 'Account at the exchange', value: d.beneficiary.accountReference },
     { label: 'Amount', value: `${formatUsdc(BigInt(d.amountMinor))} USDC` },
     { label: 'Purpose', value: d.purpose.label },
+    // Exactly the string the provider is sent as the payment's details, the sender's name cut to what travels.
+    { label: 'Payment details as sent', value: purposeTextOf(d) },
   ];
   return {
     headline: 'What will be shared with the exchange',
