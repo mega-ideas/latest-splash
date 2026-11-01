@@ -299,13 +299,14 @@ test('an owner removes a person; their membership, Finance lead, access and plac
   await client.close();
 });
 
-test('removing a person leaves other businesses\' memberships alone (the delete is scoped to this business)', async () => {
+test('removing a person from one business cannot touch another business\' memberships: a person has only one, and the database refuses a second', async () => {
   const { client, db } = await seeded();
-  // A person who belongs to two businesses (the table allows it): removing them from acme keeps northwind.
-  await db.insert(schema.memberships).values({ id: 'm-maker-north', userId: 'u-maker', orgId: 'northwind', role: 'viewer' });
+  // A person belongs to ONE business (migration 0074). The delete is still scoped to the business, and a second row cannot exist.
+  await assert.rejects(db.insert(schema.memberships).values({ id: 'm-maker-north', userId: 'u-maker', orgId: 'northwind', role: 'viewer' }));
+  assert.equal((await removeTeamMember(db, { ...base, actorUserId: 'u-owner', userId: 'u-n-maker' })).ok, false, 'another business\'s person is absent to an acme owner');
+  assert.equal(await roleOf(db, 'northwind', 'u-n-maker'), 'maker');
   assert.equal((await removeTeamMember(db, { ...base, actorUserId: 'u-owner', userId: 'u-maker' })).ok, true);
   assert.equal(await roleOf(db, 'acme', 'u-maker'), null);
-  assert.equal(await roleOf(db, 'northwind', 'u-maker'), 'viewer');
   await client.close();
 });
 
