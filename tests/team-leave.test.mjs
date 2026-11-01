@@ -202,7 +202,7 @@ test('two owners approving at once make one removal and one set of trail lines',
   await client.close();
 });
 
-test('the Finance lead can approve a leave for staff, but not for an owner, nor for anyone in charge or holding Add funds or Withdraw', async () => {
+test('only an owner decides a request to leave: the Finance lead is refused for every request, plain staff included, and nothing changes', async () => {
   const { client, db } = await seeded();
   assert.equal((await appointPersonInCharge(db, { ...base, actorUserId: 'u-owner', userId: 'u-appr' })).ok, true);
   assert.equal((await setMemberAccess(db, { ...base, actorUserId: 'u-owner', userId: 'u-maker2', access: 'add_funds', allowed: true })).ok, true);
@@ -210,18 +210,19 @@ test('the Finance lead can approve a leave for staff, but not for an owner, nor 
   const inCharge = await ask(db, 'u-appr');
   const granted = await ask(db, 'u-maker2');
   const owner = await ask(db, 'u-owner2');
-  assert.equal((await approve(db, 'u-lead', plain.request.id)).ok, true);
-  for (const r of [inCharge, granted, owner]) {
+  for (const r of [plain, inCharge, granted, owner]) {
     const x = await approve(db, 'u-lead', r.request.id);
     assert.equal(x.ok, false);
     assert.equal(x.status, 403);
     assert.equal(x.code, 'owner_only');
     const d = await declineLeaveRequest(db, { ...base, actorUserId: 'u-lead', requestId: r.request.id });
-    assert.equal(d.code, 'owner_only', 'nor can the lead decline it, which would be a decision about them');
+    assert.equal(d.code, 'owner_only', 'nor can the lead decline it');
   }
+  assert.equal(await roleOf(db, 'acme', 'u-maker'), 'maker', 'the lead’s approval would have ended access and left the on-chain rule live');
   assert.equal(await roleOf(db, 'acme', 'u-appr'), 'checker');
   assert.equal(await roleOf(db, 'acme', 'u-maker2'), 'maker');
-  assert.equal((await requests(db)).filter((r) => r.status === 'pending').length, 3);
+  assert.equal((await requests(db)).filter((r) => r.status === 'pending').length, 4);
+  assert.equal((await trail(db)).filter((a) => a === 'leave_approved' || a === 'member_removed').length, 0);
   // The lead’s own request is an owner’s to decide.
   const own = await ask(db, 'u-lead');
   assert.equal((await approve(db, 'u-lead', own.request.id)).code, 'own_request');
@@ -328,7 +329,8 @@ test('who sees the open requests, in order, with whether the viewer may decide e
   assert.equal(owner[0].name, 'u-maker');
   assert.equal(owner[0].email, 'maker@acme.test');
   const lead = await listLeaveRequests(db, { orgId: 'acme', actorUserId: 'u-lead' });
-  assert.deepEqual(lead.map((r) => [r.userId, r.canDecide]), [['u-maker', true], ['u-appr', false], ['u-owner2', false]]);
+  assert.deepEqual(lead.map((r) => [r.userId, r.canDecide]), [['u-maker', false], ['u-appr', false], ['u-owner2', false]], 'the lead sees every request and decides none');
+  assert.ok(lead.every((r) => /owner/i.test(r.whyNot)), 'each says an owner decides');
   const own = await listLeaveRequests(db, { orgId: 'acme', actorUserId: 'u-owner2' });
   assert.equal(own.find((r) => r.userId === 'u-owner2').canDecide, false, 'not their own');
   await client.close();

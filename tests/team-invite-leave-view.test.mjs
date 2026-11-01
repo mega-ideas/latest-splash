@@ -37,13 +37,12 @@ test('who may decide a request to leave: one rule, for owners, the lead and ever
   assert.equal(d('finance_lead', 'u-x', row()), 'own_request');
   assert.equal(d('owner', 'u-a', row({ role: 'admin' })), null, 'an owner’s leaving is for ANOTHER owner');
   assert.equal(d('owner', 'u-a', row({ inCharge: true })), null);
-  assert.equal(d('finance_lead', 'u-a', row({ role: 'viewer' })), null);
-  assert.equal(d('finance_lead', 'u-a', row({ role: 'checker' })), null);
-  assert.equal(d('finance_lead', 'u-a', row({ role: 'admin' })), 'owner_only');
-  assert.equal(d('finance_lead', 'u-a', row({ inCharge: true })), 'granted_authority');
-  assert.equal(d('finance_lead', 'u-a', row({ addFunds: true })), 'granted_authority');
-  assert.equal(d('finance_lead', 'u-a', row({ withdraw: true })), 'granted_authority');
-  for (const reason of ['not_a_manager', 'own_request', 'owner_only', 'granted_authority']) assert.ok(LEAVE_WHY_NOT[reason].length > 10);
+  // The decision is the highest authority's (an owner): the Finance lead decides none, so approving can never leave an on-chain rule live.
+  for (const over of [{ role: 'viewer' }, { role: 'checker' }, { role: 'maker' }, { role: 'admin' }, { inCharge: true }, { addFunds: true }, { withdraw: true }]) {
+    assert.equal(d('finance_lead', 'u-a', row(over)), 'owner_only', JSON.stringify(over));
+  }
+  for (const reason of ['not_a_manager', 'own_request', 'owner_only']) assert.ok(LEAVE_WHY_NOT[reason].length > 10);
+  assert.equal(LEAVE_WHY_NOT.granted_authority, undefined, 'one reason, not a list of cases');
 });
 
 test('the sentences a person reads about their own request say what is kept and what is next', () => {
@@ -93,8 +92,9 @@ test('every new trail action is a team action, reads as a sentence, and names no
 test('the Finance lead’s words include inviting and leave requests, and the limits on both', () => {
   const words = financeLeadWords();
   assert.ok(words.can.some((t) => /invitation/.test(t) && /add them directly/.test(t)));
-  assert.ok(words.can.some((t) => /request to leave/.test(t) && /not in charge/.test(t)));
-  assert.ok(words.cannot.some((t) => /request to leave from an owner/.test(t) && /no one decides their own/.test(t)));
+  assert.ok(words.can.some((t) => /see requests to leave/i.test(t)), 'the lead sees them');
+  assert.ok(!words.can.some((t) => /approve or decline/i.test(t)), 'and does not decide them');
+  assert.ok(words.cannot.some((t) => /approve or decline a request to leave/i.test(t) && /every one/.test(t) && /no one decides their own/.test(t)));
 });
 
 test('the new components say nothing the copy rules forbid, and use no em dash, coral or Demo wording', () => {
