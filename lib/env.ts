@@ -396,8 +396,8 @@ export const envSchema = z.object({
   COMPOSED_TREASURY_ALLOCATION_BPS: int(100, 0),
   MAYBANK_INTERCOMPANY_ENABLED: flag('true'),
 
-  /* Funding rails and providers. lib/server/funding-*.ts, stripe.ts,
-     airwallex.ts, lib/funding/registry.ts. */
+  /* Funding rails and providers. lib/server/funding-*.ts,
+     lib/funding/registry.ts. */
   CARD_FUNDING_ENABLED: flag('false'),
   FEATURE_DUAL_FUNDING: flag('true'),
   /* Subscription billing (Amendment A1 §6; lib/server/subscription-billing.ts).

@@ -1068,15 +1068,6 @@ body {
   gap: 8px;
 }
 
-.iso-deepbook-logo {
-  filter: brightness(0) saturate(100%) invert(20%) sepia(16%) saturate(1679%) hue-rotate(142deg) brightness(91%);
-}
-
-.iso-airwallex-logo {
-  padding: 0;
-  background: transparent;
-}
-
 .iso-partner-item {
   display: grid;
   min-height: 100px;
@@ -6990,8 +6981,6 @@ button.iso-product-row {
 /* (stale duplicate order map removed — the canonical map lives next to
    `.iso-landing { display: flex }` above; keep exactly one.) */
 
-/* Keep the signature engine compact enough to scan without losing the flow. */
-
 .splash-loading-shell,
 .admin-login-shell,
 .admin-login-form-wrap {
@@ -7037,7 +7026,7 @@ button.iso-product-row {
 }
 
 /* Responsive composition guardrails. These final rules intentionally own the
-   hero artwork and the shared dashboard engine across viewport sizes. */
+   hero artwork across viewport sizes. */
 .iso-hero {
   --iso-marquee-height: 48px;
   height: 100svh;

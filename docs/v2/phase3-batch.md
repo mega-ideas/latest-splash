@@ -165,14 +165,7 @@ and the path was already refused on mainnet in every mode (v2 D11).
 
 What stays: the `BATCH_PAYOUT` proposal kind with its approval-binding
 helpers, because Zeke's drafts and approvals already on file carry it.
-
-What goes after it: the `batch_runs` table, which only the removed route wrote.
-Migration `0071_drop_batch_runs` drops it. `0011`, which made it, is not edited:
-it is an applied migration, and `0071` takes the table away. Nothing read the
-table (a search for `batch_runs` and `batchRuns` in the app, the library, the
-components, the scripts and the config finds nothing; the schema no longer
-defines it; no other table points at it). The history of a business's batch
-payouts is `wallet_batches`. Migrations are applied in journal order on an empty or current database. Approving one now records it as
+Approving one now records it as
 **not executed**, names Batch payouts as where payout runs are paid, claims no
 payment, and spends the approval once (`BATCH_PAYOUT_RETIRED_REASON`). That holds
 whether or not the proposal carries a payload (none of them does), in every launch
@@ -180,6 +173,14 @@ scope: the executor checks the kind before it asks for a payload, so an approver
 never told to "re-authorize" through a route that no longer exists. Zeke's draft
 says the same in its own recommendation ("approving this draft sends nothing").
 Whether Zeke should draft one at all is Sky's decision.
+
+What goes after it: the `batch_runs` table, which only the removed route wrote.
+Migration `0071_drop_batch_runs` drops it. `0011`, which made it, is not edited:
+it is an applied migration, and `0071` takes the table away. Nothing read the
+table (a search for `batch_runs` and `batchRuns` in the app, the library, the
+components, the scripts and the config finds nothing; the schema no longer
+defines it; no other table points at it). The history of a business's batch
+payouts is `wallet_batches`.
 
 The wallet batch routes that replaced the old route ask for the accepted terms
 (`requireTermsAccepted`, 412 `terms_not_accepted`) on every POST that opens a

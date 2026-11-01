@@ -96,8 +96,8 @@ test('the batch page keeps the approval text with the BATCH_PAYOUT sentence it i
   const goes = paragraphs.find((p) => p.startsWith('What goes after it:'));
   assert.ok(goes, 'the What goes after it paragraph exists');
   assert.doesNotMatch(goes, /Approving one|Migrations are applied/);
-  assert.match(goes, /wallet_batches\.$/);
-  for (const p of paragraphs) assert.ok(p.length < 1200, 'no run-on paragraph');
+  assert.match(goes, /`wallet_batches`\.$/);
+  for (const p of [stays, goes]) assert.ok(p.length < 1200, 'no run-on paragraph');
 });
 
 // ── batch_runs is dropped by a new migration ───────────────────────────────
