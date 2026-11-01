@@ -314,8 +314,9 @@ procedure in [`docs/UPGRADE-POLICY.md`](UPGRADE-POLICY.md).
 
 ## W4 — compliance rails (largest gap)
 - [ ] KYT pipeline behind provider interface + stub: screen at beneficiary
-      create, pre-settlement, inbound funding; screening_results persisted;
-      risk ≥ threshold → COMPLIANCE_HOLD lane; fail closed
+      create, pre-settlement, inbound funding; screening results persisted
+      (in a table made for it then; the unused `screening_results` table was
+      dropped by migration 0080); risk ≥ threshold → COMPLIANCE_HOLD lane; fail closed
 - [ ] KYB tier → server-enforced limits in lib/policy/evaluate.ts; middleware
       assertion on every money route
 - [ ] Sanctions name screening + travel-rule data package (per payout-partner format)

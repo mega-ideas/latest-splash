@@ -178,11 +178,10 @@ export const emailVerificationTokens = pgTable('email_verification_tokens', {
 /**
  * Hits against a named rate-limit bucket, for lib/server/rate-limit.ts.
  *
- * The same shape as `login_attempts`, generalised: `bucket` names the rule
- * (`signup:ip`, `verify-resend:email`, …) and `key` is the thing being
- * limited within it. In Postgres, not Redis, for the reason login_attempts
- * gives — a limit that evaporates when a cache restarts is a pause, not a
- * limit. Rows are pruned by the limiter as it reads them.
+ * `bucket` names the rule (`signup:ip`, `verify-resend:email`,
+ * `login-failure:email`, …) and `key` is the thing being limited within it.
+ * In Postgres, not Redis: a limit that evaporates when a cache restarts is a
+ * pause, not a limit. Rows are pruned by the limiter as it reads them.
  */
 export const rateLimitHits = pgTable('rate_limit_hits', {
   id: text('id').primaryKey(),
@@ -218,24 +217,6 @@ export const memberships = pgTable('memberships', {
   index('memberships_org_idx').on(table.orgId),
   // A person belongs to ONE business (migration 0074): the database refuses a second row.
   uniqueIndex('memberships_user_unique').on(table.userId),
-]);
-
-/**
- * LEGACY — no longer written. Failed login attempts used to live here; the
- * login limiter now rides `rate_limit_hits` like every other limit (WS7). The
- * table stays until a migration drops it, so an in-flight deploy that still
- * runs the old code does not fail on a missing relation.
- */
-export const loginAttempts = pgTable('login_attempts', {
-  id: text('id').primaryKey(),
-  /** Lowercased email as submitted. Scopes the per-email limit; it is a login
-   *  identifier, not proof anyone owns the address. */
-  email: text('email').notNull(),
-  ip: text('ip').notNull(),
-  attemptedAt: timestamp('attempted_at', { withTimezone: true }).notNull().defaultNow(),
-}, (table) => [
-  index('login_attempts_email_idx').on(table.email, table.attemptedAt),
-  index('login_attempts_ip_idx').on(table.ip, table.attemptedAt),
 ]);
 
 /**
@@ -908,23 +889,6 @@ export const consumedApprovals = pgTable('consumed_approvals', {
   consumedAt: timestamp('consumed_at', { withTimezone: true }).notNull().defaultNow(),
 });
 
-export const fundingEvents = pgTable('funding_events', {
-  id: text('id').primaryKey(),
-  orgId: text('org_id').notNull().references(() => organizations.id),
-  sessionId: text('session_id').notNull(),
-  provider: text('provider').notNull(),
-  method: text('method').notNull(),
-  status: text('status').notNull(),
-  amountMinor: bigint('amount_minor', { mode: 'bigint' }).notNull(),
-  currency: text('currency').notNull(),
-  providerReference: text('provider_reference'),
-  kytStatus: text('kyt_status'),
-  ...timestamps,
-}, (table) => [
-  index('funding_org_idx').on(table.orgId),
-  uniqueIndex('funding_provider_ref_unique').on(table.provider, table.providerReference),
-]);
-
 export const payouts = pgTable('payouts', {
   id: text('id').primaryKey(),
   orgId: text('org_id').notNull().references(() => organizations.id),
@@ -937,52 +901,6 @@ export const payouts = pgTable('payouts', {
   providerReference: text('provider_reference'),
   ...timestamps,
 }, (table) => [index('payouts_intent_idx').on(table.intentId)]);
-
-export const treasuryMoves = pgTable('treasury_moves', {
-  id: text('id').primaryKey(),
-  orgId: text('org_id').notNull().references(() => organizations.id),
-  kind: text('kind').notNull(),
-  status: text('status').notNull(),
-  amountMinor: bigint('amount_minor', { mode: 'bigint' }).notNull(),
-  currency: text('currency').notNull(),
-  approvedBy: text('approved_by'),
-  ...timestamps,
-}, (table) => [index('treasury_org_idx').on(table.orgId)]);
-
-export const complianceCases = pgTable('compliance_cases', {
-  id: text('id').primaryKey(),
-  orgId: text('org_id').notNull().references(() => organizations.id),
-  subjectKind: text('subject_kind').notNull(),
-  subjectId: text('subject_id').notNull(),
-  status: text('status').notNull().default('OPEN'),
-  reason: text('reason'),
-  releasedBy: text('released_by'),
-  releaseReason: text('release_reason'),
-  ...timestamps,
-}, (table) => [index('cases_subject_idx').on(table.subjectKind, table.subjectId)]);
-
-export const screeningResults = pgTable('screening_results', {
-  id: text('id').primaryKey(),
-  orgId: text('org_id').notNull().references(() => organizations.id),
-  subjectKind: text('subject_kind').notNull(),
-  subjectId: text('subject_id').notNull(),
-  provider: text('provider').notNull(),
-  verdict: screeningVerdict('verdict').notNull(),
-  riskScore: numeric('risk_score'),
-  raw: jsonb('raw'),
-  screenedAt: timestamp('screened_at', { withTimezone: true }).notNull(),
-  ...timestamps,
-}, (table) => [index('screening_subject_idx').on(table.subjectKind, table.subjectId)]);
-
-export const auditAnchors = pgTable('audit_anchors', {
-  id: text('id').primaryKey(),
-  orgId: text('org_id').references(() => organizations.id),
-  batchDate: text('batch_date').notNull(),
-  walrusBlobId: text('walrus_blob_id'),
-  auditHash: text('audit_hash'),
-  suiDigest: text('sui_digest'),
-  ...timestamps,
-});
 
 export const webhookEvents = pgTable('webhook_events', {
   id: text('id').primaryKey(),

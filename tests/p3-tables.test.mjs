@@ -93,6 +93,8 @@ test('nothing in the code, the scripts or the other tests reads or writes the dr
   const found = [];
   for (const file of await allText('.')) {
     if (file === 'tests/p3-tables.test.mjs') continue;
+    // This one says the old login table no longer exists, which has to name it.
+    if (file === 'tests/rate-limits-and-headers.test.mjs') continue;
     const text = await readFile(at(file), 'utf8');
     if (pattern.test(text)) found.push(file);
   }

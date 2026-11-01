@@ -22,8 +22,7 @@ export { clientIp } from '../server/rate-limit.ts';
  *
  * This is a thin layer over lib/server/rate-limit.ts — the same buckets, the
  * same table, the same pruning — rather than the second implementation on
- * its own `login_attempts` table it used to be. That table is legacy and is
- * no longer written; a later migration drops it.
+ * a table of its own it used to be. That table was dropped by migration 0080.
  */
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any

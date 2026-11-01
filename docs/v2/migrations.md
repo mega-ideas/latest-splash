@@ -55,3 +55,32 @@ constraint is dropped and re-added with the third kind) and a new table,
 `wallet_transfer_disclosures`, with a trigger that refuses any rewrite except
 setting the signing request id once. It inserts nothing: no existing member is
 given the switch. Safe to run again.
+
+## `0080_drop_unused_tables`
+
+`0080` drops six tables that nothing reads and nothing writes: `funding_events`,
+`treasury_moves`, `compliance_cases`, `screening_results`, `audit_anchors` and
+`login_attempts`. Dropping loses the rows; they are not copied anywhere. Each
+statement is `DROP TABLE IF EXISTS` with no `CASCADE`, so it is safe on a
+database that never had a table, a second run changes nothing, and no other
+table goes with them (none has a foreign key to them). The `screening_verdict`
+type stays; `suppliers.screening_verdict` uses it.
+
+Before applying `0080` to a shared database (testnet, staging, production), read
+how many rows each holds:
+
+```sql
+select count(*) from funding_events;
+select count(*) from treasury_moves;
+select count(*) from compliance_cases;
+select count(*) from screening_results;
+select count(*) from audit_anchors;
+select count(*) from login_attempts;
+```
+
+A count above zero is a reason to stop and ask: export those rows first, or
+confirm they are test data. `login_attempts` may hold old failed-login rows from
+before the limiter moved to `rate_limit_hits`; they have no use now. A
+recipient's screening verdict is `suppliers.screening_verdict`, the daily audit
+batch is `daily_audit_batches` and the on-chain anchor is the `audit_anchor`
+object, none of which this touches.
