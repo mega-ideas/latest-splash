@@ -22,6 +22,9 @@ import { Ed25519Keypair } from '@mysten/sui/keypairs/ed25519';
 import { normalizeSuiAddress } from '@mysten/sui/utils';
 
 import * as schema from '../../lib/db/schema.ts';
+import { parseAllowanceInput } from '../../lib/schedule/rules.ts';
+import { automaticSummary, paymentsOfSchedules, summaryDigest } from '../../lib/schedule/summary.ts';
+import * as S from '../../lib/server/scheduled-payments.ts';
 import { readSpenderStanding } from '../../lib/server/spend-standing.ts';
 import * as T from '../../lib/server/wallet-transfers.ts';
 import { OWNER, SUPPLIER, U, amountInput, feeFor, setup, signBy, t0, DAY } from './staff-rule-world.mjs';
@@ -103,6 +106,20 @@ export async function scheduleWorld(opts = {}) {
   /** The owners give the scheduled payer an allowance (per payment max, a monthly cap, an expiry). */
   const allowance = async (over = {}) => t.give(t.rule(PAYER, { perPaymentMaxMinor: U(2_000), cap: { period: 'month', limitMinor: U(20_000) }, expiresAtMs: t0 + 90n * DAY, ...over }));
 
+  /**
+   * What the page sends with a request for the allowance: the typed values and the digest of the summary the page
+   * built from the schedules it loaded and its clock (here, the world's), as the owner confirmed it.
+   */
+  const confirmed = async (input, over = {}) => {
+    const deps = sdeps('acme', over);
+    const views = await S.listScheduleViews(deps, OWNER_ACTOR);
+    const { payments, schedules, firstPaymentMs } = paymentsOfSchedules(views);
+    const { form } = parseAllowanceInput(input);
+    const { graceMinutes } = await S.automaticStatus(deps);
+    const summary = automaticSummary({ payments, schedules, form, graceMinutes, nowMs: deps.now().getTime(), firstPaymentMs });
+    return { ...input, summaryDigest: await summaryDigest(summary) };
+  };
+
   /** Move the clock and screen every recipient again, as the provider does when a screening has gone stale. */
   const addresses = [SUPPLIER, WALLET_B, WALLET_C, NORTH];
   const clock = async (when) => {
@@ -114,7 +131,7 @@ export async function scheduleWorld(opts = {}) {
   const kinds = () => notices.map((n) => n.kind);
   /** How many payments the model chain has taken under an allowance. */
   const spent = () => w.spends.length;
-  return { ...t, kinds, spent, payer, payerKey, signed, notices, undelivered, state, sdeps, recipient, payBefore, allowance, clock, ids: { a: t.recipientId, b: second, c: third } };
+  return { ...t, kinds, spent, payer, payerKey, signed, notices, undelivered, state, sdeps, recipient, payBefore, allowance, confirmed, clock, ids: { a: t.recipientId, b: second, c: third } };
 }
 
 /** A schedule input in USDC, as the page sends it. */

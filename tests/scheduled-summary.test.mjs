@@ -44,7 +44,7 @@ const typed = { perPaymentUsdc: '1,500', dailyUsdc: '4000', monthlyUsdc: '16000'
 
 test('asking for the allowance answers with the summary, built from the rule that was issued', async () => {
   const t = await withAutoSchedule();
-  const asked = ok(await S.requestAllowance(t.sdeps(), OWNER_ACTOR, typed));
+  const asked = ok(await S.requestAllowance(t.sdeps(), OWNER_ACTOR, await t.confirmed(typed)));
   const s = asked.summary;
   assert.ok(s, 'the answer carries the summary');
   assert.equal(s.paymentCount, 2);
@@ -55,15 +55,16 @@ test('asking for the allowance answers with the summary, built from the rule tha
   assert.equal(s.perPaymentMinor, U(1_500).toString());
   assert.equal(s.dailyMinor, U(4_000).toString());
   assert.equal(s.monthlyMinor, U(16_000).toString());
-  assert.equal(s.endsAtMs, Number(t0) + 60 * 86_400_000);
+  assert.equal(s.endsAtMs % 86_400_000, 0, 'the end is midnight UTC');
+  assert.ok(s.endsAtMs > Number(t0) + 60 * 86_400_000 && s.endsAtMs <= Number(t0) + 61 * 86_400_000, 'the days asked for, to the end of that UTC day');
   assert.equal(s.startsAtMs, FIRST.getTime(), 'it starts with the first run');
   assert.equal(s.graceMinutes, 10);
-  assert.match(s.headline, /^Splash will pay these 2 payments, up to 1,500 USDC each, from \d+ \w{3} until \d+ \w{3}\. Nothing is paid without your limits\. You can stop this anytime\.$/);
+  assert.match(s.headline, /^Splash will pay these 2 payments each time they fall due, up to 1,500 USDC each, from \d+ \w{3} until \d+ \w{3} \(UTC\)\. Nothing is paid without your limits\. You can stop this anytime\.$/);
 });
 
 test('what the owners sign is what the summary said: after they sign, the network holds the same figures', async () => {
   const t = await withAutoSchedule();
-  const asked = ok(await S.requestAllowance(t.sdeps(), OWNER_ACTOR, typed));
+  const asked = ok(await S.requestAllowance(t.sdeps(), OWNER_ACTOR, await t.confirmed(typed)));
   assert.equal((await signBy(t.w, asked.request, ['two', 'three'])).status, 'executed');
   const held = await S.automaticStatus(t.sdeps());
   assert.equal(held.allowance.state, 'active');
@@ -77,11 +78,11 @@ test('what the owners sign is what the summary said: after they sign, the networ
 test('the screen and the server build the same summary from the same typed values', async () => {
   const t = await withAutoSchedule();
   const views = await S.listScheduleViews(t.sdeps(), OWNER_ACTOR);
-  const { payments, firstPaymentMs } = paymentsOfSchedules(views);
+  const { payments, schedules, firstPaymentMs } = paymentsOfSchedules(views);
   const { form, problems } = parseAllowanceInput(typed);
   assert.deepEqual(problems, []);
-  const client = automaticSummary({ payments, form, graceMinutes: 10, nowMs: Number(t0), firstPaymentMs });
-  const server = ok(await S.requestAllowance(t.sdeps(), OWNER_ACTOR, typed)).summary;
+  const client = automaticSummary({ payments, schedules, form, graceMinutes: 10, nowMs: Number(t0), firstPaymentMs });
+  const server = ok(await S.requestAllowance(t.sdeps(), OWNER_ACTOR, await t.confirmed(typed))).summary;
   assert.deepEqual(client, server);
 });
 
@@ -92,15 +93,15 @@ test('the payments in the summary are the ones the owner resent when switching t
   assert.equal(asking.schedule.mode, 'ask');
   refused(await S.editSchedule(t.sdeps(), OWNER_ACTOR, asking.schedule.id, { mode: 'auto' }), 400, 'confirm_payments');
   ok(await S.editSchedule(t.sdeps(), OWNER_ACTOR, asking.schedule.id, { mode: 'auto', items: [{ recipientId: t.ids.a, amount: '123.45', reference: 'RESENT' }] }));
-  const s = ok(await S.requestAllowance(t.sdeps(), OWNER_ACTOR, typed)).summary;
+  const s = ok(await S.requestAllowance(t.sdeps(), OWNER_ACTOR, await t.confirmed(typed))).summary;
   assert.deepEqual(s.payments.map((p) => [p.amountMinor, p.reference]), [[U(123.45).toString(), 'RESENT']]);
-  assert.match(s.headline, /^Splash will pay this payment, up to 1,500 USDC/);
+  assert.match(s.headline, /^Splash will pay this payment each time it falls due, up to 1,500 USDC/);
 });
 
 test('a schedule that asks first is not in the summary, nor is another business’s', async () => {
   const t = await withAutoSchedule();
   ok(await S.createSchedule(t.sdeps(), OWNER_ACTOR, sched(t.ids, { clientKey: 'sched_key_000002', name: 'Asks first', items: [{ recipientId: t.ids.c, amount: '77' }] })));
-  const mine = ok(await S.requestAllowance(t.sdeps(), OWNER_ACTOR, typed)).summary;
+  const mine = ok(await S.requestAllowance(t.sdeps(), OWNER_ACTOR, await t.confirmed(typed))).summary;
   assert.equal(mine.paymentCount, 2, 'only the automatic schedule’s two payments');
   assert.ok(!mine.payments.some((p) => p.amountMinor === U(77).toString()));
   const northOwner = { userId: 'u-north', role: 'OWNER' };
@@ -110,7 +111,7 @@ test('a schedule that asks first is not in the summary, nor is another business�
 
 test('with no automatic schedule yet, the summary says so and still shows the limits', async () => {
   const t = await scheduleWorld();
-  const s = ok(await S.requestAllowance(t.sdeps(), OWNER_ACTOR, typed)).summary;
+  const s = ok(await S.requestAllowance(t.sdeps(), OWNER_ACTOR, await t.confirmed(typed))).summary;
   assert.equal(s.paymentCount, 0);
   assert.match(s.headline, /No schedule pays automatically yet/);
   assert.match(s.headline, /up to 1,500 USDC/);
@@ -118,7 +119,7 @@ test('with no automatic schedule yet, the summary says so and still shows the li
 
 test('a request that cannot be made has no summary, and only an owner can make one', async () => {
   const t = await withAutoSchedule();
-  const bad = refused(await S.requestAllowance(t.sdeps(), OWNER_ACTOR, { ...typed, perPaymentUsdc: '9000' }), 400, 'bad_allowance');
+  const bad = refused(await S.requestAllowance(t.sdeps(), OWNER_ACTOR, await t.confirmed({ ...typed, perPaymentUsdc: '9000' })), 400, 'bad_allowance');
   assert.equal(bad.summary, undefined);
   refused(await S.requestAllowance(t.sdeps(), FINANCE_LEAD, typed), 403, 'owner_only');
 });
@@ -126,7 +127,7 @@ test('a request that cannot be made has no summary, and only an owner can make o
 test('the window an owner set is the window the summary names', async () => {
   const t = await withAutoSchedule();
   ok(await S.setGraceWindow(t.sdeps(), OWNER_ACTOR, 25));
-  const s = ok(await S.requestAllowance(t.sdeps(), OWNER_ACTOR, typed)).summary;
+  const s = ok(await S.requestAllowance(t.sdeps(), OWNER_ACTOR, await t.confirmed(typed))).summary;
   assert.equal(s.graceMinutes, 25);
   assert.match(s.graceText, /25 minutes/);
 });
@@ -135,6 +136,7 @@ test('the allowance route sends the summary back with the request', async () => 
   const { readFileSync } = await import('node:fs');
   const route = readFileSync('app/api/wallet/schedules/automatic/allowance/route.ts', 'utf8');
   assert.match(route, /summary: result\.summary/);
+  assert.match(route, /summaryDigest: body\.summaryDigest/);
   const auto = readFileSync('app/api/wallet/schedules/automatic/route.ts', 'utf8');
   assert.match(auto, /action === 'grace'|'grace'/);
   assert.match(auto, /setGraceWindow/);

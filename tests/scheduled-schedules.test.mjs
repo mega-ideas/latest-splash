@@ -311,11 +311,11 @@ test('the allowance: the owners give it through a signed request, change it, and
   assert.equal(none.dailyCapMinor, U(5_000).toString(), 'the daily limit starts at the default');
 
   refused(await S.requestAllowance(t.sdeps(), FINANCE_LEAD, { perPaymentUsdc: '1000', dailyUsdc: '5000', monthlyUsdc: '20000', expiresInDays: 90 }), 403, 'owner_only');
-  const bad = refused(await S.requestAllowance(t.sdeps(), OWNER_ACTOR, { perPaymentUsdc: '6000', dailyUsdc: '5000', monthlyUsdc: '20000', expiresInDays: 90 }), 400, 'bad_allowance');
+  const bad = refused(await S.requestAllowance(t.sdeps(), OWNER_ACTOR, await t.confirmed({ perPaymentUsdc: '6000', dailyUsdc: '5000', monthlyUsdc: '20000', expiresInDays: 90 })), 400, 'bad_allowance');
   assert.match(bad.error, /one payment cannot be more than the daily/);
-  refused(await S.requestAllowance(t.sdeps(), OWNER_ACTOR, { perPaymentUsdc: '1000', dailyUsdc: '5000', monthlyUsdc: '20000', expiresInDays: 400 }), 400, 'bad_allowance');
+  refused(await S.requestAllowance(t.sdeps(), OWNER_ACTOR, await t.confirmed({ perPaymentUsdc: '1000', dailyUsdc: '5000', monthlyUsdc: '20000', expiresInDays: 400 })), 400, 'bad_allowance');
 
-  const asked = ok(await S.requestAllowance(t.sdeps(), OWNER_ACTOR, { perPaymentUsdc: '1500', dailyUsdc: '4000', monthlyUsdc: '16000', expiresInDays: 60 }));
+  const asked = ok(await S.requestAllowance(t.sdeps(), OWNER_ACTOR, await t.confirmed({ perPaymentUsdc: '1500', dailyUsdc: '4000', monthlyUsdc: '16000', expiresInDays: 60 })));
   assert.equal(asked.request.purpose, 'spend_rule', 'it is a spending-rule request the quorum signs, like any other');
   assert.equal(asked.request.status, 'collecting');
   assert.equal((await S.automaticStatus(t.sdeps())).allowance.state, 'none', 'nothing is in force until the owners sign');
@@ -325,10 +325,12 @@ test('the allowance: the owners give it through a signed request, change it, and
   assert.equal(given.allowance.state, 'active');
   assert.equal(given.allowance.perPaymentMaxMinor, U(1_500).toString());
   assert.equal(given.allowance.spendableNowMinor, U(16_000).toString(), 'the monthly cap is the allowance’s own');
-  assert.equal(given.allowance.expiresAtMs, String(t0 + 60n * DAY));
+  // The end of the 60th UTC day after today: midnight, at least 60 days and less than 61.
+  assert.equal(BigInt(given.allowance.expiresAtMs) % DAY, 0n);
+  assert.ok(BigInt(given.allowance.expiresAtMs) > t0 + 60n * DAY && BigInt(given.allowance.expiresAtMs) <= t0 + 61n * DAY);
   assert.equal(given.dailyCapMinor, U(4_000).toString(), 'the daily limit the owners set is held by the server');
 
-  const changed = ok(await S.requestAllowance(t.sdeps(), OWNER_ACTOR, { perPaymentUsdc: '1000', dailyUsdc: '3000', monthlyUsdc: '9000', expiresInDays: 30 }));
+  const changed = ok(await S.requestAllowance(t.sdeps(), OWNER_ACTOR, await t.confirmed({ perPaymentUsdc: '1000', dailyUsdc: '3000', monthlyUsdc: '9000', expiresInDays: 30 })));
   assert.equal((await signBy(t.w, changed.request, ['two', 'three'])).status, 'executed');
   const after = await S.automaticStatus(t.sdeps());
   assert.equal(after.allowance.perPaymentMaxMinor, U(1_000).toString());
@@ -346,7 +348,7 @@ test('the allowance is asked for only where the payer, the spending rules and a 
   const t = await scheduleWorld();
   const form = { perPaymentUsdc: '1000', dailyUsdc: '5000', monthlyUsdc: '20000', expiresInDays: 90 };
   t.state.payer = { ok: false, code: 'not_configured', reason: 'x' };
-  refused(await S.requestAllowance(t.sdeps(), OWNER_ACTOR, form), 409, 'payer_unavailable');
+  refused(await S.requestAllowance(t.sdeps(), OWNER_ACTOR, await t.confirmed(form)), 409, 'payer_unavailable');
   refused(await S.revokeAllowance(t.sdeps(), OWNER_ACTOR), 409, 'payer_unavailable');
   assert.equal((await S.automaticStatus(t.sdeps())).payer.ready, false);
   t.state.payer = { ok: true, payer: t.payer };

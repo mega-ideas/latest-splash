@@ -172,37 +172,46 @@ test('the rule an allowance request is built from carries exactly the values typ
   assert.equal(rule.spender, '0xspender');
   assert.equal(rule.perPaymentMaxMinor, U(1_500));
   assert.deepEqual(rule.cap, { period: 'month', limitMinor: U(16_000) });
-  assert.equal(rule.expiresAtMs, BigInt(now) + 60n * 86_400_000n);
+  // A whole UTC day: the end of the 60th day after today, so a page and a server on the same day name the same end.
+  assert.equal(rule.expiresAtMs, BigInt(Date.UTC(2027, 0, 12)));
+  assert.equal(rule.expiresAtMs % 86_400_000n, 0n);
+  assert.ok(rule.expiresAtMs > BigInt(now) + 60n * 86_400_000n && rule.expiresAtMs <= BigInt(now) + 61n * 86_400_000n);
 });
 
 // ─── The summary ───────────────────────────────────────────────────────────
 
 const payments = [
-  { position: 1, name: 'Santos Supplies Inc', masked: '0x7171…7171', amountMinor: U(500).toString(), reference: 'INV-1' },
-  { position: 2, name: 'Reyes Logistics Corp', masked: '0x7272…7272', amountMinor: U(750.5).toString(), reference: 'INV-2' },
-  { position: 3, name: 'Santos Supplies Inc', masked: '0x7171…7171', amountMinor: U(120).toString(), reference: '' },
-  { position: 4, name: 'Dela Cruz Trading Corp', masked: '0x6969…6969', amountMinor: U(1_900).toString(), reference: 'INV-4' },
+  { position: 1, name: 'Santos Supplies Inc', masked: '0x7171…7171', amountMinor: U(500).toString(), feeMinor: '0', firstPayment: false, reference: 'INV-1' },
+  { position: 2, name: 'Reyes Logistics Corp', masked: '0x7272…7272', amountMinor: U(750.5).toString(), feeMinor: '0', firstPayment: false, reference: 'INV-2' },
+  { position: 3, name: 'Santos Supplies Inc', masked: '0x7171…7171', amountMinor: U(120).toString(), feeMinor: '0', firstPayment: false, reference: '' },
+  { position: 4, name: 'Dela Cruz Trading Corp', masked: '0x6969…6969', amountMinor: U(1_900).toString(), feeMinor: '0', firstPayment: false, reference: 'INV-4' },
 ];
 
 const NOW = at('2026-11-12T08:00:00Z');
 
+/** The one schedule the payments above belong to: monthly from NOW, a run moves 3,270.50 USDC. */
+const RENT = { name: 'Rent', cadence: 'monthly', cadenceText: 'On day 12 of every month at 08:00 UTC', firstDueMs: NOW, nextDueMs: NOW, paymentCount: 4, runTotalMinor: U(3_270.5).toString() };
+const SCHEDULES = [RENT];
+
 test('before the owners sign, one sentence says what Splash will pay, up to what, and until when', () => {
-  const s = automaticSummary({ payments, form: { perPaymentMinor: U(2_000), dailyMinor: U(5_000), monthlyMinor: U(20_000), expiresInDays: 90 }, graceMinutes: 10, nowMs: NOW, firstPaymentMs: NOW });
-  assert.equal(s.headline, 'Splash will pay these 4 payments, up to 2,000 USDC each, from 12 Nov until 10 Feb. Nothing is paid without your limits. You can stop this anytime.');
+  const s = automaticSummary({ payments, schedules: SCHEDULES, form: { perPaymentMinor: U(2_000), dailyMinor: U(5_000), monthlyMinor: U(20_000), expiresInDays: 90 }, graceMinutes: 10, nowMs: NOW, firstPaymentMs: NOW });
+  assert.equal(s.headline, 'Splash will pay these 4 payments each time they fall due, up to 2,000 USDC each, from 12 Nov until 10 Feb (UTC). Nothing is paid without your limits. You can stop this anytime.');
 });
 
 test('the summary shows the exact payments, the maximum, both caps, the recipients, the end date, the window and how to stop', () => {
   const form = { perPaymentMinor: U(2_000), dailyMinor: U(5_000), monthlyMinor: U(20_000), expiresInDays: 90 };
-  const s = automaticSummary({ payments, form, graceMinutes: 10, nowMs: NOW, firstPaymentMs: at('2026-11-20T08:00:00Z') });
-  assert.deepEqual(s.payments, payments, 'every payment, exactly as the owner resent it');
+  const s = automaticSummary({ payments, schedules: SCHEDULES, form, graceMinutes: 10, nowMs: NOW, firstPaymentMs: at('2026-11-20T08:00:00Z') });
+  assert.deepEqual(s.payments.map((p) => ({ ...p, reasons: undefined, notes: undefined })), payments.map((p) => ({ ...p, reasons: undefined, notes: undefined })), 'every payment, exactly as the owner resent it');
+  assert.ok(s.payments.every((p) => p.reasons.length === 0 && p.notes.length === 0), 'and none of them is outside the limits');
   assert.equal(s.paymentCount, 4);
   assert.equal(s.perPaymentMinor, U(2_000).toString());
   assert.equal(s.dailyMinor, U(5_000).toString());
   assert.equal(s.monthlyMinor, U(20_000).toString());
   assert.deepEqual(s.recipients, ['Santos Supplies Inc', 'Reyes Logistics Corp', 'Dela Cruz Trading Corp'], 'each recipient once, in order');
   assert.equal(s.startsAtMs, at('2026-11-20T08:00:00Z'));
-  assert.equal(s.endsAtMs, NOW + 90 * 86_400_000);
-  assert.match(s.headline, /from 20 Nov until 10 Feb/);
+  assert.equal(s.endsAtMs, Date.UTC(2027, 1, 11), 'midnight UTC after the 90th day: 10 Feb is the last day');
+  assert.equal(s.endsOnText, '10 Feb 2027 (UTC)');
+  assert.match(s.headline, /from 20 Nov until 10 Feb \(UTC\)/);
   assert.equal(s.graceMinutes, 10);
   assert.match(s.graceText, /10 minutes/);
   assert.match(s.stopText, /Skip this run/);
@@ -214,10 +223,11 @@ test('the summary shows the exact payments, the maximum, both caps, the recipien
 
 test('one payment is "this payment", and no schedule paying automatically says so', () => {
   const form = { perPaymentMinor: U(2_000), dailyMinor: U(5_000), monthlyMinor: U(20_000), expiresInDays: 90 };
-  const one = automaticSummary({ payments: payments.slice(0, 1), form, graceMinutes: 0, nowMs: NOW, firstPaymentMs: NOW });
-  assert.match(one.headline, /^Splash will pay this payment, up to 2,000 USDC/);
+  const once = { ...RENT, name: 'Once', cadence: 'once', cadenceText: 'Once, 08:00 UTC on 12 Nov', paymentCount: 1, runTotalMinor: U(500).toString() };
+  const one = automaticSummary({ payments: payments.slice(0, 1), schedules: [once], form, graceMinutes: 0, nowMs: NOW, firstPaymentMs: NOW });
+  assert.match(one.headline, /^Splash will pay this payment when it falls due, up to 2,000 USDC/);
   assert.match(one.graceText, /no warning window|at the due time/i, 'a window of 0 is said plainly');
-  const none = automaticSummary({ payments: [], form, graceMinutes: 10, nowMs: NOW, firstPaymentMs: null });
+  const none = automaticSummary({ payments: [], schedules: [], form, graceMinutes: 10, nowMs: NOW, firstPaymentMs: null });
   assert.equal(none.paymentCount, 0);
   assert.match(none.headline, /No schedule pays automatically yet/);
   assert.match(none.headline, /up to 2,000 USDC/);
@@ -226,7 +236,7 @@ test('one payment is "this payment", and no schedule paying automatically says s
 
 test('a fractional per-payment maximum keeps its cents, a whole one does not', () => {
   const form = { perPaymentMinor: U(1_500.5), dailyMinor: U(5_000), monthlyMinor: U(20_000), expiresInDays: 30 };
-  assert.match(automaticSummary({ payments, form, graceMinutes: 10, nowMs: NOW, firstPaymentMs: NOW }).headline, /up to 1,500\.50 USDC each/);
+  assert.match(automaticSummary({ payments, schedules: SCHEDULES, form, graceMinutes: 10, nowMs: NOW, firstPaymentMs: NOW }).headline, /up to 1,500\.50 USDC each/);
 });
 
 test('the figures in the summary are the ones in the rule the request is built from, whatever is typed', () => {
@@ -240,7 +250,7 @@ test('the figures in the summary are the ones in the rule the request is built f
     const { form, problems } = parseAllowanceInput(input);
     assert.deepEqual(problems, [], JSON.stringify(input));
     const rule = allowanceRule(form, '0xspender', NOW);
-    const s = automaticSummary({ payments, form, graceMinutes: 10, nowMs: NOW, firstPaymentMs: NOW });
+    const s = automaticSummary({ payments, schedules: SCHEDULES, form, graceMinutes: 10, nowMs: NOW, firstPaymentMs: NOW });
     assert.equal(s.perPaymentMinor, rule.perPaymentMaxMinor.toString(), `${JSON.stringify(input)}: per payment`);
     assert.equal(s.monthlyMinor, rule.cap.limitMinor.toString(), `${JSON.stringify(input)}: monthly`);
     assert.equal(s.dailyMinor, form.dailyMinor.toString(), `${JSON.stringify(input)}: daily`);
@@ -249,12 +259,13 @@ test('the figures in the summary are the ones in the rule the request is built f
 });
 
 test('the payments in a summary come from the automatic schedules that are running, and nothing else', () => {
-  const view = (over) => ({ id: 'psc_a', name: 'Rent', mode: 'auto', status: 'active', nextDueAt: '2026-11-20T08:00:00.000Z', items: payments.slice(0, 2).map((p) => ({ ...p, payeeKind: 'recipient', payeeId: 'r', country: null, feeMinor: '0' })), ...over });
-  const got = paymentsOfSchedules([view(), view({ id: 'psc_b', name: 'Askers', mode: 'ask' }), view({ id: 'psc_c', status: 'stopped' }), view({ id: 'psc_d', status: 'completed', nextDueAt: null }), view({ id: 'psc_e', name: 'Later', nextDueAt: '2026-12-01T08:00:00.000Z', items: payments.slice(2, 3).map((p) => ({ ...p, payeeKind: 'recipient', payeeId: 'r', country: null, feeMinor: '0' })) })]);
+  const view = (over) => ({ id: 'psc_a', name: 'Rent', mode: 'auto', status: 'active', cadence: 'monthly', cadenceText: 'On day 20 of every month at 08:00 UTC', firstDueAt: '2026-11-20T08:00:00.000Z', nextDueAt: '2026-11-20T08:00:00.000Z', items: payments.slice(0, 2).map((p) => ({ ...p, payeeKind: 'recipient', payeeId: 'r', country: null })), ...over });
+  const got = paymentsOfSchedules([view(), view({ id: 'psc_b', name: 'Askers', mode: 'ask' }), view({ id: 'psc_c', status: 'stopped' }), view({ id: 'psc_d', status: 'completed', nextDueAt: null }), view({ id: 'psc_e', name: 'Later', nextDueAt: '2026-12-01T08:00:00.000Z', items: payments.slice(2, 3).map((p) => ({ ...p, payeeKind: 'recipient', payeeId: 'r', country: null })) })]);
   assert.equal(got.payments.length, 3, 'two from Rent and one from Later; not the "ask me first" one, the stopped one or the finished one');
   assert.deepEqual(got.payments.map((p) => p.schedule), ['Rent', 'Rent', 'Later']);
   assert.equal(got.firstPaymentMs, at('2026-11-20T08:00:00Z'), 'the earliest of their next times');
-  assert.deepEqual(paymentsOfSchedules([]), { payments: [], firstPaymentMs: null });
+  assert.deepEqual(got.schedules.map((x) => [x.name, x.paymentCount]), [['Rent', 2], ['Later', 1]]);
+  assert.deepEqual(paymentsOfSchedules([]), { payments: [], schedules: [], firstPaymentMs: null });
 });
 
 // ─── The screen builds nothing of its own ─────────────────────────────────

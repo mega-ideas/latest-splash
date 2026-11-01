@@ -193,11 +193,12 @@ test('a payment above the most for one payment is marked, and the headline says 
   const santos = summary.payments.find((p) => p.name === 'Santos Supplies Inc');
   assert.deepEqual(santos.reasons, ['over_payment_limit']);
   assert.match(santos.notes[0], /600 USDC/);
-  assert.match(santos.notes[0], /approve/i);
+  assert.match(santos.notes[0], /approval/i);
   assert.deepEqual(summary.payments.find((p) => p.name === 'Dela Cruz Trading Corp').reasons, []);
   assert.match(summary.headline, /^Splash will pay up to 2 payments /);
-  assert.match(summary.headline, /1 of them would come to you for approval/);
-  assert.equal(summary.handedBackCount, 1);
+  assert.match(summary.headline, /1 schedule would come to you for approval/);
+  assert.equal(summary.unpaidSchedules, 1, 'a run is paid whole or handed back whole: its schedule is the unit');
+  assert.equal(summary.schedules[0].pays, false);
 });
 
 test('a payee never paid before is marked: a first payment is never automatic', async () => {
@@ -227,7 +228,7 @@ test('how often it runs: the cadence and how many runs fall before the end, with
   const { summary } = await onThePage(t);
   const [s] = summary.schedules;
   assert.equal(s.name, 'Monthly suppliers');
-  assert.match(s.cadenceText, /Every month/);
+  assert.match(s.cadenceText, /every month/i);
   const ends = summary.endsAtMs;
   const day = (n) => Date.UTC(2026, 9 + n, 27, 8, 0, 0);
   const expected = [0, 1, 2, 3].filter((n) => day(n) < ends).length;
@@ -235,7 +236,7 @@ test('how often it runs: the cadence and how many runs fall before the end, with
   assert.equal(s.paymentCount, 2);
   assert.equal(summary.paymentsInAll, 2 * expected);
   assert.match(summary.headline, /each time they fall due/);
-  assert.ok(summary.lines.some((l) => l.startsWith('Monthly suppliers:') && l.includes('Every month') && l.includes(`${expected} run`)));
+  assert.ok(summary.lines.some((l) => l.startsWith('Monthly suppliers:') && /every month/i.test(l) && l.includes(`${expected} run`)));
 });
 
 test('a schedule whose next time falls after the allowance ends is marked', async () => {
@@ -250,7 +251,7 @@ test('a schedule whose next time falls after the allowance ends is marked', asyn
 test('a clean summary promises exactly what it will do and nothing it would refuse', async () => {
   const t = await withAutoSchedule();
   const { summary } = await onThePage(t);
-  assert.equal(summary.handedBackCount, 0);
+  assert.equal(summary.unpaidSchedules, 0);
   assert.match(summary.headline, /^Splash will pay these 2 payments each time they fall due, up to 1,500 USDC each, from /);
   assert.ok(summary.payments.every((p) => p.reasons.length === 0 && p.notes.length === 0));
   assert.ok(summary.schedules.every((s) => s.pays && s.notes.length === 0));
@@ -292,4 +293,13 @@ test('the run and the History row say whether the window is open, by the serverâ
   const ended = (await S.listRunViews(t.sdeps()))[0];
   assert.equal(ended.windowOpen, false, 'at the start time the window is over');
   void U;
+});
+
+test('half-typed values never break the screen: letters or a fraction in the days read as whole days, and the request is refused in words', async () => {
+  const t = await withAutoSchedule();
+  for (const days of ['', 'abc', '2.5', '-4', ' ']) {
+    const { form } = parseAllowanceInput({ ...typed, expiresInDays: days });
+    assert.doesNotThrow(() => automaticSummary({ payments: [], schedules: [], form, graceMinutes: 10, nowMs: Number(t0), firstPaymentMs: null }), `days ${JSON.stringify(days)}`);
+  }
+  refused(await S.requestAllowance(t.sdeps(), OWNER_ACTOR, { ...typed, expiresInDays: 'abc' }), 400, 'bad_allowance');
 });

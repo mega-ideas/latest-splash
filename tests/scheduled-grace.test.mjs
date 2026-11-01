@@ -396,7 +396,7 @@ test('changing the payments inside the window hands the run back: what was annou
 test('the allowance changed or taken back inside the window is read again at the end', async () => {
   const t = await ready();
   await pass(t, FIRST.getTime());
-  const lower = ok(await S.requestAllowance(t.sdeps(), OWNER_ACTOR, { perPaymentUsdc: '400', dailyUsdc: '5000', monthlyUsdc: '20000', expiresInDays: 90 }));
+  const lower = ok(await S.requestAllowance(t.sdeps(), OWNER_ACTOR, await t.confirmed({ perPaymentUsdc: '400', dailyUsdc: '5000', monthlyUsdc: '20000', expiresInDays: 90 })));
   assert.equal((await signBy(t.w, lower.request, ['two', 'three'])).status, 'executed');
   await pass(t, START);
   await handedBack(t, 'over_payment_limit');

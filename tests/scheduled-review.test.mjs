@@ -198,7 +198,7 @@ test('a raised daily limit applies only once the owners have signed; until then 
   const before = await S.automaticStatus(t.sdeps());
   assert.equal(before.dailyCapMinor, U(5_000).toString());
 
-  const raise = ok(await S.requestAllowance(t.sdeps(), OWNER_ACTOR, form('9000')));
+  const raise = ok(await S.requestAllowance(t.sdeps(), OWNER_ACTOR, await t.confirmed(form('9000'))));
   const waiting = await S.automaticStatus(t.sdeps());
   assert.equal(waiting.dailyCapMinor, U(5_000).toString(), 'one owner’s call did not raise the limit');
   assert.equal(waiting.pendingDailyCapMinor, U(9_000).toString(), 'it is shown as waiting for the owners');
@@ -210,7 +210,7 @@ test('a raised daily limit applies only once the owners have signed; until then 
   assert.equal(signed.pendingDailyCapMinor, null);
 
   // A request that is cancelled before it is signed leaves the limit where it was.
-  const second = ok(await S.requestAllowance(t.sdeps(), OWNER_ACTOR, form('12000')));
+  const second = ok(await S.requestAllowance(t.sdeps(), OWNER_ACTOR, await t.confirmed(form('12000'))));
   assert.equal((await S.automaticStatus(t.sdeps())).dailyCapMinor, U(9_000).toString());
   const { cancelSigningRequest } = await import('../lib/server/wallet-signing.ts');
   const cancelled = await cancelSigningRequest(t.w.signing, { orgId: 'acme', userId: OWNER_ACTOR.userId, id: second.request.id });
