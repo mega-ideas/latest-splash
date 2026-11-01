@@ -199,6 +199,8 @@ test('a payment above the most for one payment is marked, and the headline says 
   assert.match(summary.headline, /1 schedule would come to you for approval/);
   assert.equal(summary.unpaidSchedules, 1, 'a run is paid whole or handed back whole: its schedule is the unit');
   assert.equal(summary.schedules[0].pays, false);
+  assert.match(summary.schedules[0].notes.join(' '), /marked below.*each run would come to you for approval/, 'the schedule row says why, not only the payment under it');
+  assert.ok(summary.lines.some((l) => l.startsWith('Monthly suppliers:') && /each run would come to you for approval/.test(l)), 'and so does the text every signer reads');
 });
 
 test('a payee never paid before is marked: a first payment is never automatic', async () => {

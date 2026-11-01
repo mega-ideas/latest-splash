@@ -158,6 +158,7 @@ export function automaticSummary(input: SummaryInput): AutomaticSummary {
       notes.push(`Its next time, ${dayMonthWords(s.nextDueMs)} (UTC), is after the allowance ends, so it would not be paid automatically.`);
     }
     const paymentReasons = payments.some((p) => p.schedule === s.name && p.reasons.length > 0);
+    if (paymentReasons) notes.push('A payment in it is marked below, and a run is paid whole or not at all, so each run would come to you for approval.');
     return { name: s.name, cadenceText: s.cadenceText, runs, paymentCount: s.paymentCount, runTotalMinor: s.runTotalMinor, pays: reasons.length === 0 && !paymentReasons, reasons, notes };
   });
 
