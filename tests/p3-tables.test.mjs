@@ -109,6 +109,17 @@ test('the migration page says what dropping loses and how to count it first', as
   assert.match(doc, /screening_verdict/, 'and says the type stays');
 });
 
+test('the migration page tells an operator that a missing table in the count is not a fault, and names payouts as the table left for a decision', async () => {
+  const doc = await readFile(at('docs/v2/migrations.md'), 'utf8');
+  const section = doc.slice(doc.indexOf('## `0080_drop_unused_tables`'));
+  // A database that never had a table answers the count with an error; that must not stop a safe deploy.
+  assert.match(section, /relation .* does not exist/i, 'the page says what the error looks like');
+  assert.match(section, /already absent|never had/i, 'and that it means the table is already gone');
+  // `payouts` also has no reader and no writer; it is kept until Sky decides.
+  assert.match(section, /`payouts`[^.]*\b(no reader|nothing reads)/i, 'the page names payouts as unused');
+  assert.match(section, /(kept|left|stays)[^.]*`payouts`|`payouts`[^.]*(kept|left|stays)/i, 'and says it is left in place');
+});
+
 test('the legacy login table is described as dropped, not as waiting for a drop', async () => {
   const security = await readFile(at('SECURITY.md'), 'utf8');
   assert.doesNotMatch(security, /waits for a drop migration/);
