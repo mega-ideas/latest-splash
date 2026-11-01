@@ -218,12 +218,14 @@ team activity list (that list names the team actions it wants).
 
 ## Screens
 
-Screenshots at 1440 and 390 (Settings, Limits at its standard; the request sheet
-empty, with a refused figure, and filled in; the pending state; the staff queue;
-the decision panels; the decided list; the owner's view after the answers; the
-lower sheet) are in the session's `screens-p3-limits` folder. The dev server ran
-without `.env.local`, `USE_MOCK_APIS=true`, signed in as the repo's seeded
-operator and the dev staff login.
+Screenshots at 1440 and 390 (Settings, Limits at its standard and with a limit
+kept at migration; the request sheet empty, after a bad submit, and filled in;
+the pending state; the staff queue; the decision panels; the decided list; the
+owner's view after the answers; the lower sheet with its second look; a lowered
+limit with Restore, and after Restore; the days sheet) are in the session's
+`screens-p3-limits-final` folder. The dev server ran without `.env.local`,
+`USE_MOCK_APIS=true`, signed in as the repo's seeded operator and the dev staff
+login; the staff decisions were made by clicking the real buttons.
 
 ## The staff queue
 

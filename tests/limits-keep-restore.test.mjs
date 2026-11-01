@@ -223,6 +223,16 @@ test('an owner who lowers a limit by mistake puts it back at once, with nothing 
   assert.equal(event.detail.after, U(2_000).toString());
 });
 
+test('putting a limit back twice to the same figure is one change, not an error and not a second line on the trail', async () => {
+  const { db } = await seeded();
+  await lower(db, 'monthly', '1,000');
+  const first = await restore(db, 'monthly', '20,000');
+  const again = await restore(db, 'monthly', '20,000');
+  assert.equal(first.ok, true);
+  assert.equal(again.ok, true, JSON.stringify(again));
+  assert.equal((await actions(db)).filter((a) => a === 'limit_restored').length, 1);
+});
+
 test('restore goes up to the highest figure the business has held, and no higher; a figure that is not higher is refused', async () => {
   const { db } = await seeded();
   await lower(db, 'daily', '100');

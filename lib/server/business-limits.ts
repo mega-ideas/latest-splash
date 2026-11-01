@@ -405,7 +405,9 @@ export async function restoreLimit(db: DrizzleDb, input: { orgId: string; actorU
   const at = clock(input.now);
   return inTransaction(db, async (tx) => {
     await applyDue(tx, input.orgId, at);
-    const { values, held } = await valuesOf(tx, input.orgId);
+    const { values, held, rows } = await valuesOf(tx, input.orgId);
+    // Putting it back to the figure it was just put back to is the same call again (a double click, a second tab).
+    if (values[kind] === value && rows.get(kind)?.source === 'restored') return { ok: true as const, current: value.toString(), held: held[kind].toString() };
     const problems = restoreProblems(kind, value, values[kind], held[kind]);
     if (problems.length > 0) return fail(400, value > held[kind] ? 'above_held' : 'bad_figure', problems.join(' '), { held: held[kind].toString() });
     // A request still open for a figure the limit now meets has nothing left to do; one for more than that stays.
