@@ -599,7 +599,10 @@ test('the send is recorded in a migration at the next free number, and the schem
   for (const column of ['email_state', 'email_sent_at', 'email_message_ref', 'email_attempts', 'email_attempt_at']) assert.match(sql, new RegExp(column));
   assert.match(sql, /CHECK/i);
   const journal = JSON.parse(read('drizzle/meta/_journal.json'));
-  assert.equal(journal.entries.at(-1).tag, '0082_invitation_email');
+  // Later migrations may follow it; none may come in between or take its number.
+  const tags = journal.entries.map((entry) => entry.tag);
+  assert.ok(tags.includes('0082_invitation_email'), 'it is in the journal');
+  assert.equal(tags.filter((tag) => tag.startsWith('0082_')).length, 1, 'and nothing else took its number');
   const schemaText = read('lib/db/schema.ts');
   for (const field of ['emailState', 'emailSentAt', 'emailMessageRef', 'emailAttempts', 'emailAttemptAt']) assert.match(schemaText, new RegExp(field));
   assert.doesNotMatch(sql, /\btoken\b|\bsecret\b/i, 'still no token column');
