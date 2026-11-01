@@ -62,7 +62,7 @@ test('the Finance lead sees controls on viewers, staff and approvers only: never
 
 test('the Finance lead is offered nothing on someone who is in charge or can add funds or withdraw: ending that is for an owner', () => {
   const ctx = { manager: 'finance_lead', youUserId: 'u-me' };
-  const none = { roles: [], remove: false, access: false, financeLead: null };
+  const none = { roles: [], remove: false, access: false, exchangeAlone: false, financeLead: null };
   assert.deepEqual(rowControls(ctx, row({ role: 'checker', inCharge: true })), none);
   assert.deepEqual(rowControls(ctx, row({ role: 'maker', addFunds: true })), none);
   assert.deepEqual(rowControls(ctx, row({ role: 'maker', withdraw: true })), none);
@@ -91,7 +91,7 @@ test('moving someone to viewer says that a spending rule they hold stays until t
 
 test('a member who manages nothing is offered nothing', () => {
   for (const role of ['viewer', 'maker', 'checker', 'admin']) {
-    assert.deepEqual(rowControls({ manager: null, youUserId: 'u-me' }, row({ role })), { roles: [], remove: false, access: false, financeLead: null });
+    assert.deepEqual(rowControls({ manager: null, youUserId: 'u-me' }, row({ role })), { roles: [], remove: false, access: false, exchangeAlone: false, financeLead: null });
   }
 });
 
