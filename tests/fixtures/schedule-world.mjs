@@ -56,14 +56,27 @@ export async function scheduleWorld(opts = {}) {
       return (await payerKey.signTransaction(bytes)).signature;
     },
   };
-  const state = { payer: { ok: true, payer }, balance: undefined };
+  // `notify`: 'ok' tells one owner; 'nobody' reaches no one (no address, WhatsApp off); 'throw' is the mail provider down.
+  const undelivered = [];
+  const state = { payer: { ok: true, payer }, balance: undefined, notify: 'ok' };
   // The scheduled payer is Splash's own spender on the policy, not a person who left: standing says so, as the live wiring does.
   w.sc.standing = () => readSpenderStanding(w.db, 'acme', { scheduledPayer: PAYER });
 
   const sdeps = (orgId = 'acme', over = {}) => ({
     ...t.deps(orgId),
     payer: async () => state.payer,
-    notify: async (n) => void notices.push(n),
+    notify: async (n) => {
+      if (state.notify === 'throw') {
+        undelivered.push(n);
+        throw new Error('the mail provider is down');
+      }
+      if (state.notify === 'nobody') {
+        undelivered.push(n);
+        return 0;
+      }
+      notices.push(n);
+      return 1;
+    },
     walletBalance: async () => (state.balance !== undefined ? state.balance : (w.balances.get(wallet.address)?.addressBalanceMinor ?? 0n)),
     ...over,
   });
@@ -101,7 +114,7 @@ export async function scheduleWorld(opts = {}) {
   const kinds = () => notices.map((n) => n.kind);
   /** How many payments the model chain has taken under an allowance. */
   const spent = () => w.spends.length;
-  return { ...t, kinds, spent, payer, payerKey, signed, notices, state, sdeps, recipient, payBefore, allowance, clock, ids: { a: t.recipientId, b: second, c: third } };
+  return { ...t, kinds, spent, payer, payerKey, signed, notices, undelivered, state, sdeps, recipient, payBefore, allowance, clock, ids: { a: t.recipientId, b: second, c: third } };
 }
 
 /** A schedule input in USDC, as the page sends it. */

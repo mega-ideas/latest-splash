@@ -17,44 +17,17 @@
  */
 import 'server-only';
 
-import { resolveEmailTransport } from '@/lib/auth/email-transport';
-import { noticeText, type ScheduleNotice } from '@/lib/schedule/notice';
 import { normalizeSuiAddress } from '@mysten/sui/utils';
-import { listApprovers } from '@/lib/server/approver-channels';
-import { listOrgOwners } from '@/lib/server/near-threshold-store';
-import { readOrgSettings } from '@/lib/server/org-settings';
+import { ownersNotifier } from '@/lib/server/owners-notifier';
 import { getScheduledPayer } from '@/lib/server/scheduled-payer-signer';
 import type { Actor, ScheduleDeps } from '@/lib/server/scheduled-payments';
 import { teamManager } from '@/lib/server/team-admin';
 import { batchDepsFor, type WalletRouteLike } from '@/lib/server/wallet-transfers-deps';
 import { liveWalletContext } from '@/lib/server/wallet-deps';
 import { walletRoute, type WalletRoute } from '@/lib/server/wallet-route';
-import { sendWhatsApp, whatsappConfigured } from '@/lib/server/whatsapp';
 import type { DrizzleDb } from '@/lib/server/wallet-signing-store';
 
-/** Tell this business's owners, by e-mail and by WhatsApp where they have it. */
-export function ownersNotifier(db: DrizzleDb, orgId: string, env: NodeJS.ProcessEnv = process.env): ScheduleDeps['notify'] {
-  return async (notice: ScheduleNotice) => {
-    const { subject, text } = noticeText(notice);
-    const appUrl = (env.NEXT_PUBLIC_APP_URL ?? 'http://localhost:3000').replace(/\/+$/, '');
-    const link = `${appUrl}${notice.path}`;
-    const owners = await listOrgOwners(db, orgId);
-    const transport = resolveEmailTransport(env);
-    await Promise.allSettled(owners.map((o) => transport.sendMessage({ to: o.email, subject, text: `${text}\n\nOpen the Scheduled tab:\n\n${link}`, link })));
-    try {
-      const [people, settings] = await Promise.all([listApprovers(orgId), readOrgSettings(orgId).catch(() => null)]);
-      if (!settings?.whatsappEnabled || !whatsappConfigured()) return;
-      const ids = new Set(owners.map((o) => o.userId));
-      await Promise.allSettled(
-        people
-          .filter((p) => ids.has(p.userId) && p.whatsappE164)
-          .map((p) => sendWhatsApp(p.whatsappE164 as string, `${text}\n\nOpen Splash, Transfer, Scheduled.`)),
-      );
-    } catch {
-      /* the e-mail and the app carry it */
-    }
-  };
-}
+export { ownersNotifier };
 
 /** One business's dependencies for the schedule service and the runner. */
 export function scheduleDepsFor(route: WalletRouteLike, env: NodeJS.ProcessEnv = process.env): ScheduleDeps {
