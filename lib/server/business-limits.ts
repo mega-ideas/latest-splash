@@ -51,6 +51,7 @@ import {
   parseLimitValue,
   raiseProblems,
   reasonProblems,
+  restoreProblems,
   requestPhase,
   requestSentence,
   DECLINE_REASON_MIN,
@@ -82,18 +83,28 @@ type RequestRow = typeof businessLimitRequests.$inferSelect;
 
 // ─── What the limits are now ────────────────────────────────────────────────
 
-/** The standard limits, with any change the business has made or Splash has approved and that has started. */
-async function valuesOf(db: DrizzleDb, orgId: string): Promise<{ values: LimitValues; rows: Map<LimitKind, typeof businessLimits.$inferSelect> }> {
+/**
+ * The standard limits, with any change the business has made or Splash has approved and that has started. `held` is the
+ * highest figure the business has legitimately held for each limit (never below the standard or the limit now): an owner
+ * puts a limit they lowered back up to it at once.
+ */
+async function valuesOf(db: DrizzleDb, orgId: string): Promise<{ values: LimitValues; held: LimitValues; rows: Map<LimitKind, typeof businessLimits.$inferSelect> }> {
   const rows = await db.select().from(businessLimits).where(eq(businessLimits.orgId, orgId));
   const values: LimitValues = { ...DEFAULT_LIMITS };
+  const held: LimitValues = { ...DEFAULT_LIMITS };
   const byKind = new Map<LimitKind, typeof businessLimits.$inferSelect>();
   for (const r of rows) {
     if (!isLimitKind(r.kind)) continue;
     // A stored figure above the ceiling is never believed.
-    values[r.kind] = r.value > LIMIT_CEILINGS[r.kind] ? LIMIT_CEILINGS[r.kind] : r.value;
+    const ceiling = LIMIT_CEILINGS[r.kind];
+    values[r.kind] = r.value > ceiling ? ceiling : r.value;
+    let top = r.heldMax > ceiling ? ceiling : r.heldMax;
+    if (top < values[r.kind]) top = values[r.kind];
+    if (top < DEFAULT_LIMITS[r.kind]) top = DEFAULT_LIMITS[r.kind];
+    held[r.kind] = top;
     byKind.set(r.kind, r);
   }
-  return { values, rows: byKind };
+  return { values, held, rows: byKind };
 }
 
 /**
@@ -116,14 +127,17 @@ async function applyDue(db: DrizzleDb, orgId: string | null, now: Date): Promise
         .returning();
       if (!r || !isLimitKind(r.kind) || r.grantedValue == null) return false;
       const kind = r.kind;
-      const before = (await valuesOf(tx, r.orgId)).values[kind];
+      const now0 = await valuesOf(tx, r.orgId);
+      const before = now0.values[kind];
       // Defence in depth: never above the ceiling, never lower than the business already has.
       let value = r.grantedValue > LIMIT_CEILINGS[kind] ? LIMIT_CEILINGS[kind] : r.grantedValue;
       if (value < before) value = before;
+      // What the business has now held at most: it can put the limit back to this after lowering it.
+      const heldMax = value > now0.held[kind] ? value : now0.held[kind];
       await tx
         .insert(businessLimits)
-        .values({ orgId: r.orgId, kind, value, source: 'raised', changedBy: 'system:limits', requestId: r.id, updatedAt: now })
-        .onConflictDoUpdate({ target: [businessLimits.orgId, businessLimits.kind], set: { value, source: 'raised', changedBy: 'system:limits', requestId: r.id, updatedAt: now } });
+        .values({ orgId: r.orgId, kind, value, source: 'raised', changedBy: 'system:limits', requestId: r.id, heldMax, updatedAt: now })
+        .onConflictDoUpdate({ target: [businessLimits.orgId, businessLimits.kind], set: { value, source: 'raised', changedBy: 'system:limits', requestId: r.id, heldMax, updatedAt: now } });
       await recordAuthorityEvent(tx, {
         orgId: r.orgId,
         actorUserId: 'system:limits',
@@ -184,7 +198,13 @@ export type LimitWire = {
   ceiling: string;
   ceilingWords: string;
   ceilingSentence: string;
-  source: 'standard' | 'raised' | 'lowered';
+  /** The highest figure the business has held for this limit: an owner can put the limit back up to it at once. */
+  held: string;
+  heldWords: string;
+  /** True for an owner when the limit is below what the business has held, so there is something to put back. */
+  canRestore: boolean;
+  /** standard; raised (Splash approved it); kept (the business ran on it before limits arrived); lowered or restored (an owner). */
+  source: 'standard' | 'raised' | 'kept' | 'lowered' | 'restored';
   /** Why the limit is what it is, in plain words. */
   why: string;
   /** The request still open for this limit, if any. */
@@ -217,10 +237,13 @@ function requestWire(r: RequestRow, current: bigint, nowMs: number): RequestWire
   };
 }
 
-function whyWords(kind: LimitKind, source: 'standard' | 'raised' | 'lowered', changedAt: Date | null): string {
+function whyWords(kind: LimitKind, source: LimitWire['source'], changedAt: Date | null, held: bigint): string {
   const date = changedAt ? ` on ${dayMonthYearWords(changedAt.getTime())}` : '';
-  if (source === 'raised') return `Splash approved a higher limit${date}. It is more than the standard ${formatLimit(kind, DEFAULT_LIMITS[kind])} because you asked for it.`;
-  if (source === 'lowered') return `An owner of your business lowered it${date}. The standard is ${formatLimit(kind, DEFAULT_LIMITS[kind])}.`;
+  const standard = formatLimit(kind, DEFAULT_LIMITS[kind]);
+  if (source === 'raised') return `Splash approved a higher limit${date}. It is more than the standard ${standard} because you asked for it.`;
+  if (source === 'kept') return `Your business already ran on this before limits arrived, so it keeps it. A new business starts with ${standard}.`;
+  if (source === 'lowered') return `An owner of your business lowered it${date}. The standard is ${standard}. You can put it back to ${formatLimit(kind, held)} at any time.`;
+  if (source === 'restored') return `An owner of your business put it back${date}. The most your business has held is ${formatLimit(kind, held)}.`;
   return 'Every business starts with this limit.';
 }
 
@@ -230,7 +253,7 @@ export async function readLimitsView(db: DrizzleDb, input: { orgId: string; user
   if (!manager) return fail(403, 'not_allowed', 'Only an owner or the Finance lead can see the limits.');
   const at = clock(input.now);
   await applyDue(db, input.orgId, at);
-  const { values, rows } = await valuesOf(db, input.orgId);
+  const { values, held, rows } = await valuesOf(db, input.orgId);
   const requests = await db
     .select()
     .from(businessLimitRequests)
@@ -239,7 +262,7 @@ export async function readLimitsView(db: DrizzleDb, input: { orgId: string; user
   const nowMs = at.getTime();
   const limits: LimitWire[] = LIMIT_KINDS.map((kind) => {
     const stored = rows.get(kind);
-    const source = stored ? (stored.source === 'raised' ? 'raised' : 'lowered') : 'standard';
+    const source: LimitWire['source'] = !stored ? 'standard' : stored.source === 'raised' ? (stored.changedBy === 'system:migration' ? 'kept' : 'raised') : stored.source === 'restored' ? 'restored' : 'lowered';
     const mine = requests.filter((r) => r.kind === kind);
     const openRow = mine.find((r) => r.status === 'pending' || r.status === 'approved');
     const lastRow = mine.find((r) => r.status === 'declined' || r.status === 'cancelled' || r.status === 'applied');
@@ -256,8 +279,11 @@ export async function readLimitsView(db: DrizzleDb, input: { orgId: string; user
       ceiling: LIMIT_CEILINGS[kind].toString(),
       ceilingWords: formatLimit(kind, LIMIT_CEILINGS[kind]),
       ceilingSentence: ceilingWords(kind),
+      held: held[kind].toString(),
+      heldWords: formatLimit(kind, held[kind]),
+      canRestore: manager === 'owner' && values[kind] < held[kind],
       source,
-      why: whyWords(kind, source, stored?.updatedAt ?? null),
+      why: whyWords(kind, source, stored?.updatedAt ?? null, held[kind]),
       open: openRow ? requestWire(openRow, values[kind], nowMs) : null,
       last: lastRow ? requestWire(lastRow, values[kind], nowMs) : null,
     };
@@ -295,7 +321,7 @@ export async function requestHigherLimit(db: DrizzleDb, input: AskInput): Promis
     await applyDue(tx, input.orgId, at);
     // The same key is the same request: a retry, a double click, a second tab.
     const [same] = await tx.select().from(businessLimitRequests).where(and(eq(businessLimitRequests.orgId, input.orgId), eq(businessLimitRequests.requestKey, key))).limit(1);
-    const { values } = await valuesOf(tx, input.orgId);
+    const { values, held } = await valuesOf(tx, input.orgId);
     if (same) {
       if (!samePayload(same, kind, requested, reason, input.actorUserId)) return fail(409, 'key_reused', 'That key was used for a different request. Start the request again.');
       const wire = requestWire(same, values[kind], at.getTime());
@@ -303,6 +329,10 @@ export async function requestHigherLimit(db: DrizzleDb, input: AskInput): Promis
     }
     const problems = raiseProblems(kind, requested, values[kind]);
     if (problems.length > 0) return fail(400, 'bad_figure', problems.join(' '), { ceiling: LIMIT_CEILINGS[kind].toString() });
+    // A figure the business already held is not Splash's to grant again: the owner puts it back at once.
+    if (requested <= held[kind]) {
+      return fail(409, 'restore_instead', `Your business has held ${formatLimit(kind, held[kind])} before, so you can put it back yourself: choose Restore on this limit. There is nothing to ask Splash.`, { held: held[kind].toString() });
+    }
     const id = `blr_${randomUUID()}`;
     const [row] = await tx
       .insert(businessLimitRequests)
@@ -336,7 +366,7 @@ export async function lowerLimit(db: DrizzleDb, input: { orgId: string; actorUse
   const at = clock(input.now);
   return inTransaction(db, async (tx) => {
     await applyDue(tx, input.orgId, at);
-    const { values, rows } = await valuesOf(tx, input.orgId);
+    const { values, held, rows } = await valuesOf(tx, input.orgId);
     // Lowering to the figure it was just lowered to is the same call again.
     if (values[kind] === value && rows.get(kind)?.source === 'lowered') return { ok: true as const, current: value.toString(), unchanged: true };
     const problems = lowerProblems(kind, value, values[kind]);
@@ -352,10 +382,52 @@ export async function lowerLimit(db: DrizzleDb, input: { orgId: string; actorUse
     }
     await tx
       .insert(businessLimits)
-      .values({ orgId: input.orgId, kind, value, source: 'lowered', changedBy: input.actorUserId, requestId: null, updatedAt: at })
-      .onConflictDoUpdate({ target: [businessLimits.orgId, businessLimits.kind], set: { value, source: 'lowered', changedBy: input.actorUserId, requestId: null, updatedAt: at } });
-    await recordAuthorityEvent(tx, { orgId: input.orgId, actorUserId: input.actorUserId, action: 'limit_lowered', detail: { kind, before: values[kind].toString(), after: value.toString() }, now: () => at });
+      .values({ orgId: input.orgId, kind, value, source: 'lowered', changedBy: input.actorUserId, requestId: null, heldMax: held[kind], updatedAt: at })
+      .onConflictDoUpdate({ target: [businessLimits.orgId, businessLimits.kind], set: { value, source: 'lowered', changedBy: input.actorUserId, requestId: null, heldMax: held[kind], updatedAt: at } });
+    await recordAuthorityEvent(tx, { orgId: input.orgId, actorUserId: input.actorUserId, action: 'limit_lowered', detail: { kind, before: values[kind].toString(), after: value.toString(), canRestoreTo: held[kind].toString() }, now: () => at });
     return { ok: true as const, current: value.toString(), unchanged: false };
+  });
+}
+
+// ─── An owner puts a lowered limit back: at once, nothing asked ──────────────
+
+/**
+ * Put a limit back up, to no more than the highest figure the business has held. An owner who lowers a limit by mistake is
+ * not made to wait for Splash to give back what they had. Anything above that figure is a request, as before.
+ */
+export async function restoreLimit(db: DrizzleDb, input: { orgId: string; actorUserId: string; kind: unknown; value: unknown; now?: Clock }): Promise<{ ok: true; current: string; held: string } | LimitFailure> {
+  const manager = await teamManager(db, input.orgId, input.actorUserId);
+  if (manager !== 'owner') return manager === 'finance_lead' ? fail(403, 'owner_only', 'Only an owner can put a limit back.') : fail(403, 'not_allowed', 'Only an owner can put a limit back.');
+  if (!isLimitKind(input.kind)) return fail(400, 'bad_limit', 'Say which limit you want to put back.');
+  const kind = input.kind;
+  const value = parseLimitValue(kind, input.value);
+  if (value == null) return fail(400, 'bad_figure', kind === 'days' ? 'Give a whole number of days.' : 'Give an amount in USDC, for example 2,000.');
+  const at = clock(input.now);
+  return inTransaction(db, async (tx) => {
+    await applyDue(tx, input.orgId, at);
+    const { values, held } = await valuesOf(tx, input.orgId);
+    const problems = restoreProblems(kind, value, values[kind], held[kind]);
+    if (problems.length > 0) return fail(400, value > held[kind] ? 'above_held' : 'bad_figure', problems.join(' '), { held: held[kind].toString() });
+    // A request still open for a figure the limit now meets has nothing left to do; one for more than that stays.
+    const open = await tx
+      .select()
+      .from(businessLimitRequests)
+      .where(and(eq(businessLimitRequests.orgId, input.orgId), eq(businessLimitRequests.kind, kind), inArray(businessLimitRequests.status, ['pending', 'approved'])));
+    for (const r of open) {
+      if ((r.grantedValue ?? r.requestedValue) > value) continue;
+      const [gone] = await tx
+        .update(businessLimitRequests)
+        .set({ status: 'cancelled', cancelledBy: input.actorUserId, cancelledAt: at, updatedAt: at })
+        .where(and(eq(businessLimitRequests.id, r.id), inArray(businessLimitRequests.status, ['pending', 'approved'])))
+        .returning({ id: businessLimitRequests.id });
+      if (gone) await recordAuthorityEvent(tx, { orgId: input.orgId, actorUserId: input.actorUserId, action: 'limit_request_cancelled', ref: r.id, detail: { kind, because: 'the owner put the limit back to a figure that already meets it' }, now: () => at });
+    }
+    await tx
+      .insert(businessLimits)
+      .values({ orgId: input.orgId, kind, value, source: 'restored', changedBy: input.actorUserId, requestId: null, heldMax: held[kind], updatedAt: at })
+      .onConflictDoUpdate({ target: [businessLimits.orgId, businessLimits.kind], set: { value, source: 'restored', changedBy: input.actorUserId, requestId: null, heldMax: held[kind], updatedAt: at } });
+    await recordAuthorityEvent(tx, { orgId: input.orgId, actorUserId: input.actorUserId, action: 'limit_restored', detail: { kind, before: values[kind].toString(), after: value.toString(), heldMax: held[kind].toString() }, now: () => at });
+    return { ok: true as const, current: value.toString(), held: held[kind].toString() };
   });
 }
 
@@ -392,6 +464,10 @@ export type StaffRequestWire = RequestWire & {
   ceilingWords: string;
   decidedBy: string | null;
   label: string;
+  /** When the request last changed hands: decided, or cancelled by the owner, or asked. The queue sorts by it. */
+  settledAt: string;
+  /** How many requests this business made before this one, of any limit and any answer. */
+  earlierRequests: number;
 };
 
 /** The queue: every open request first (oldest first), then what was decided lately. Cross-tenant, for Splash staff. */
@@ -424,10 +500,13 @@ export async function listLimitRequestsForStaff(db: DrizzleDb, staff: StaffActor
       ceilingWords: formatLimit(r.kind, LIMIT_CEILINGS[r.kind]),
       decidedBy: r.decidedBy,
       label: LIMIT_WORDS[r.kind].label,
+      settledAt: (r.decidedAt ?? r.cancelledAt ?? r.requestedAt).toISOString(),
+      earlierRequests: rows.filter((o) => o.r.orgId === r.orgId && o.r.id !== r.id && o.r.requestedAt.getTime() < r.requestedAt.getTime()).length,
     });
   }
   const open = out.filter((r) => r.phase === 'asked');
-  const recent = out.filter((r) => r.phase !== 'asked').reverse().slice(0, 50);
+  // What was answered most lately first, by when it was answered, not by when it was asked.
+  const recent = out.filter((r) => r.phase !== 'asked').sort((a, b) => Date.parse(b.settledAt) - Date.parse(a.settledAt)).slice(0, 50);
   return { ok: true, open, recent };
 }
 
@@ -538,7 +617,9 @@ export async function sendLimitNotices(db: DrizzleDb, input: { notify: NotifyOwn
     const kind = r.kind;
     const wanted: Array<{ column: 'approvedNotifiedAt' | 'declinedNotifiedAt' | 'effectiveNotifiedAt'; notice: LimitNotice }> = [];
     const base = { limit: kind, requested: r.requestedValue, granted: r.grantedValue, before: r.currentValue, reason: r.declineReason };
-    if ((r.status === 'approved' || r.status === 'applied') && !r.approvedNotifiedAt) wanted.push({ column: 'approvedNotifiedAt', notice: { ...base, kind: 'approved', startsAtMs: r.effectiveAt?.getTime() ?? null } });
+    // A limit that has already started is told as started alone: "it will start" would be wrong by now, and "started" says all of it.
+    if (r.status === 'applied' && !r.approvedNotifiedAt) await db.update(businessLimitRequests).set({ approvedNotifiedAt: at }).where(and(eq(businessLimitRequests.id, r.id), isNull(businessLimitRequests.approvedNotifiedAt)));
+    else if (r.status === 'approved' && !r.approvedNotifiedAt) wanted.push({ column: 'approvedNotifiedAt', notice: { ...base, kind: 'approved', startsAtMs: r.effectiveAt?.getTime() ?? null } });
     if (r.status === 'declined' && !r.declinedNotifiedAt) wanted.push({ column: 'declinedNotifiedAt', notice: { ...base, kind: 'declined', startsAtMs: null } });
     if (r.status === 'applied' && !r.effectiveNotifiedAt) wanted.push({ column: 'effectiveNotifiedAt', notice: { ...base, kind: 'started', startsAtMs: r.appliedAt?.getTime() ?? r.effectiveAt?.getTime() ?? null } });
     for (const w of wanted) {

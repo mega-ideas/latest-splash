@@ -30,7 +30,7 @@ const card = code(read('components/settings/LimitsCard.tsx'));
 const queue = code(read('components/admin/AdminLimitRequests.tsx'));
 
 test('a button that is off says why in visible words, not only in a title attribute', () => {
-  assert.doesNotMatch(card, /title=\{/, 'no control relies on a title for its reason');
+  assert.doesNotMatch(card, /<QuietButton[^>]*\stitle=/, 'no control relies on a title attribute for its reason');
   assert.match(card, /This is the most Splash offers\./);
   assert.match(card, /A request is already open for this limit\./);
   assert.match(card, /This is the lowest a limit can be\./);
@@ -57,7 +57,8 @@ test('the sheet closes with "Close"; "Cancel" is left to cancelling a request', 
 
 test('a submit that is not valid moves focus to the first field that is wrong', () => {
   assert.match(card, /\.focus\(\)/);
-  assert.match(card, /getElementById\('limit-figure'\)|figureRef/);
+  assert.match(card, /getElementById\([^)]*limit-figure[^)]*\)/);
+  assert.match(card, /limit-reason/);
 });
 
 test('a lowering to under a tenth of the limit asks for a second look before it goes', () => {

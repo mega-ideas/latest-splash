@@ -22,9 +22,16 @@ export default function AdminLimitRequests({ initial, allowed, problem }: { init
   const [queue, setQueue] = useState(initial);
   const [error, setError] = useState<string | null>(problem);
 
+  // A refresh that fails is said, never swallowed: the queue on screen would otherwise look current when it is not.
   const refresh = useCallback(async () => {
-    const response = await fetch('/api/admin/limits', { cache: 'no-store' });
-    if (response.ok) setQueue((await response.json()) as Queue);
+    try {
+      const response = await fetch('/api/admin/limits', { cache: 'no-store' });
+      if (!response.ok) throw new Error('refresh failed');
+      setQueue((await response.json()) as Queue);
+      setError(null);
+    } catch {
+      setError('The list could not be refreshed, so what is on screen may be out of date. Choose Refresh to try again.');
+    }
   }, []);
 
   useEffect(() => {
@@ -126,6 +133,8 @@ function RequestCard({ request, onDecided, onError }: { request: StaffRequestWir
   const [reason, setReason] = useState('');
   const [busy, setBusy] = useState(false);
   const [here, setHere] = useState<string | null>(null);
+  // Once the decision is saved the card is closed: a second click on a card that is still on screen would only replay it.
+  const [saved, setSaved] = useState<Choice | null>(null);
   const days = request.kind === 'days';
   const declineShort = choice === 'decline' && reason.replace(/\s+/g, ' ').trim().length < DECLINE_REASON_MIN;
   const smallerMissing = choice === 'approve_smaller' && smaller.trim() === '';
@@ -145,6 +154,7 @@ function RequestCard({ request, onDecided, onError }: { request: StaffRequestWir
         setHere(body.error ?? 'The decision was not saved. Nothing was changed.');
         return;
       }
+      setSaved(choice);
       await onDecided();
     } catch {
       setHere('Could not reach Splash. Nothing was changed.');
@@ -154,7 +164,7 @@ function RequestCard({ request, onDecided, onError }: { request: StaffRequestWir
   }
 
   const options: Array<[Choice, string]> = [
-    ['approve', `Approve ${request.requestedWords}`],
+    ['approve', 'Approve as asked'],
     ['approve_smaller', 'Approve a smaller figure'],
     ['decline', 'Decline'],
   ];
@@ -165,6 +175,7 @@ function RequestCard({ request, onDecided, onError }: { request: StaffRequestWir
         <div>
           <h3 id={`limit-${request.id}`} className="text-base font-black text-[#1F4452]">{request.org.name}</h3>
           <p className="text-[13px] text-[#1F4452]">Asked by {request.requestedBy}, {stampWords(Date.parse(request.requestedAt))}</p>
+          <p className="text-[13px] text-[#326273]">{request.earlierRequests === 0 ? 'The first request from this business.' : `${request.earlierRequests} earlier ${request.earlierRequests === 1 ? 'request' : 'requests'} from this business.`}</p>
         </div>
         <Outcome request={request} />
       </div>
@@ -183,6 +194,12 @@ function RequestCard({ request, onDecided, onError }: { request: StaffRequestWir
         <blockquote className="border-l-4 border-[#5C9EAD] pl-4 text-sm leading-6 text-[#1F4452]">{request.reason}</blockquote>
       </div>
 
+      {saved ? (
+        <div role="status" className="flex items-start gap-2 border-t border-[#326273]/12 bg-[var(--info-bg)] px-5 py-4 text-[13px] font-semibold text-[#1F4452]">
+          <BadgeCheck className="mt-0.5 h-4 w-4 shrink-0" aria-hidden="true" />
+          <span>Decision saved. {saved === 'decline' ? 'The owners have been told it was declined and why.' : 'The owners will be told it is approved and when it starts.'} It leaves this list when it refreshes.</span>
+        </div>
+      ) : (
       <div className="space-y-3 border-t border-[#326273]/12 px-5 py-4">
         <div role="group" aria-label="Decision" className="flex flex-wrap gap-2">
           {options.map(([value, label]) => (
@@ -249,6 +266,7 @@ function RequestCard({ request, onDecided, onError }: { request: StaffRequestWir
           </button>
         </div>
       </div>
+      )}
     </article>
   );
 }

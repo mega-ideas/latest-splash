@@ -22,7 +22,8 @@
  *     splash_spend and a staff member's Transfer use, run payment by payment
  *     with each payment counted against the next);
  *   - the day's automatic payments, this run included, stay within the daily
- *     limit the owners set (the allowance itself carries the monthly cap);
+ *     limit the owners set, and the last 30 days' within the business's monthly
+ *     limit (the allowance itself carries its own monthly cap on the network);
  *   - the fee for each payment is no higher than the fee the owner was shown;
  *   - the wallet holds enough.
  *
@@ -65,11 +66,16 @@ export type AutoFacts = {
   dailyCapMinor: bigint;
   /**
    * The business's own limit for one automatic payment (Settings, Limits): the standard, a lower one the owners chose,
-   * or a higher one Splash approved and whose notice has passed. A payment above it is the owners'. Absent: no such limit is checked.
+   * or a higher one Splash approved and whose notice has passed. A payment above it is the owners'. Required: a run that is
+   * not told the limit is handed back, never paid without it.
    */
-  perPaymentLimitMinor?: bigint;
+  perPaymentLimitMinor: bigint;
+  /** The business's limit for automatic payments in any 30 days (Settings, Limits), the same way. Required. */
+  monthlyLimitMinor: bigint;
   /** What automatic runs paid, or are paying, in the last 24 hours. */
   dailyUsedMinor: bigint;
+  /** What automatic runs paid, or are paying, in the last 30 days. */
+  monthlyUsedMinor: bigint;
   /** What the wallet can spend now, or null when it could not be read. */
   walletBalanceMinor: bigint | null;
 };
@@ -150,7 +156,8 @@ export function evaluateAutoRun(facts: AutoFacts, items: AutoItemFacts[]): AutoV
     const fee = item.currentFeeMinor;
     if (amount > threshold) return refuse('above_approval_line', item);
     // The business's limit for one automatic payment, whatever the allowance on the network says.
-    if (facts.perPaymentLimitMinor != null && amount > facts.perPaymentLimitMinor) return refuse('over_payment_limit', item);
+    // Written so that a limit that is missing or not a number refuses: only a payment known to be inside the limit passes.
+    if (!(typeof facts.perPaymentLimitMinor === 'bigint' && amount <= facts.perPaymentLimitMinor)) return refuse('over_payment_limit', item);
 
     // The same plan a staff member's payment is judged by, with each payment counted against the next.
     const plan = approvalPlan({
@@ -176,6 +183,8 @@ export function evaluateAutoRun(facts: AutoFacts, items: AutoItemFacts[]): AutoV
   }
 
   if (facts.dailyUsedMinor + total + fees > facts.dailyCapMinor) return refuse('daily_cap');
+  // The business's monthly limit holds for the allowance already signed: lowering it changes what is paid from the next run.
+  if (!(typeof facts.monthlyLimitMinor === 'bigint' && facts.monthlyUsedMinor + total + fees <= facts.monthlyLimitMinor)) return refuse('monthly_limit');
   if (facts.walletBalanceMinor !== null && facts.walletBalanceMinor < total + fees) return refuse('balance_short');
   return { ok: true, rows, totalMinor: total, feeMinor: fees };
 }

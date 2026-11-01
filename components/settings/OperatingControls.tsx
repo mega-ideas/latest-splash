@@ -123,6 +123,9 @@ export default function OperatingControls({ settings, setSettings, editable }: {
         <div className="grid gap-5">
           <div>
             <h3 className="flex items-center gap-2 text-sm font-extrabold text-[#0c3e48]"><SlidersHorizontal className="h-4 w-4 text-[var(--info)]" aria-hidden="true" />Payment controls</h3>
+            <p className="mt-1.5 max-w-[62ch] text-[13px] leading-5 text-[#326273]">
+              These limits apply to payments your team sends. The limits for payments Splash makes for you automatically are separate: see <a href="#limits" className="font-semibold text-[#0d6370] underline underline-offset-2">Limits on automatic payments</a>.
+            </p>
             <div className="mt-3 grid gap-3 sm:grid-cols-2">
               <NumberControl readOnly={!editable} label="Per-transfer limit" value={settings.perTransferLimitUsd} suffix="USD" onChange={(value) => update('perTransferLimitUsd', value)} />
               <NumberControl readOnly={!editable} label="Daily limit" value={settings.dailyLimitUsd} suffix="USD" onChange={(value) => update('dailyLimitUsd', value)} />

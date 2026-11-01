@@ -80,7 +80,8 @@ export type AuthorityAction =
   | 'limit_request_approved'
   | 'limit_request_declined'
   | 'limit_request_cancelled'
-  | 'limit_change_applied';
+  | 'limit_change_applied'
+  | 'limit_restored';
 
 export type AuthorityFailure = { ok: false; status: number; code: string; error: string };
 const fail = (status: number, code: string, error: string): AuthorityFailure => ({ ok: false, status, code, error });

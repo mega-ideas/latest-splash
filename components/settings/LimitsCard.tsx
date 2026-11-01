@@ -1,12 +1,12 @@
 'use client';
 
 import { useRef, useState } from 'react';
-import { CircleAlert, Clock3, Loader2, RefreshCw } from 'lucide-react';
+import { CircleAlert, Clock3, Loader2, RefreshCw, Undo2 } from 'lucide-react';
 
 import { call, errorText } from '@/components/transfer/api';
 import { CONTROL, Field, Modal, PrimaryButton, QuietButton, TextInput } from '@/components/transfer/ui';
 import { Card, Loading, Note, Pill, newKey, useLoad } from '@/components/wallet/parts';
-import { WHAT_HAPPENS_NEXT, REASON_MAX, REASON_MIN, lowerProblems, parseLimitValue, raiseProblems, reasonProblems, type LimitKind } from '@/lib/limits/rules';
+import { WHAT_HAPPENS_NEXT, REASON_MAX, REASON_MIN, limitInputValue, lowerNeedsConfirm, lowerProblems, parseLimitValue, raiseProblems, reasonProblems, type LimitKind } from '@/lib/limits/rules';
 import type { LimitWire, LimitsWire, RequestWire } from '@/lib/server/business-limits';
 
 const TEXTAREA = CONTROL.replace('h-11 ', 'min-h-28 py-2.5 leading-6 ');
@@ -16,9 +16,10 @@ type Sheet = { mode: 'raise' | 'lower'; limit: LimitWire } | null;
 /**
  * Limits (v2 Phase 3, Sky's decision): the four limits Splash holds automatic
  * payments to, each in plain words with its figure and why it is that figure.
- * An owner lowers one at once, or asks Splash for a higher one: Splash reviews
- * it and, if it approves, the higher limit starts after a 24 hour notice that
- * any owner can cancel. The Finance lead sees all of it and asks for nothing.
+ * An owner lowers one at once, puts one they lowered back at once (up to the most
+ * their business has held), or asks Splash for a higher one: Splash reviews it
+ * and, if it approves, the higher limit starts after a 24 hour notice that any
+ * owner can cancel. The Finance lead sees all of it and asks for nothing.
  *
  * The page does the same arithmetic as the server (lib/limits/rules.ts) so a
  * figure that would be refused is said so before it is sent; the server decides.
@@ -28,6 +29,7 @@ export default function LimitsCard() {
   const view = useLoad<LimitsWire>('/api/limits', 'Your limits could not be read.');
   const [sheet, setSheet] = useState<Sheet>(null);
   const [cancelling, setCancelling] = useState<string | null>(null);
+  const [restoring, setRestoring] = useState<string | null>(null);
   const [problem, setProblem] = useState<string | null>(null);
   const { reload } = view;
 
@@ -54,20 +56,30 @@ export default function LimitsCard() {
     reload();
   }
 
+  // Putting a lowered limit back is an owner's own change: it applies at once and nothing is asked of Splash.
+  async function restore(limit: LimitWire) {
+    setRestoring(limit.kind);
+    setProblem(null);
+    const answer = await call('/api/limits/restore', { method: 'POST', body: { kind: limit.kind, value: limitInputValue(limit.kind as LimitKind, BigInt(limit.held)) } });
+    setRestoring(null);
+    if (!answer.ok) setProblem(errorText(answer, 'The limit was not put back. Nothing was changed.'));
+    reload();
+  }
+
   return (
     <Card id="limits" title="Limits on automatic payments">
       <div className="space-y-4">
         <p className="max-w-[62ch] text-[13px] leading-5 text-[#1F4452]">
-          These are the most Splash will pay for you automatically. Every business starts with the same four. {data.canAsk ? 'You can lower any of them at once. To go higher, ask Splash.' : 'Only an owner can lower a limit or ask Splash for a higher one.'}
+          These are the most Splash will pay for you automatically. Every business starts with the same four. {data.canAsk ? 'You can lower any of them at once, and put one back at once. To go higher than your business has had, ask Splash.' : 'Only an owner can lower a limit or ask Splash for a higher one.'}
         </p>
         {problem ? <Note tone="error">{problem}</Note> : null}
         <ul className="divide-y divide-[#326273]/12 border-y border-[#326273]/12">
           {data.limits.map((limit) => (
-            <LimitRow key={limit.kind} limit={limit} canAsk={data.canAsk} cancelling={cancelling} onRaise={() => setSheet({ mode: 'raise', limit })} onLower={() => setSheet({ mode: 'lower', limit })} onCancel={cancel} />
+            <LimitRow key={limit.kind} limit={limit} canAsk={data.canAsk} cancelling={cancelling} restoring={restoring} onRaise={() => setSheet({ mode: 'raise', limit })} onLower={() => setSheet({ mode: 'lower', limit })} onRestore={() => void restore(limit)} onCancel={cancel} />
           ))}
         </ul>
         <p className="max-w-[62ch] text-[13px] leading-5 text-[#326273]">
-          The amount above which an owner approves every payment is set in your spending policy, and only owners change it. Nothing here moves that line.
+          These apply only to payments Splash makes for you automatically. The per-transfer and daily limits in Settings, Controls apply to payments your team sends, and the amount above which an owner approves every payment is set in your spending policy. Nothing here changes those.
         </p>
       </div>
       {sheet ? <LimitSheet key={`${sheet.mode}-${sheet.limit.kind}`} sheet={sheet} onClose={() => setSheet(null)} onDone={() => { setSheet(null); reload(); }} /> : null}
@@ -75,11 +87,17 @@ export default function LimitsCard() {
   );
 }
 
-function LimitRow({ limit, canAsk, cancelling, onRaise, onLower, onCancel }: { limit: LimitWire; canAsk: boolean; cancelling: string | null; onRaise: () => void; onLower: () => void; onCancel: (request: RequestWire) => Promise<void> }) {
+function LimitRow({ limit, canAsk, cancelling, restoring, onRaise, onLower, onRestore, onCancel }: { limit: LimitWire; canAsk: boolean; cancelling: string | null; restoring: string | null; onRaise: () => void; onLower: () => void; onRestore: () => void; onCancel: (request: RequestWire) => Promise<void> }) {
   const open = limit.open;
   const last = limit.last && !open && limit.last.phase !== 'in_force' ? limit.last : null;
   const atCeiling = BigInt(limit.current) >= BigInt(limit.ceiling);
   const atFloor = BigInt(limit.current) <= BigInt(limit.floor);
+  // A control that is off says why in words on the page: a title attribute is not read on a phone or reliably by a screen reader.
+  const whyOff = [
+    atCeiling ? 'This is the most Splash offers.' : open ? 'A request is already open for this limit.' : null,
+    atFloor ? 'This is the lowest a limit can be.' : null,
+  ].filter((text): text is string => text !== null);
+  const whyId = `limit-${limit.kind}-why`;
   return (
     <li className="grid gap-3 py-4 sm:grid-cols-[minmax(0,1fr)_auto] sm:gap-x-6">
       {/* On a phone: the name, the figure and its buttons, then the words. From sm up: the words on the left, the figure on the right. */}
@@ -90,9 +108,18 @@ function LimitRow({ limit, canAsk, cancelling, onRaise, onLower, onCancel }: { l
           <p className="mt-1.5 text-[13px] text-[#326273]">Most Splash offers: <span className="tabular-nums">{limit.ceilingWords}</span></p>
         </div>
         {canAsk ? (
-          <div className="flex flex-wrap gap-2 sm:justify-end">
-            <QuietButton type="button" onClick={onRaise} disabled={atCeiling || Boolean(open)} aria-label={`Ask for more: ${limit.label}`} title={atCeiling ? 'This is the most Splash offers.' : open ? 'A request is already open for this limit.' : undefined}>Ask for more</QuietButton>
-            <QuietButton type="button" onClick={onLower} disabled={atFloor} aria-label={`Lower: ${limit.label}`}>Lower</QuietButton>
+          <div className="flex flex-col gap-2 sm:items-end">
+            <div className="flex flex-wrap gap-2 sm:justify-end">
+              {limit.canRestore ? (
+                <QuietButton type="button" onClick={onRestore} disabled={restoring === limit.kind} aria-label={`Restore ${limit.label} to ${limit.heldWords}`}>
+                  {restoring === limit.kind ? <Loader2 className="h-4 w-4 animate-spin" aria-hidden="true" /> : <Undo2 className="h-4 w-4" aria-hidden="true" />}
+                  Restore to <span className="tabular-nums">{limit.heldWords}</span>
+                </QuietButton>
+              ) : null}
+              <QuietButton type="button" onClick={onRaise} disabled={atCeiling || Boolean(open)} aria-label={`Ask for more: ${limit.label}`} aria-describedby={atCeiling || open ? whyId : undefined}>Ask for more</QuietButton>
+              <QuietButton type="button" onClick={onLower} disabled={atFloor} aria-label={`Lower: ${limit.label}`} aria-describedby={atFloor ? whyId : undefined}>Lower</QuietButton>
+            </div>
+            {whyOff.length > 0 ? <p id={whyId} className="max-w-[34ch] text-[13px] leading-5 text-[#326273] sm:text-right">{whyOff.join(' ')}</p> : null}
           </div>
         ) : null}
       </div>
@@ -142,10 +169,17 @@ function LimitSheet({ sheet, onClose, onDone }: { sheet: NonNullable<Sheet>; onC
   const figureProblems = figure.trim() === '' ? [days ? 'Give a whole number of days.' : 'Give an amount in USDC.'] : parsed == null ? [days ? 'Give a whole number of days.' : 'Give an amount in USDC, for example 3,000.'] : raising ? raiseProblems(kind, parsed, BigInt(limit.current)) : lowerProblems(kind, parsed, BigInt(limit.current));
   const reasonList = raising ? reasonProblems(reason) : [];
   const invalid = figureProblems.length > 0 || reasonList.length > 0;
+  // "2" for "2,000" is a missing zero more often than a decision. The owner is asked to look again; it can be put back at once either way.
+  const lookAgain = !raising && parsed != null && figureProblems.length === 0 && lowerNeedsConfirm(kind, parsed, BigInt(limit.current));
 
   async function send() {
     setTouched(true);
-    if (invalid || busy) return;
+    if (invalid) {
+      // A bad submit takes the person to the first field that is wrong.
+      document.getElementById(figureProblems.length > 0 ? 'limit-figure' : 'limit-reason')?.focus();
+      return;
+    }
+    if (busy) return;
     setBusy(true);
     setError(null);
     const answer = raising
@@ -185,6 +219,13 @@ function LimitSheet({ sheet, onClose, onDone }: { sheet: NonNullable<Sheet>; onC
         </Field>
         {raising ? <p id="limit-ceiling" className="-mt-2 text-[13px] leading-5 text-[#326273]">{limit.ceilingSentence}</p> : null}
 
+        {lookAgain && parsed != null ? (
+          <p role="status" className="flex items-start gap-2 rounded-xl border border-[#326273]/25 bg-[var(--warn-bg)] p-3 text-[13px] leading-5 text-[#1F4452]">
+            <CircleAlert className="mt-0.5 h-4 w-4 shrink-0" aria-hidden="true" />
+            <span>That is less than a tenth of your limit of {limit.currentWords}. Check you have not left a zero off. If you meant it, go ahead: you can put the limit back at once with Restore.</span>
+          </p>
+        ) : null}
+
         {raising ? (
           <Field label="Why do you need it?" hint={`${reason.trim().length} of ${REASON_MAX}`} htmlFor="limit-reason" error={touched ? reasonList[0] ?? null : null}>
             <textarea
@@ -205,10 +246,17 @@ function LimitSheet({ sheet, onClose, onDone }: { sheet: NonNullable<Sheet>; onC
               <p className="font-bold text-[#0c3e48]">What happens next</p>
               <p className="mt-1">{WHAT_HAPPENS_NEXT} Until then your limit stays {limit.currentWords}. You can cancel the request at any time before it starts.</p>
             </>
+          ) : days ? (
+            <>
+              <p className="font-bold text-[#0c3e48]">What happens next</p>
+              <p className="mt-1">This holds for the next allowance you give. An allowance you have already given keeps its length until you give it again or take it back, in Automatic payments. There is nothing to ask Splash. If a request for a higher limit is open, it is cancelled so it cannot raise this one later.</p>
+            </>
           ) : (
             <>
               <p className="font-bold text-[#0c3e48]">What happens next</p>
-              <p className="mt-1">The lower limit applies at once. There is nothing to ask Splash. If a request for a higher limit is open, it is cancelled so it cannot raise this one later.</p>
+              <p className="mt-1">
+                The lower limit applies at once, to every automatic payment from now on{kind === 'monthly' ? ' (what was paid in the last 30 days counts towards it)' : ''}. There is nothing to ask Splash. If a request for a higher limit is open, it is cancelled so it cannot raise this one later. If you change your mind, you can put the limit back at once with Restore.
+              </p>
             </>
           )}
         </div>
@@ -216,10 +264,10 @@ function LimitSheet({ sheet, onClose, onDone }: { sheet: NonNullable<Sheet>; onC
         <div role="status" className="empty:hidden">{error ? <p role="alert" className="flex items-start gap-2 rounded-xl border border-[var(--error)]/30 bg-[var(--error-bg)] p-3 text-[13px] font-medium text-[var(--error)]"><CircleAlert className="mt-0.5 h-4 w-4 shrink-0" aria-hidden="true" /><span>{error}</span></p> : null}</div>
 
         <div className="flex flex-wrap justify-end gap-2 border-t border-[#326273]/12 pt-4">
-          <QuietButton type="button" onClick={onClose}>Cancel</QuietButton>
+          <QuietButton type="button" onClick={onClose}>Close</QuietButton>
           <PrimaryButton type="submit" disabled={busy}>
             {busy ? <Loader2 className="h-4 w-4 animate-spin" aria-hidden="true" /> : null}
-            {raising ? 'Send request' : 'Lower limit'}
+            {raising ? 'Send request' : lookAgain ? 'Lower it anyway' : 'Lower limit'}
           </PrimaryButton>
         </div>
       </form>

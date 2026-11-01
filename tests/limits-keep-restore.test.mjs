@@ -115,7 +115,7 @@ async function dbBefore0079() {
 
 const signingRequest = (id, org, status) =>
   `INSERT INTO wallet_signing_requests (id, org_id, purpose, dedupe_key, sender_address, signer_kind, threshold, gas_mode, tx_bytes, tx_digest, bytes_hash, summary, status, requested_by, expires_at)
-   VALUES ('${id}', '${org}', 'wallet_membership', 'dk-${id}', '0x${'aa'.repeat(32)}', 'multisig', 2, 'sponsored', 'bytes', 'digest-${id}', 'hash-${id}', '{}'::jsonb, '${status}', 'u-1', now() + interval '1 day')`;
+   VALUES ('${id}', '${org}', 'wallet_membership', 'dk-${id}', '0x${'aa'.repeat(32)}', 'single', 1, 'sponsored', 'bytes', 'digest-${id}', 'hash-${id}', '{}'::jsonb, '${status}', 'u-1', now() + interval '1 day')`;
 const allowanceEvent = (id, org, ref, per, monthly, days, createdAt) =>
   `INSERT INTO wallet_authority_events (id, org_id, actor_user_id, action, ref, detail, created_at)
    VALUES ('${id}', '${org}', 'u-1', 'automatic_allowance_requested', '${ref}', '{"perPaymentMinor":"${per}","dailyMinor":"0","monthlyMinor":"${monthly}","days":${days}}'::jsonb, '${createdAt}')`;
@@ -312,8 +312,8 @@ test('the pure rules: what restore accepts, and when a lowering asks for a secon
   assert.equal(restoreProblems('per_payment', U(100), U(100), U(2_000)).length, 1);
   assert.equal(restoreProblems('days', 60n, 7n, 90n).length, 0);
   assert.equal(lowerNeedsConfirm('per_payment', U(2), U(2_000)), true, '2 for 2,000 looks like a missing zero');
-  assert.equal(lowerNeedsConfirm('per_payment', U(200), U(2_000)), true, 'under a tenth');
-  assert.equal(lowerNeedsConfirm('per_payment', U(200.01), U(2_000)), false, 'a tenth or more');
+  assert.equal(lowerNeedsConfirm('per_payment', U(199.99), U(2_000)), true, 'under a tenth');
+  assert.equal(lowerNeedsConfirm('per_payment', U(200), U(2_000)), false, 'a tenth or more');
   assert.equal(lowerNeedsConfirm('days', 5n, 90n), true);
   assert.equal(lowerNeedsConfirm('days', 30n, 90n), false);
 });

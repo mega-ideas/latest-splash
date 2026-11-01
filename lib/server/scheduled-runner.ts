@@ -127,6 +127,9 @@ import { resolvePayee, TRANSFER_INTENT_LIFETIME_MS, type PayeeInput } from './wa
 
 /** How long the quote of an automatic payment lasts: it is paid within seconds. */
 export const AUTO_SETTLE_WINDOW_MS = 15 * 60_000;
+
+/** The window the business's monthly limit counts automatic payments over: any 30 days. */
+const MONTHLY_WINDOW_MS = 30 * 24 * 3_600_000;
 /** An unknown outcome is read back from the chain for this long, then given up on: the bytes can no longer land. */
 export const SUBMIT_GIVE_UP_MS = 72 * 3_600_000;
 /** The most missed occurrences made up in one pass: each lapses, and nothing is paid late. */
@@ -578,6 +581,7 @@ async function evaluateAuto(d: ScheduleDeps, sch: ScheduleRow): Promise<CheckedR
   const limits = await currentLimits(d.db, d.orgId, d.now);
   const dailyCap = effectiveDailyCap((await dailyCapOf(d.db, d.orgId)).capMinor, limits);
   const dailyUsed = await autoPaidSince(d.db, d.orgId, new Date(now.getTime() - 24 * 3_600_000));
+  const monthlyUsed = await autoPaidSince(d.db, d.orgId, new Date(now.getTime() - MONTHLY_WINDOW_MS));
   const balance = d.walletBalance ? await d.walletBalance().catch(() => null) : null;
   const verdict = evaluateAutoRun(
     {
@@ -594,7 +598,9 @@ async function evaluateAuto(d: ScheduleDeps, sch: ScheduleRow): Promise<CheckedR
       runningTotals: rule?.facts.runningTotals ?? {},
       dailyCapMinor: dailyCap,
       perPaymentLimitMinor: limits.per_payment,
+      monthlyLimitMinor: limits.monthly,
       dailyUsedMinor: dailyUsed,
+      monthlyUsedMinor: monthlyUsed,
       walletBalanceMinor: balance,
     },
     itemFacts,
@@ -641,6 +647,9 @@ async function executeAuto(d: ScheduleDeps, sch: ScheduleRow, run: RunRow, check
   const reserved = await withLock(d.db, `scheduled-cap|${d.orgId}`, async (tx) => {
     const used = await autoPaidSince(tx, d.orgId, new Date(now.getTime() - 24 * 3_600_000));
     if (used + checked.totalMinor + checked.feeMinor > cap) return 'over_cap' as const;
+    // The same for the business's monthly limit: the last 30 days, counting what the runs before this one have set aside.
+    const usedMonth = await autoPaidSince(tx, d.orgId, new Date(now.getTime() - MONTHLY_WINDOW_MS));
+    if (usedMonth + checked.totalMinor + checked.feeMinor > businessLimits.monthly) return 'over_month' as const;
     // From here the run is the owners' allowance paying: a Skip or a pause moves it, and the payments below look first.
     const moved = await moveRun(tx, d.orgId, run.id, { status: 'approved', ranAs: 'auto', fallback: false, reasonCode: null, reason: null, itemCount: checked.rows.length, totalMinor: checked.totalMinor, feeMinor: checked.feeMinor, updatedAt: now }, ['scheduled']);
     if (!moved) return null;
@@ -648,6 +657,7 @@ async function executeAuto(d: ScheduleDeps, sch: ScheduleRow, run: RunRow, check
     return moved;
   });
   if (reserved === 'over_cap') return prepareApproval(d, sch, run, { code: 'daily_cap', text: fallbackWords('daily_cap') });
+  if (reserved === 'over_month') return prepareApproval(d, sch, run, { code: 'monthly_limit', text: fallbackWords('monthly_limit') });
   if (!reserved) return 0;
   const started = reserved;
   let notices = 0;

@@ -2923,11 +2923,13 @@ export const businessLimits = pgTable('business_limits', {
   orgId: text('org_id').notNull().references(() => organizations.id),
   kind: text('kind').notNull(),
   value: bigint('value', { mode: 'bigint' }).notNull(),
-  /** raised | lowered */
+  /** raised | lowered | restored (migration 0079). */
   source: text('source').notNull(),
-  /** A user id (an owner), or `system:limits` when the notice ran out. */
+  /** A user id (an owner), `system:limits` when the notice ran out, or `system:migration` for a figure the business already ran on. */
   changedBy: text('changed_by').notNull(),
   requestId: text('request_id'),
+  /** The highest figure this business has legitimately held for the limit (migration 0079): an owner restores up to it at once. Never below `value`. */
+  heldMax: bigint('held_max', { mode: 'bigint' }).notNull(),
   updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
 }, (table) => [
   primaryKey({ columns: [table.orgId, table.kind], name: 'business_limits_pk' }),

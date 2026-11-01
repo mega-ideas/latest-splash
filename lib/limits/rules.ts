@@ -83,7 +83,7 @@ export const DECLINE_REASON_MIN = 10;
 export const LIMIT_WORDS: Record<LimitKind, { label: string; says: string; unit: 'usdc' | 'days' }> = {
   per_payment: { label: 'One automatic payment', says: 'The most Splash will pay in a single automatic payment.', unit: 'usdc' },
   daily: { label: 'In a day', says: 'The most Splash will pay automatically in 24 hours, all payments together.', unit: 'usdc' },
-  monthly: { label: 'In a month', says: 'The most an allowance lets Splash pay automatically in a calendar month.', unit: 'usdc' },
+  monthly: { label: 'In a month', says: 'The most Splash will pay automatically in any 30 days, all payments together.', unit: 'usdc' },
   days: { label: 'How long an allowance lasts', says: 'The longest an allowance you give Splash can run before you give it again.', unit: 'days' },
 };
 
@@ -91,6 +91,14 @@ export const LIMIT_WORDS: Record<LimitKind, { label: string; says: string; unit:
 export function formatLimit(kind: LimitKind, units: bigint): string {
   if (kind === 'days') return `${units.toString()} ${units === 1n ? 'day' : 'days'}`;
   return `${formatUsdcBound(units)} USDC`;
+}
+
+/** A value as the text a person would type into the figure field: "2000", "1500.5", "90" (no commas, no unit). */
+export function limitInputValue(kind: LimitKind, units: bigint): string {
+  if (kind === 'days') return units.toString();
+  const whole = units / USDC;
+  const cents = (units % USDC).toString().padStart(6, '0').replace(/0+$/, '');
+  return cents ? `${whole}.${cents}` : whole.toString();
 }
 
 /** What an owner typed: whole days, or an amount of USDC, as the number it means; null when it is neither. */
@@ -146,6 +154,25 @@ export function lowerProblems(kind: LimitKind, lowered: bigint, current: bigint)
   if (lowered < LIMIT_FLOORS[kind]) return [kind === 'days' ? 'A limit is at least one day.' : 'A limit is above zero.'];
   if (lowered >= current) return [`That is not lower than your limit of ${formatLimit(kind, current)}. To get a higher limit, ask Splash for one.`];
   return [];
+}
+
+/**
+ * Is `restored` a figure an owner may put a limit back to? Higher than it is now, and no higher than the most the
+ * business has held (`held`): going past that is a request to Splash, not a restore.
+ */
+export function restoreProblems(kind: LimitKind, restored: bigint, current: bigint, held: bigint): string[] {
+  if (restored <= current) return [`That is not higher than your limit of ${formatLimit(kind, current)}. To lower a limit, choose Lower.`];
+  if (restored > held) return [`Your business has held ${formatLimit(kind, held)} at most, so you can put it back to that and no higher. For more than that, ask Splash.`];
+  return [];
+}
+
+/**
+ * Lowering a limit to under a tenth of what it is looks like a missing zero ("2" for "2,000"). The page asks the owner to
+ * look again before sending it; the owner can put it back at once either way.
+ */
+export function lowerNeedsConfirm(kind: LimitKind, lowered: bigint, current: bigint): boolean {
+  void kind;
+  return lowered * 10n < current;
 }
 
 /** A reason in the owner's own words: not blank, not a one-word shrug, not an essay. Words for what is wrong; empty when it is fine. */
