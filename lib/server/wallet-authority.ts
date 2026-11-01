@@ -30,7 +30,7 @@ import { and, desc, eq, gt, isNotNull, isNull, or } from 'drizzle-orm';
 import { normalizeSuiAddress } from '@mysten/sui/utils';
 import { verifyPersonalMessageSignature } from '@mysten/sui/verify';
 
-import { memberships, passkeyCredentials, walletAuthorityEvents, walletFinanceLeads, walletMemberAccess, walletMigrationSignoffs, walletOffboardedSpenders, walletPersonsInCharge } from '../db/schema.ts';
+import { memberships, passkeyCredentials, teamLeaveRequests, walletAuthorityEvents, walletFinanceLeads, walletMemberAccess, walletMigrationSignoffs, walletOffboardedSpenders, walletPersonsInCharge } from '../db/schema.ts';
 import type { DrizzleDb } from './wallet-signing-store.ts';
 
 export type AuthorityAction =
@@ -63,7 +63,16 @@ export type AuthorityAction =
   | 'automatic_payments_paused'
   | 'automatic_payments_resumed'
   | 'automatic_allowance_requested'
-  | 'automatic_allowance_revoke_requested';
+  | 'automatic_allowance_revoke_requested'
+  | 'team_invitation_sent'
+  | 'team_invitation_accepted'
+  | 'team_invitation_declined'
+  | 'team_invitation_withdrawn'
+  | 'team_invitation_expired'
+  | 'leave_requested'
+  | 'leave_withdrawn'
+  | 'leave_approved'
+  | 'leave_declined';
 
 export type AuthorityFailure = { ok: false; status: number; code: string; error: string };
 const fail = (status: number, code: string, error: string): AuthorityFailure => ({ ok: false, status, code, error });
@@ -300,6 +309,11 @@ export async function offboardMember(
   const addresses = [...new Set(input.addresses.map((a) => normalizeSuiAddress(a)))];
   await recordAuthorityEvent(db, { orgId: input.orgId, actorUserId: input.by, action: 'member_offboarded', subjectUserId: input.userId, detail: { addresses }, now: at });
   const ended = await endMemberHolds(db, { orgId: input.orgId, userId: input.userId, by: input.by, reason: 'membership_removed', now: at });
+  // A request to leave that was still open has nothing left to ask: the person is gone (an approved one is already closed).
+  await db
+    .update(teamLeaveRequests)
+    .set({ status: 'closed', decidedAt: now, decidedBy: input.by })
+    .where(and(eq(teamLeaveRequests.orgId, input.orgId), eq(teamLeaveRequests.userId, input.userId), eq(teamLeaveRequests.status, 'pending')));
   for (const address of addresses) {
     await db.insert(walletOffboardedSpenders).values({ id: `wofs_${randomUUID()}`, orgId: input.orgId, userId: input.userId, address, reason: 'removed', offboardedBy: input.by, offboardedAt: now });
   }

@@ -28,12 +28,109 @@ export type TeamMemberWire = {
 
 export type TeamActivityWire = { id: string; action: string; createdAt: string; actorName: string; subjectName: string | null; summary: string };
 
-/** What GET /api/team answers. `members` and `activity` go to a manager only. */
+/** One open invitation, as a manager sees it. The full address is here; the trail keeps only a masked one. */
+export type InvitationWire = { id: string; email: string; role: MembershipRole; invitedByName: string; createdAt: string; expiresAt: string; canWithdraw: boolean };
+
+/** One open request to leave, as a manager sees it, with whether this manager may decide it. */
+export type LeaveRequestWire = { id: string; userId: string; name: string; email: string; role: MembershipRole; createdAt: string; canDecide: boolean; whyNot: string | null };
+
+/** The signed-in person's own leave state. `message` is the sentence to show. */
+export type LeaveStatusWire = {
+  state: 'none' | 'pending' | 'declined';
+  canRequest: boolean;
+  message: string | null;
+  requestedAt: string | null;
+  decidedAt: string | null;
+  decidedByName: string | null;
+};
+
+/** What GET /api/team answers. `members`, `activity`, `invitations` and `leaveRequests` go to a manager only. */
 export type TeamWire = {
   you: { userId: string; role: MembershipRole | null; manager: Manager; addFunds: boolean; withdraw: boolean };
   members: TeamMemberWire[];
   activity: TeamActivityWire[];
+  invitations: InvitationWire[];
+  leaveRequests: LeaveRequestWire[];
+  leave: LeaveStatusWire;
 };
+
+/** An invitation as the invited person sees it after signing in. Never names any other business. */
+export type MyInvitationWire = {
+  id: string;
+  businessName: string;
+  role: MembershipRole;
+  invitedByName: string;
+  expiresAt: string;
+  canAccept: boolean;
+  blockedReason: string | null;
+};
+
+/** How long an invitation stays open, in days. The server's INVITATION_TTL_MS is this many days. */
+export const INVITATION_DAYS = 7;
+
+/** "a***@example.com": enough to recognise, never the address. The trail is append-only, so it keeps only this. */
+export function maskEmail(email: string): string {
+  const at = email.lastIndexOf('@');
+  if (at < 1) return '***';
+  return `${email[0]}${'*'.repeat(Math.min(Math.max(at - 1, 1), 6))}${email.slice(at)}`;
+}
+
+/** The answer when the invited person already belongs to a business. It names no business. */
+export const ON_A_BUSINESS =
+  'You already belong to a business, and a person can belong to one business at a time. You cannot accept this invitation. You can decline it.';
+
+/** How the owner chooses between the two ways to add someone, in plain words. */
+export const ADD_CHOICES = {
+  invite: {
+    title: 'Send an invitation',
+    body: 'They see it after they sign in and choose to accept or decline. It ends after 7 days, and you can withdraw it before then.',
+    action: 'Send invitation',
+  },
+  direct: {
+    title: 'Add directly',
+    body: 'They join straight away, with no step on their side. Choose this only when you are sure of the person.',
+    action: 'Add to team',
+    confirm: 'I have checked that this is the right person.',
+  },
+} as const;
+
+/**
+ * May this manager decide this person's request to leave? The server and the
+ * page use this one rule. A person never decides their own. The Finance lead
+ * never decides an owner's, nor the request of someone in charge of sign-offs
+ * or who holds Add funds or Withdraw: those are an owner's, as removing them is.
+ */
+export type LeaveDecisionRefusal = 'not_a_manager' | 'own_request' | 'owner_only' | 'granted_authority';
+export function leaveDecisionRefusal(ctx: {
+  manager: Manager;
+  actorUserId: string;
+  leaver: Pick<TeamMemberWire, 'userId' | 'role' | 'inCharge' | 'addFunds' | 'withdraw'>;
+}): LeaveDecisionRefusal | null {
+  if (!ctx.manager) return 'not_a_manager';
+  if (ctx.leaver.userId === ctx.actorUserId) return 'own_request';
+  if (ctx.manager === 'owner') return null;
+  if (ctx.leaver.role === 'admin') return 'owner_only';
+  if (holdsGrantedAuthority(ctx.leaver)) return 'granted_authority';
+  return null;
+}
+
+/** Said next to a request the signed-in manager may not decide. */
+export const LEAVE_WHY_NOT: Record<LeaveDecisionRefusal, string> = {
+  not_a_manager: 'Only an owner decides.',
+  own_request: 'Another owner decides your own request.',
+  owner_only: 'An owner decides an owner’s request.',
+  granted_authority: 'This person is in charge of sign-offs or can add funds or withdraw. An owner decides.',
+};
+
+/** The sentence a person reads about their own request to leave. */
+export function leaveSentence(state: 'none' | 'pending' | 'declined', decidedBy?: string | null): string | null {
+  if (state === 'pending') return 'Your request to leave is with the owners. You keep your access, and any spending rule you hold, until an owner approves it.';
+  if (state === 'declined') return `${decidedBy ?? 'An owner'} declined your request to leave. You are still on the team, with the same access as before. You can ask again.`;
+  return null;
+}
+
+/** Said to the only owner of a business, who cannot ask to leave. */
+export const LAST_OWNER_SENTENCE = 'You are the only owner, so you cannot ask to leave. Make someone else an owner first, then ask.';
 
 /** The four roles in the words a customer uses. */
 export const ROLE_NAME: Record<MembershipRole, string> = { viewer: 'Viewer', maker: 'Staff', checker: 'Approver', admin: 'Owner' };
@@ -160,6 +257,15 @@ export const TEAM_ACTIONS = [
   'member_access_revoked',
   'person_in_charge_appointed',
   'person_in_charge_revoked',
+  'team_invitation_sent',
+  'team_invitation_accepted',
+  'team_invitation_declined',
+  'team_invitation_withdrawn',
+  'team_invitation_expired',
+  'leave_requested',
+  'leave_withdrawn',
+  'leave_approved',
+  'leave_declined',
 ] as const;
 
 /** One trail line in plain words: who did what to whom. */
@@ -185,6 +291,26 @@ export function activitySummary(e: { action: string; detail: unknown; actorName:
       return `${e.actorName} put ${who} in charge of signing off moves.`;
     case 'person_in_charge_revoked':
       return `${e.actorName} took ${who} out of charge of signing off moves.`;
+    case 'team_invitation_sent':
+      return `${e.actorName} invited ${String(d.emailMask ?? 'a person')} as ${A_ROLE[String(d.role)] ?? 'a member'}.`;
+    case 'team_invitation_accepted':
+      return `${e.actorName} accepted the invitation and joined as ${A_ROLE[String(d.role)] ?? 'a member'}.`;
+    case 'team_invitation_declined':
+      return `${e.actorName} declined the invitation to join as ${A_ROLE[String(d.role)] ?? 'a member'}.`;
+    case 'team_invitation_withdrawn':
+      return d.reason === 'inviter_no_longer_manages'
+        ? `The invitation to ${String(d.emailMask ?? 'a person')} was closed because the person who sent it no longer manages the team.`
+        : `${e.actorName} withdrew the invitation to ${String(d.emailMask ?? 'a person')}.`;
+    case 'team_invitation_expired':
+      return `The invitation to ${String(d.emailMask ?? 'a person')} ended after ${INVITATION_DAYS} days without an answer.`;
+    case 'leave_requested':
+      return `${e.actorName} asked to leave the team.`;
+    case 'leave_withdrawn':
+      return `${e.actorName} withdrew their request to leave.`;
+    case 'leave_approved':
+      return `${e.actorName} approved ${who}’s request to leave. ${who} no longer has access.`;
+    case 'leave_declined':
+      return `${e.actorName} declined ${who}’s request to leave. ${who} is still on the team.`;
     default:
       return `${e.actorName} changed the team.`;
   }

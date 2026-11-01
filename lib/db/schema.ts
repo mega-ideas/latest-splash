@@ -1738,6 +1738,50 @@ export const walletMemberAccess = pgTable('wallet_member_access', {
 ]);
 
 /**
+ * An invitation to join a business's team (migration 0073). The person sees it
+ * after signing in with the verified email it was sent to, and accepts or
+ * declines; it ends after 7 days; its sender can withdraw it. There is no token
+ * column on purpose: the signed-in person's own email finds it, so there is no
+ * link to leak or replay.
+ */
+export const teamInvitations = pgTable('team_invitations', {
+  id: text('id').primaryKey(),
+  orgId: text('org_id').notNull().references(() => organizations.id),
+  /** Lowercased, as users.email is. */
+  email: text('email').notNull(),
+  role: text('role').notNull(),
+  invitedBy: text('invited_by').notNull(),
+  /** pending, accepted, declined, withdrawn, expired */
+  status: text('status').notNull().default('pending'),
+  createdAt: timestamp('created_at', { withTimezone: true }).notNull(),
+  expiresAt: timestamp('expires_at', { withTimezone: true }).notNull(),
+  decidedAt: timestamp('decided_at', { withTimezone: true }),
+  decidedBy: text('decided_by'),
+}, (table) => [
+  uniqueIndex('team_invitations_one_open').on(table.orgId, table.email).where(sql`${table.status} = 'pending'`),
+  index('team_invitations_email_idx').on(table.email, table.status),
+  index('team_invitations_org_idx').on(table.orgId, table.status),
+]);
+
+/**
+ * A member's request to leave the business (migration 0073). Nothing changes
+ * until an owner approves: the person keeps their access and any rule.
+ */
+export const teamLeaveRequests = pgTable('team_leave_requests', {
+  id: text('id').primaryKey(),
+  orgId: text('org_id').notNull().references(() => organizations.id),
+  userId: text('user_id').notNull().references(() => users.id, { onDelete: 'cascade' }),
+  /** pending, approved, declined, withdrawn, closed (the person was removed another way) */
+  status: text('status').notNull().default('pending'),
+  createdAt: timestamp('created_at', { withTimezone: true }).notNull(),
+  decidedAt: timestamp('decided_at', { withTimezone: true }),
+  decidedBy: text('decided_by'),
+}, (table) => [
+  uniqueIndex('team_leave_requests_one_open').on(table.orgId, table.userId).where(sql`${table.status} = 'pending'`),
+  index('team_leave_requests_org_idx').on(table.orgId, table.status),
+]);
+
+/**
  * The highest authority's passkey-signed sign-off for one member moving the
  * USDC at one address into one business wallet (migration 0035).
  */

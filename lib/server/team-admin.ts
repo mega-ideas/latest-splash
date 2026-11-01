@@ -56,7 +56,7 @@ import type { DrizzleDb } from './wallet-signing-store.ts';
 
 type Clock = () => Date;
 export type TeamFailure = { ok: false; status: number; code: string; error: string };
-const fail = (status: number, code: string, error: string): TeamFailure => ({ ok: false, status, code, error });
+export const fail = (status: number, code: string, error: string): TeamFailure => ({ ok: false, status, code, error });
 const clock = (now?: Clock) => (now ?? (() => new Date()))();
 
 export const FUNDS_ACCESS_KINDS: readonly FundsAccessKind[] = ['add_funds', 'withdraw'];
@@ -72,7 +72,7 @@ function ownerOnly(manager: Manager, what: string): TeamFailure | null {
 }
 
 /** Run `fn` in one transaction: the change and its clean-up are kept together or not at all. */
-function inTransaction<T>(db: DrizzleDb, fn: (tx: DrizzleDb) => Promise<T>): Promise<T> {
+export function inTransaction<T>(db: DrizzleDb, fn: (tx: DrizzleDb) => Promise<T>): Promise<T> {
   return db.transaction(async (tx) => fn(tx as unknown as DrizzleDb));
 }
 
@@ -81,7 +81,7 @@ function inTransaction<T>(db: DrizzleDb, fn: (tx: DrizzleDb) => Promise<T>): Pro
  * they are. Two owners acting on each other wait here in turn, and the second
  * reads the first's result (a row that stopped being an owner's is skipped).
  */
-async function lockOwners(tx: DrizzleDb, orgId: string): Promise<string[]> {
+export async function lockOwners(tx: DrizzleDb, orgId: string): Promise<string[]> {
   const rows = await tx
     .select({ userId: memberships.userId })
     .from(memberships)
@@ -97,7 +97,7 @@ const LAST_OWNER = () => fail(409, 'last_owner', 'A business always keeps an own
  * Is this person in charge of sign-offs, or do they hold Add funds or
  * Withdraw? An owner granted that, so only an owner moves or removes them.
  */
-async function holdsGrantedAuthority(db: DrizzleDb, orgId: string, userId: string): Promise<boolean> {
+export async function holdsGrantedAuthority(db: DrizzleDb, orgId: string, userId: string): Promise<boolean> {
   const [charge] = await db
     .select({ id: walletPersonsInCharge.id })
     .from(walletPersonsInCharge)
@@ -412,12 +412,12 @@ export async function listTeamActivity(db: DrizzleDb, orgId: string, limit = 50)
     .where(and(eq(walletAuthorityEvents.orgId, orgId), inArray(walletAuthorityEvents.action, [...TEAM_ACTIONS])))
     .orderBy(desc(walletAuthorityEvents.seq))
     .limit(limit);
-  const ids = [...new Set(rows.flatMap((r: { actorUserId: string; subjectUserId: string | null }) => [r.actorUserId, r.subjectUserId]).filter((x: string | null): x is string => Boolean(x) && !String(x).startsWith('operator:')))];
+  const ids = [...new Set(rows.flatMap((r: { actorUserId: string; subjectUserId: string | null }) => [r.actorUserId, r.subjectUserId]).filter((x: string | null): x is string => Boolean(x) && !String(x).startsWith('operator:') && !String(x).startsWith('system:')))];
   const names = new Map<string, string>();
   if (ids.length > 0) {
     for (const u of (await db.select({ id: users.id, name: users.name }).from(users).where(inArray(users.id, ids))) as Array<{ id: string; name: string }>) names.set(u.id, u.name);
   }
-  const nameOf = (id: string | null): string | null => (id === null ? null : id.startsWith('operator:') ? 'Splash support' : names.get(id) ?? 'A former member');
+  const nameOf = (id: string | null): string | null => (id === null ? null : id.startsWith('operator:') ? 'Splash support' : id.startsWith('system:') ? 'Splash' : names.get(id) ?? 'A former member');
   return rows
     .map((r: { id: string; action: string; detail: unknown; createdAt: Date; actorUserId: string; subjectUserId: string | null }) => {
       const actorName = nameOf(r.actorUserId) ?? 'Someone';

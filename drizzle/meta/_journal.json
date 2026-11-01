@@ -512,6 +512,13 @@
       "when": 1794787200000,
       "tag": "0072_retire_batch_payout_proposals",
       "breakpoints": true
+    },
+    {
+      "idx": 73,
+      "version": "7",
+      "when": 1794873600000,
+      "tag": "0073_team_invitations_and_leaving",
+      "breakpoints": true
     }
   ]
 }
