@@ -37,6 +37,7 @@ import { declineApprovalAsk } from '../lib/server/payment-approval-asks.ts';
 import { cancelSigningRequest, declineSigningRequest, readRequestForSigner, signingInbox, submitPartialSignature } from '../lib/server/wallet-signing.ts';
 import { declinedByAllLabel } from '../lib/team/declined-by.ts';
 import { askDeclinerOf, declinersOfRequests } from '../lib/server/wallet-signing-store.ts';
+import { setMemberTitle } from '../lib/server/team-admin.ts';
 
 import { world, T0 } from './fixtures/wallet-world.mjs';
 
@@ -437,6 +438,85 @@ test('an ask an owner declined keeps the owner’s name and title as they were, 
   assert.deepEqual(await askDeclinerOf(db, 'acme', 'wpa_old1'), { names: [{ name: 'Olu', title: 'Owner' }], unnamed: 0 });
   await t.w.client.exec(`DELETE FROM memberships WHERE user_id = 'u-old'`);
   assert.deepEqual(await askDeclinerOf(db, 'acme', 'wpa_old1'), { names: [], unnamed: 1 }, 'no snapshot and gone: an owner');
+  await t.w.client.close();
+});
+
+// ─── v2 Phase 3 (p3-member-title): the member's own title is the title in the label ───
+
+const titleOf = (t, userId, title, actor = 'u-founder') => setMemberTitle(t.w.db, { orgId: 'acme', actorUserId: actor, userId, title, now: () => T0 });
+
+test('a title an owner gave is the title in "Declined by", in History and in the panel; with none, the role word as before', async () => {
+  const t = await setup();
+  await rename(t, { 'u-two': 'Aisha', 'u-three': 'Ben' });
+  assert.equal((await titleOf(t, 'u-two', 'CFO')).ok, true);
+  // Ben sets his own, and it is not "Owner" either.
+  assert.equal((await titleOf(t, 'u-three', 'Finance lead', 'u-three')).ok, true);
+  const made = await declinedPayment(t, 'tx_key_mtitle01', ['u-two', 'u-three']);
+  assert.deepEqual(await snapshotOf(t, made.signingRequest.id, 'u-two'), { name: 'Aisha', title: 'CFO' });
+  assert.deepEqual(labels(await historyOf(t)), ['Declined by Aisha (CFO) and Ben (Finance lead)']);
+  assert.equal(declinedByAllLabel((await panelOf(t, made.signingRequest.id)).request.declinedBy), 'Declined by Aisha (CFO) and Ben (Finance lead)');
+  // Someone with no title is still the role word.
+  const second = await setup();
+  await rename(second, { 'u-two': 'Aisha', 'u-three': 'Ben' });
+  assert.equal((await titleOf(second, 'u-two', 'CFO')).ok, true);
+  await declinedPayment(second, 'tx_key_mtitle02', ['u-two', 'u-three']);
+  assert.deepEqual(labels(await historyOf(second)), ['Declined by Aisha (CFO) and Ben (Owner)']);
+  await t.w.client.close();
+  await second.w.client.close();
+});
+
+test('an old decline keeps the title it was made under: a new title, a cleared title, leaving or removal change nothing', async () => {
+  const t = await setup();
+  await rename(t, { 'u-two': 'Aisha', 'u-three': 'Ben' });
+  await titleOf(t, 'u-two', 'CFO');
+  const made = await declinedPayment(t, 'tx_key_mtitle03', ['u-two', 'u-three']);
+  const said = 'Declined by Aisha (CFO) and Ben (Owner)';
+  assert.deepEqual(labels(await historyOf(t)), [said]);
+  await titleOf(t, 'u-two', 'Chair');
+  await titleOf(t, 'u-three', 'Treasurer', 'u-three');
+  assert.deepEqual(labels(await historyOf(t)), [said], 'a new title does not rewrite an old decline');
+  await titleOf(t, 'u-two', '');
+  assert.deepEqual(labels(await historyOf(t)), [said], 'clearing does not either');
+  await t.w.client.exec(`DELETE FROM memberships WHERE user_id = 'u-two'`);
+  assert.equal(declinedByAllLabel((await panelOf(t, made.signingRequest.id)).request.declinedBy), said, 'and a leaver still shows with the title they had');
+  // A decline made after the change carries the new title.
+  const later = await declinedPayment(t, 'tx_key_mtitle04', ['u-three']);
+  assert.deepEqual(await snapshotOf(t, later.signingRequest.id, 'u-three'), { name: 'Ben', title: 'Treasurer' });
+  await t.w.client.close();
+});
+
+test('a decline from before the snapshot reads the member’s live title while they are a member', async () => {
+  const t = await setup();
+  await rename(t, { 'u-two': 'Aisha', 'u-three': 'Ben' });
+  const made = await declinedPayment(t, 'tx_key_mtitle05', ['u-two', 'u-three']);
+  await t.w.client.exec(`UPDATE wallet_signing_signers SET declined_name = NULL, declined_title = NULL WHERE request_id = '${made.signingRequest.id}'`);
+  await titleOf(t, 'u-two', 'CFO');
+  assert.deepEqual(labels(await historyOf(t)), ['Declined by Aisha (CFO) and Ben (Owner)']);
+  await titleOf(t, 'u-two', 'Chair');
+  assert.deepEqual(labels(await historyOf(t)), ['Declined by Aisha (Chair) and Ben (Owner)'], 'no snapshot: the live title');
+  await t.w.client.close();
+});
+
+test('an ask an owner declined keeps that owner’s title as it was', async () => {
+  const t = await setup();
+  await rename(t, { 'u-two': 'Aisha' });
+  await titleOf(t, 'u-two', 'CFO');
+  await t.w.db.insert(schema.walletApprovalAsks).values({ id: 'wpa_mtitle1', orgId: 'acme', intentId: 'intent-m', requestedBy: 'u-three', intent: {}, note: null, contentHash: 'h', walrusBlobId: 'b', status: 'open', expiresAt: new Date(T0.getTime() + 86_400_000) });
+  assert.equal((await declineApprovalAsk(t.w.db, { orgId: 'acme', userId: 'u-two', askId: 'wpa_mtitle1', now: () => T0 })).ok, true);
+  await titleOf(t, 'u-two', 'Chair');
+  assert.deepEqual(await askDeclinerOf(t.w.db, 'acme', 'wpa_mtitle1'), { names: [{ name: 'Aisha', title: 'CFO' }], unnamed: 0 });
+  await t.w.client.close();
+});
+
+test('another business’s title is never read into this business’s label', async () => {
+  const t = await setup();
+  await rename(t, { 'u-two': 'Aisha', 'u-north': 'Nadia' });
+  await t.w.client.exec(`UPDATE memberships SET title = 'Northwind Chair' WHERE user_id = 'u-north'`);
+  await titleOf(t, 'u-two', 'CFO');
+  const made = await declinedPayment(t, 'tx_key_mtitle06', ['u-two']);
+  const all = JSON.stringify([await historyOf(t), (await panelOf(t, made.signingRequest.id)).request.declinedBy]);
+  assert.doesNotMatch(all, /Northwind Chair|Nadia/);
+  assert.equal((await titleOf(t, 'u-north', 'Spy')).ok, false, 'an acme owner cannot set a northwind person’s title');
   await t.w.client.close();
 });
 

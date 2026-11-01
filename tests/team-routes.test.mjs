@@ -33,6 +33,7 @@ const TEAM_ROUTES = {
   'app/api/team/me/route.ts': { GET: null },
   'app/api/team/members/[userId]/route.ts': { PATCH: 'changeTeamMemberRole', DELETE: 'removeTeamMember' },
   'app/api/team/members/[userId]/access/route.ts': { PUT: 'setMemberAccess' },
+  'app/api/team/members/[userId]/title/route.ts': { PUT: 'setMemberTitle' },
   'app/api/team/finance-lead/route.ts': { POST: 'appointFinanceLead', DELETE: 'revokeFinanceLead' },
   'app/api/team/invitations/route.ts': { POST: 'sendInvitation' },
   'app/api/team/invitations/[invitationId]/route.ts': { DELETE: 'withdrawInvitation' },
@@ -113,7 +114,7 @@ test('the team gate reads the business from the session and fails closed without
 
 test('nothing outside the team routes (and the service itself) calls a team-changing function: a new route cannot skip the rules', () => {
   const names = [
-    'addTeamMember', 'changeTeamMemberRole', 'removeTeamMember', 'appointFinanceLead', 'revokeFinanceLead', 'setMemberAccess',
+    'addTeamMember', 'changeTeamMemberRole', 'removeTeamMember', 'appointFinanceLead', 'revokeFinanceLead', 'setMemberAccess', 'setMemberTitle',
     'sendInvitation', 'withdrawInvitation', 'acceptInvitation', 'declineInvitation', 'resendInvitationEmail', 'deliverInvitationEmail',
     'requestToLeave', 'withdrawLeaveRequest', 'approveLeaveRequest', 'declineLeaveRequest',
   ];
