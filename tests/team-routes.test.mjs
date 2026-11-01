@@ -290,10 +290,10 @@ test('adding directly needs the owner to confirm they have the right person; an 
   assert.doesNotMatch(code(read('app/api/team/invitations/route.ts')), /confirmed/);
 });
 
-test('approving a request to leave takes the rule back through the spending-rules revoke path, for an owner only', () => {
+test('approving a request to leave takes the rule back through the spending-rules revoke path, for an owner only, and records what followed', () => {
   const approve = code(handler(read('app/api/team/leave-requests/[requestId]/approve/route.ts'), 'POST'));
-  assert.ok(approve.indexOf('approveLeaveRequest(') < approve.indexOf('revokeLeaverRules('), 'the membership ends first, then the rule revoke opens');
-  assert.match(approve, /authority\.role === 'OWNER'/);
+  assert.ok(approve.indexOf('approveLeaveRequest(') < approve.indexOf('runLeaveFollowUp('), 'the membership ends first, then the follow-up (rule revoke, signer state, trail line) runs');
+  assert.doesNotMatch(approve, /by_owner/, 'only an owner decides, so there is no "left for an owner" path');
   const helper = code(read('lib/server/team-leave-rules.ts'));
   assert.match(helper, /revokeOrphanedRules\(/, 'the existing revoke path, which the wallet owners sign');
   assert.match(helper, /route\.authority\.role !== 'OWNER'/);
