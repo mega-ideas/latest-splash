@@ -44,7 +44,8 @@ test('a title has no link, markup, control or hidden character, and no bracket o
   assert.equal(plainTitle('evil.example'), null);
   assert.equal(plainTitle('<b>CFO</b>'), null);
   assert.equal(plainTitle('R&amp;D'), null, 'an entity is not a word');
-  assert.equal(plainTitle('R&D lead'), null, 'a symbol inside a word is not a plain word');
+  assert.equal(plainTitle('R$D lead'), null, 'a symbol inside a word is not a plain word');
+  assert.equal(plainTitle('R&D lead'), 'R&D lead', 'except one ampersand inside a short word: R&D, P&L (the review of the title)');
   assert.equal(plainTitle('javascript:alert'), null);
   assert.equal(plainTitle('1234'), null);
   assert.equal(plainTitle('Declined'), null, 'a word that would read as a second sentence is not a title');
@@ -160,7 +161,7 @@ test('every place that builds "Name (Title)" reads the title: the live card, the
   assert.match(read('lib/server/team-admin.ts'), /title: .*plainTitle|plainTitle\(r\.title\)/, 'the team list carries each title');
   assert.match(read('lib/server/org-member-names.ts'), /memberships\.title/, 'the people to put in charge carry their titles');
   assert.doesNotMatch(code(read('components/wallet/Migration.tsx')), /roleLabel\(m\.role\)/, 'the person in charge is named with a title, not only the role word');
-  assert.match(read('components/wallet/Migration.tsx'), /memberTitle\(m\)/);
+  assert.match(read('components/wallet/Migration.tsx'), /titleAndRole\(m\)/, 'through titleAndRole, which also keeps the role beside it');
   const card = read('components/settings/TeamCard.tsx');
   assert.match(card, /OwnTitle/, 'every member can set their own title in Settings');
   assert.match(read('components/team/MemberDialog.tsx'), /md-title/, 'an owner sets another person’s title under Manage');

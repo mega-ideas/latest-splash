@@ -102,7 +102,7 @@ test('an owner may set their own title, and another owner’s', async () => {
 
 test('a person sets their own title, whatever their role, and it is on the trail as their own', async () => {
   const { client, db } = await seeded();
-  for (const [userId, title] of [['u-viewer', 'Analyst'], ['u-maker', 'Operations'], ['u-appr', 'CFO'], ['u-lead', 'Finance lead']]) {
+  for (const [userId, title] of [['u-viewer', 'Analyst'], ['u-maker', 'Operations'], ['u-appr', 'CFO'], ['u-lead', 'Controller']]) {
     const r = await setMemberTitle(db, { ...base, actorUserId: userId, userId, title });
     assert.deepEqual(r, { ok: true, changed: true, title }, userId);
   }
@@ -143,7 +143,7 @@ test('a title is plain words: links, markup and hidden characters never get in; 
   const set = (title) => setMemberTitle(db, { ...base, actorUserId: 'u-owner', userId: 'u-maker', title });
   assert.deepEqual(await set('CFO (Finance), Ops'), { ok: true, changed: true, title: 'CFO Finance Ops' });
   assert.deepEqual(await set('Ops​ lead‮'), { ok: true, changed: true, title: 'Ops lead' });
-  assert.deepEqual(await set('Lead https://evil.example/pay'), { ok: true, changed: true, title: 'Lead' });
+  assert.deepEqual(await set('Lead https://evil.example/pay'), { ok: true, changed: true, title: 'Lead', leftOut: 'https://evil.example' }, 'the word it stopped at is said');
   for (const bad of ['https://evil.example', '<script>alert(1)</script>', '<b>CFO</b>', '1234', '[x](https://evil.example)x']) {
     const r = await set(bad);
     if (bad.startsWith('[x]')) {
