@@ -108,3 +108,10 @@ test('the status pill never grows past its row: it caps at the row width and wra
   const history = readFileSync(new URL('../components/history/HistoryPage.tsx', import.meta.url), 'utf8');
   assert.match(history, /<Pill tone=\{entry\.status\.tone\}>/, 'History says its status through the shared pill');
 });
+
+test('the batch page does not widen for a long name: its one column is capped at the screen and the summary breaks a long word', async () => {
+  const { readFileSync } = await import('node:fs');
+  const flow = readFileSync(new URL('../components/batch/BatchFlow.tsx', import.meta.url), 'utf8');
+  assert.match(flow, /<div className="grid grid-cols-1 gap-4 lg:grid-cols-\[minmax\(0,1fr\)_320px\]">/, 'on a phone the grid is one column that cannot be wider than the screen (an auto column grows to its longest word)');
+  assert.match(flow, /<div className="mt-2 break-words text-xl font-extrabold">\{made \? statusWords\(made\.batch\)/, 'the summary beside the approval breaks a 30-letter name rather than pushing the page wider');
+});
