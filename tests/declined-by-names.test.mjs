@@ -61,16 +61,18 @@ test('a name with a dash from another keyboard is still the whole name, not the 
 });
 
 test('when a word is not plain, the name stops there; what follows is never shown as the person', () => {
-  assert.equal(plainName('Tan, Aisha'), null, 'a comma makes the first word unplain: nothing is guessed');
+  // v2 Phase 3 (p3-decliners): brackets and commas inside one field are removed in place, not a reason to drop the name.
+  assert.equal(plainName('Tan, Aisha'), 'Tan Aisha', 'a comma inside the name is removed, the name stays');
   assert.equal(plainName('Mc.Donald'), null);
   assert.equal(plainName('Dr.Evil'), null);
   assert.equal(plainName('Aisha.Ben'), null);
-  assert.equal(plainName('Aisha (Finance)'), 'Aisha');
+  assert.equal(plainName('Aisha (Finance)'), 'Aisha Finance', 'brackets are removed in place');
   assert.equal(plainName('Aisha \u{1F600} Rahman'), 'Aisha', 'the name stops at the emoji');
   assert.equal(plainName('Aisha 2nd Rahman'), 'Aisha');
   assert.equal(plainName('<b>Aisha</b> Rahman'), null);
   assert.equal(plainName('Aisha evil.example Rahman'), 'Aisha');
-  assert.equal(declinedByLabel({ names: ['Tan, Aisha', 'Ben'], unnamed: 0 }), 'Declined by Ben and 1 more', 'the person still counts');
+  assert.equal(declinedByLabel({ names: ['<b>Aisha</b> Rahman', 'Ben'], unnamed: 0 }), 'Declined by Ben and 1 more', 'the person still counts');
+  assert.equal(declinedByLabel({ names: ['Tan, Aisha', 'Ben'], unnamed: 0 }), 'Declined by Tan Aisha and Ben');
 });
 
 test('a run of combining marks cannot stack through the lines around it', () => {

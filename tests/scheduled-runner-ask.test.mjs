@@ -179,7 +179,7 @@ test('an owner who declines ends the run as skipped, and an owner who skips with
   assert.equal(declined.reasonCode, 'declined');
   assert.match(declined.reason, /Nothing was paid/);
   // The run's reason says who declined it, like the batch it points to. Both declined at the one instant of the test clock, so either order is the order they declined in.
-  assert.match(declined.reason, /^Declined by (u-two and u-three|u-three and u-two)\. Nothing was paid\.$/);
+  assert.match(declined.reason, /^Declined by (u-two \(Owner\) and u-three \(Owner\)|u-three \(Owner\) and u-two \(Owner\))\. Nothing was paid\.$/);
 
   const t2 = await ready();
   await t2.clock(FIRST);
