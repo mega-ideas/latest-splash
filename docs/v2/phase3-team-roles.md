@@ -23,6 +23,7 @@ Sky's decisions (31 Oct):
 | Invitations, and leaving | `lib/server/team-invitations.ts`, `lib/server/team-leave.ts`, `lib/server/team-leave-rules.ts` (migration 0073) |
 | Tables | `wallet_finance_leads`, `wallet_member_access` (migration 0066); `team_invitations`, `team_leave_requests` (migration 0073) |
 | Trail | `wallet_authority_events` (append-only) |
+| Job title ("Aisha (CFO)") | `memberships.title` (migration 0083); `setMemberTitle` in `lib/server/team-admin.ts`; `PUT /api/team/members/:id/title`; `lib/team/member-title.ts`; see "Job title" below |
 
 ## Roles
 
@@ -55,6 +56,7 @@ refused for them without anyone remembering to say so.
 | Change or remove an owner | yes (not themselves) | no | no |
 | Change or remove themselves | no | no | no |
 | Appoint or take back the Finance lead | yes | no | no |
+| Set or clear someone's job title | yes (anyone in their business, themselves included) | no, their own only | their own only |
 | Give or take away Add funds, Withdraw | yes | no (themselves included) | no |
 | Start a request to add a signer | yes | yes | no |
 | Remove an owner or set the recovery party (wallet) | yes | no | no |
@@ -340,7 +342,7 @@ transaction, so a failure between them keeps neither.
 Every grant, change and removal is a line in `wallet_authority_events`, which a
 trigger keeps append-only: `member_added`, `member_role_changed` (with the old
 and new role), `member_removed`, `finance_lead_appointed`,
-`finance_lead_revoked`, `member_access_granted`, `member_access_revoked`, plus
+`finance_lead_revoked`, `member_access_granted`, `member_access_revoked`, `member_title_changed` (migration 0083), plus
 the person-in-charge and offboarding lines that already existed, and (migration
 0073) one line for every invitation and leave step: `team_invitation_sent`,
 `team_invitation_accepted` (by the person; `member_added` follows under the
@@ -399,9 +401,95 @@ who manages nothing sees who they are and whether they can add funds and
 withdraw, that their owners manage the team, and Leave this business (ask to
 leave, where the request stands, or why they cannot ask).
 
+**Your title** sits above the list for everyone (an owner, the Finance lead, and
+a member who manages nothing): one field and its own Save title button, with the
+words that explain it. In the list the title shows after the name ("Aisha
+(CFO)"), the role pill stays, and a person with no title shows the name only.
+**Manage** gains a "Job title" section for an owner, for the person they opened.
+
 The team is managed without a business wallet (it needs only the database), so
 an owner can add people before the wallet exists. The person in charge, rules
 and signers still need the wallet.
+
+## Job title
+
+Sky's request (round four): people always show with their title, "Aisha (CFO)".
+Round four built the label but a membership had no title to put in it, so labels
+read the role word. This adds the field.
+
+| What | Where |
+|---|---|
+| The column | `memberships.title`, text, NULL by default, at most 40 characters (CHECK `memberships_title_length`); migration `drizzle/0083_member_title.sql` |
+| Cleaning, and the label | `plainTitle` (`lib/team/declined-by.ts`), `memberTitle`, `memberLabel`, `titleFromInput` (`lib/team/member-title.ts`) |
+| The write | `setMemberTitle`, `titleOf`, `listTeam` (`lib/server/team-admin.ts`); `PUT /api/team/members/:userId/title { title }` |
+| The live card and the snapshot | `liveCards`, `declineSnapshot`, `memberLabelOf` (`lib/server/wallet-signing-store.ts`) |
+| Settings → Team | `components/team/OwnTitle.tsx` (everyone, "Your title"), the "Job title" section of `components/team/MemberDialog.tsx` (an owner, for someone else), both through `components/team/TitleForm.tsx` |
+| Tests | `tests/member-title.test.mjs` (cleaning, labels, trail words, who is offered it, wiring, the migration), `tests/member-title-store.test.mjs` (a real database), the end of `tests/declined-by-history.test.mjs` (the snapshot, History, the panel) |
+
+- **Empty by default.** Nobody is given a title by the migration. With none, the
+  title is what it was: the role word, or "Finance lead" for the appointed
+  approver. A title the person or an owner sets comes first, so an approver who
+  is also the Finance lead and has a title of their own reads that title.
+- **Who sets it.** An owner sets or clears anyone's title in their own business
+  (themselves included). Every member sets their own, whatever their role, the
+  Finance lead and a viewer included. Nobody else sets another person's: the
+  Finance lead gets `owner_only`, staff, approvers and viewers `not_allowed`
+  (403). It is the owner's own change, so it is **instant**: no notice, no
+  cooldown, no second signature. A title grants and changes nothing but how a
+  name is written.
+- **Cleaned as plain words**, on the server, before it is written, with the
+  rules of a name (the same `plainWords`): no link, markup, control or hidden
+  character; spaces collapsed; brackets and commas of every kind turned into a
+  space ("CFO (Finance), Ops" is "CFO Finance Ops"); the title ends at the first
+  word that is not a plain word (a link, a number, a symbol, "and", "declined");
+  at most **40 characters** counting the one ellipsis, cut at a word. Cutting a
+  cut title changes nothing. Typing nothing, spaces, or only hidden characters
+  clears it. Typing something with no plain word in it (a link, markup, only
+  numbers) is refused (400 `bad_title`) and nothing is changed, so nobody is
+  told "saved" for something that was not; a body with no `title` at all is
+  refused too, never read as a clear. The page shows what the server kept.
+  A stored title is cleaned again wherever it is read (the team list, the live
+  card), whatever wrote it.
+- **The trail.** A change that changes something writes one
+  `member_title_changed` line (actor, person, `by` owner or self, `from`, `to`)
+  and "Asha set Ben's title to CFO." / "Ben set their own title to CFO." /
+  "Asha cleared Ben's title." shows in Recent changes. The same title again, or
+  clearing an empty one, writes nothing; two owners at once make one change (the
+  membership row is locked while it is read and written). A person's own change
+  is on the trail too, not only an owner's, because a self-chosen title is what
+  another owner reads in "Declined by".
+- **Tenants.** The actor must be a member of the business in the session (403
+  otherwise). A person of another business reads as absent (404 `not_a_member`),
+  and neither the live card, the team list nor a decline reads another
+  business's title (the card is read through this business's own membership).
+- **Where it is read.** `memberTitle` is the one title. It feeds the live card
+  (so the decline snapshot written when someone declines carries the title they
+  have *then*), History and the signing panel (through that snapshot), the team
+  list (the title after the name, the role pill unchanged), "Person in charge"
+  and its picker in Settings (`Aisha (CFO)` instead of `Aisha (Approver)`), the
+  Manage dialog, and `memberLabelOf`, the one server helper for any sentence
+  that names a person with their title.
+- **Old declines keep their stored snapshot.** A new title, a cleared title,
+  leaving or removing the account changes nothing already written. A decline from
+  before snapshots (null) still reads the person's live title while they are a
+  member, else "an owner" (tests in `declined-by-history.test.mjs`).
+- **The exchange confirmation.** The Travel Rule message's "Sent by" row
+  (`lib/server/exchange-disclosure.ts`) still carries the person's name only, as
+  built; that row and "Payment details as sent" (the string the provider
+  receives) are what the exchange is told, and sharing more about a person than
+  their name needs Sky's confirmation (the same reason as the name today).
+  Anything built on the confirmation's own screen that says who is paying, such
+  as "Sent by Aisha (CFO)", reads `memberLabelOf(db, orgId, userId)`, which
+  returns the title as it is now for this business's member and nothing for
+  anyone else (tested). The invitation email names the sender by name only and
+  needs nothing from this field.
+- **Words a title cannot hold.** Because a title is cleaned like a name, "Sales
+  and Marketing lead" is kept as "Sales", and "R&D lead" is refused: "and" and
+  symbols end it. That is round four's rule that one account never reads as two
+  people ("Declined by Aisha (Owner and Ben)"). The field says so under the box.
+  Allowing "and" inside a title is a change to that guard for Sky to decide.
+- **Not changed.** No Move code. A title is Splash's text, not an on-chain
+  fact: the multisig, the signers and every owner check are unchanged.
 
 ## Tests
 
@@ -671,10 +759,10 @@ declined:
 | Migration | `drizzle/0081_decliner_snapshot.sql` |
 | Tests | `tests/declined-by-titles.test.mjs` (the words), `tests/declined-by-history.test.mjs` (a real database: the panel, History, the snapshot, leavers, renames, old rows, other businesses) |
 
-**What a member's title is.** A membership is a user, a business and a role; a
-member has no title or job field of their own in this code. The title is
-therefore the member's own title when one is set (`memberTitle` reads it first,
-so adding the field later changes nothing else), else the role's word: Owner
+**What a member's title is.** A membership is a user, a business, a role and,
+since migration 0083, an optional job title (see "Job title" above). The title
+is the member's own title when one is set (`memberTitle` reads
+`memberships.title` first), else the role's word: Owner
 (`admin`), Staff (`maker`), Approver (`checker`), Viewer (`viewer`), and
 **Finance lead** for the approver the owners appointed to it
 (`wallet_finance_leads`, open and still an approver). A person with no
@@ -690,7 +778,8 @@ cannot add a bracket, a comma, a link or a second person.
   earlier rule that turned "Aisha (CFO)" into "Aisha" and "Tan,
   Aisha" into "an owner" is replaced.
 - A field stops at its first word that is not a plain word (a link, markup, a
-  number, a symbol, an emoji), and is at most 30 characters, cut once at a word
+  number, a symbol, an emoji), and is at most 30 characters for a name and 40
+  for a title (the ellipsis counted), cut once at a word
   with the one ellipsis character. Control, hidden and direction characters are
   removed and spaces are collapsed.
 - A name that is empty after cleaning is said by the title alone ("Finance
@@ -724,5 +813,6 @@ nothing usable was left; null means the decline predates 0081.
 - **Repeat.** A second decline by the same person writes nothing, snapshot
   included.
 
-**Not changed.** No Move code. Adding a title field to a member (and a place in
-Settings > Team to set it) is a product decision for Sky; nothing here needs it.
+**Not changed.** No Move code. The title field and the place in Settings > Team
+to set it were added afterwards (p3-member-title, "Job title" above): the
+snapshot now carries a member's own title when they have one.

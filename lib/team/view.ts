@@ -8,6 +8,7 @@
  * same server rule.
  */
 import type { MembershipRole } from '../membership-roles.ts';
+import { plainTitle } from './declined-by.ts';
 import type { InviteEmailWire } from './invitation-email.ts';
 
 export const FINANCE_LEAD_NAME = 'Finance lead';
@@ -23,6 +24,8 @@ export type TeamMemberWire = {
   name: string;
   email: string;
   role: MembershipRole;
+  /** The job title an owner or the person set (plain words, at most 40 characters), or null: then the role word is the title. */
+  title: string | null;
   financeLead: boolean;
   inCharge: boolean;
   addFunds: boolean;
@@ -61,7 +64,7 @@ export type LeaveStatusWire = {
 
 /** What GET /api/team answers. `members`, `activity`, `invitations` and `leaveRequests` go to a manager only. */
 export type TeamWire = {
-  you: { userId: string; role: MembershipRole | null; manager: Manager; addFunds: boolean; withdraw: boolean };
+  you: { userId: string; role: MembershipRole | null; manager: Manager; addFunds: boolean; withdraw: boolean; /** The signed-in person's own job title, or null. */ title: string | null };
   members: TeamMemberWire[];
   activity: TeamActivityWire[];
   invitations: InvitationWire[];
@@ -244,6 +247,16 @@ export function holdsGrantedAuthority(row: Pick<TeamMemberWire, 'role' | 'inChar
   return row.role !== 'admin' && row.role !== 'viewer' && (row.inCharge || row.addFunds || row.withdraw || Boolean(row.payExchangeAlone));
 }
 
+/**
+ * Who may set this person's job title, as the page offers it: an owner for anyone in their business,
+ * and everyone for themselves. Nobody else, the Finance lead included, sets another person's. The
+ * server decides again (setMemberTitle).
+ */
+export function titleEditor(ctx: { manager: Manager; youUserId: string }, userId: string): 'owner' | 'self' | null {
+  if (userId === ctx.youUserId) return 'self';
+  return ctx.manager === 'owner' ? 'owner' : null;
+}
+
 /** What the signed-in manager is offered on one person's row. */
 export function rowControls(ctx: { manager: Manager; youUserId: string }, row: Pick<TeamMemberWire, 'userId' | 'role' | 'financeLead' | 'inCharge' | 'addFunds' | 'withdraw'> & { payExchangeAlone?: boolean }): RowControls {
   if (!ctx.manager || row.userId === ctx.youUserId) return NONE;
@@ -326,6 +339,7 @@ export const TEAM_ACTIONS = [
   'finance_lead_revoked',
   'member_access_granted',
   'member_access_revoked',
+  'member_title_changed',
   'person_in_charge_appointed',
   'person_in_charge_revoked',
   'team_invitation_sent',
@@ -359,6 +373,12 @@ export function activitySummary(e: { action: string; detail: unknown; actorName:
       return `${e.actorName} let ${who} ${d.access === 'withdraw' ? 'withdraw' : d.access === 'pay_exchange_alone' ? 'pay exchange accounts alone' : 'add funds'}.`;
     case 'member_access_revoked':
       return `${e.actorName} stopped ${who} ${d.access === 'withdraw' ? 'withdrawing' : d.access === 'pay_exchange_alone' ? 'paying exchange accounts alone' : 'adding funds'}.`;
+    case 'member_title_changed': {
+      // A title in the trail is read as plain words again, like every other text a person typed.
+      const to = plainTitle(d.to);
+      if (d.by === 'self') return to ? `${e.actorName} set their own title to ${to}.` : `${e.actorName} cleared their own title.`;
+      return to ? `${e.actorName} set ${who}’s title to ${to}.` : `${e.actorName} cleared ${who}’s title.`;
+    }
     case 'person_in_charge_appointed':
       return `${e.actorName} put ${who} in charge of signing off moves.`;
     case 'person_in_charge_revoked':

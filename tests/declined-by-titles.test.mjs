@@ -21,7 +21,7 @@ import { readFileSync } from 'node:fs';
 import test from 'node:test';
 
 import { copyViolations } from '../scripts/copy-rules.mjs';
-import { cleanDecliners, declinedByAllLabel, declinedByLabel, declinerLabel, plainName } from '../lib/team/declined-by.ts';
+import { cleanDecliners, declinedByAllLabel, declinedByLabel, declinerLabel, plainName, plainTitle } from '../lib/team/declined-by.ts';
 import { memberTitle } from '../lib/team/member-title.ts';
 import { buildHistory } from '../lib/history-page/entries.ts';
 
@@ -97,7 +97,7 @@ test('a name and a title are cleaned separately, so neither can add a bracket, a
 test('a name and a title are each cut once to a sensible length with the one ellipsis character', () => {
   const label = declinerLabel(person('A'.repeat(500), 'B'.repeat(500)));
   assert.match(label, /^A{30}… \(B{39}…\)$/, 'a name is cut at 30 and a title at 40 (the ellipsis counted)');
-  assert.equal(declinerLabel(person(plainName('A'.repeat(500)), plainName('B'.repeat(500)))), label, 'cutting what was cut changes nothing');
+  assert.equal(declinerLabel(person(plainName('A'.repeat(500)), plainTitle('B'.repeat(500)))), label, 'cutting what was cut changes nothing');
   assert.equal(declinerLabel(person('  Aisha   binti    Rahman ', '  Finance    lead ')), 'Aisha binti Rahman (Finance lead)', 'spaces are collapsed');
 });
 

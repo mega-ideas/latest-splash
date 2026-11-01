@@ -108,8 +108,8 @@ const labels = (entries) => entries.map((e) => e.status.label);
 const historyOf = async (t, orgId = 'acme') => buildHistory({ transfers: await T.listTransfers(t.deps(orgId)), batches: await B.listBatches(t.deps(orgId)), withdrawals: [], earlier: [] });
 
 /** A payment the owners declined: the named owners decline it, one after the other, a minute apart. */
-async function declinedPayment(t, clientKey, decliners = ['u-two', 'u-three']) {
-  const recipientId = await savedWallet(t);
+async function declinedPayment(t, clientKey, decliners = ['u-two', 'u-three'], address = SUPPLIER_WALLET) {
+  const recipientId = await savedWallet(t, address);
   const made = await T.createTransfer(t.deps(), OWNER, input(recipientId, clientKey));
   assert.equal(made.ok, true, JSON.stringify(made));
   let minute = 0;
@@ -480,7 +480,7 @@ test('an old decline keeps the title it was made under: a new title, a cleared t
   await t.w.client.exec(`DELETE FROM memberships WHERE user_id = 'u-two'`);
   assert.equal(declinedByAllLabel((await panelOf(t, made.signingRequest.id)).request.declinedBy), said, 'and a leaver still shows with the title they had');
   // A decline made after the change carries the new title.
-  const later = await declinedPayment(t, 'tx_key_mtitle04', ['u-three']);
+  const later = await declinedPayment(t, 'tx_key_mtitle04', ['u-three'], WALLET_A);
   assert.deepEqual(await snapshotOf(t, later.signingRequest.id, 'u-three'), { name: 'Ben', title: 'Treasurer' });
   await t.w.client.close();
 });

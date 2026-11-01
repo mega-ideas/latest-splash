@@ -2,11 +2,13 @@
 
 import { useRef, useState } from 'react';
 
+import TitleForm from '@/components/team/TitleForm';
 import { call, errorText } from '@/components/transfer/api';
 import { Field, Modal, PrimaryButton, QuietButton, SelectInput } from '@/components/transfer/ui';
 import { Note } from '@/components/wallet/parts';
 import type { MembershipRole } from '@/lib/membership-roles';
-import { EXCHANGE_ALONE_LABEL, EXCHANGE_ALONE_WORDS, FINANCE_LEAD_NAME, ROLE_NAME, ROLE_SENTENCE, holdsGrantedAuthority, roleChangeNote, rowControls, type MemberAccessKind, type Manager, type TeamMemberWire } from '@/lib/team/view';
+import { memberTitle } from '@/lib/team/member-title';
+import { EXCHANGE_ALONE_LABEL, EXCHANGE_ALONE_WORDS, FINANCE_LEAD_NAME, ROLE_NAME, ROLE_SENTENCE, holdsGrantedAuthority, roleChangeNote, rowControls, titleEditor, type MemberAccessKind, type Manager, type TeamMemberWire } from '@/lib/team/view';
 
 /**
  * One person on the team: their role, what they may do with Add funds and
@@ -112,6 +114,16 @@ export default function MemberDialog({
             <PrimaryButton type="button" disabled={busy !== null || chosen === member.role} onClick={() => void saveRole()}>
               {busy === 'role' ? 'Saving…' : 'Save role'}
             </PrimaryButton>
+          </section>
+        ) : null}
+
+        {titleEditor({ manager, youUserId }, member.userId) === 'owner' ? (
+          <section className="space-y-2" aria-labelledby="md-title">
+            <h3 id="md-title" className="text-[13px] font-extrabold text-[#0c3e48]">Job title</h3>
+            <p className="text-[13px] leading-5 text-[#326273]">
+              {member.title ? `Shown as ${member.name} (${member.title}).` : `Shown as ${member.name} (${memberTitle(member)}) until you set a title. Your change is instant.`}
+            </p>
+            <TitleForm userId={member.userId} current={member.title} label={`${member.name}’s title`} whose={`${member.name}’s`} roleWord={memberTitle(member)} onChanged={onChanged} />
           </section>
         ) : null}
 

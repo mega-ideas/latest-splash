@@ -112,3 +112,19 @@ It also drops one foreign key, by name and `IF EXISTS`:
 that a person declined, with the snapshot) when the account was deleted. The
 column and its place in the primary key stay. Nothing else is dropped and no
 `CASCADE` is used. Safe to run again.
+
+## `0083_member_title`
+
+`0083` adds one nullable text column, `memberships.title`: a member's job title
+(for example CFO, Finance lead, Operations), plain words, at most 40 characters,
+**empty for everyone** after the migration (no row is touched, nobody is given a
+title). Empty means the role word is the title, as before. A CHECK
+(`memberships_title_length`) refuses more than 40 characters, as a backstop to
+the cleaning the app does before it writes.
+
+It also adds `member_title_changed` to the audit trail's allowed actions. A CHECK
+cannot be extended, so `wallet_authority_events_action_check` is dropped and added
+again **with every value `0079` listed plus the new one** (a shorter list would
+refuse lines already written; `tests/member-title.test.mjs` compares the two
+lists). Safe to run again; nothing is dropped but those two constraints, by name
+and `IF EXISTS`.

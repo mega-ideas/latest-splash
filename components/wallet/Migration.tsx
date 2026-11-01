@@ -7,8 +7,9 @@ import { call, errorText, type SigningView } from '@/components/transfer/api';
 import SignPanel from '@/components/transfer/SignPanel';
 import { Field, PrimaryButton, QuietButton, SelectInput } from '@/components/transfer/ui';
 import { shortAddress } from '@/lib/payments/stablecoin-lane';
+import { memberTitle } from '@/lib/team/member-title';
 import { describeSignError, signApprovalWithPasskey } from '@/lib/wallet/sui-signers';
-import { personsInChargeView, roleLabel, type Member } from '@/lib/wallet-page/members';
+import { personsInChargeView, type Member } from '@/lib/wallet-page/members';
 import { migrationRows, type Authority, type FundsRow, type MigrationRow } from '@/lib/wallet-page/migration';
 import { Card, Loading, Note, useLoad } from './parts';
 import { WALLET_LABELS } from './SetupWallet';
@@ -179,7 +180,7 @@ export function PersonInCharge({ given, onChanged }: { given?: InCharge; onChang
         <ul className="space-y-1.5">
           {view.inCharge.map((m) => (
             <li key={m.userId} className="flex flex-wrap items-center justify-between gap-2 text-sm text-[#1F4452]">
-              <span className="font-semibold">{m.name} <span className="font-normal text-[#326273]">({roleLabel(m.role)})</span></span>
+              <span className="font-semibold">{m.name} <span className="font-normal text-[#326273]">({memberTitle(m)})</span></span>
               <QuietButton type="button" disabled={busy} onClick={() => void act(m.userId, false)}>Take back</QuietButton>
             </li>
           ))}
@@ -190,7 +191,7 @@ export function PersonInCharge({ given, onChanged }: { given?: InCharge; onChang
           <Field label="Put someone in charge" htmlFor="pic-pick" className="w-full min-w-0 sm:w-auto sm:flex-1">
             <SelectInput id="pic-pick" value={pick} onChange={(e) => setPick(e.target.value)}>
               <option value="">Choose a team member</option>
-              {view.candidates.map((m) => <option key={m.userId} value={m.userId}>{m.name} ({roleLabel(m.role)})</option>)}
+              {view.candidates.map((m) => <option key={m.userId} value={m.userId}>{m.name} ({memberTitle(m)})</option>)}
             </SelectInput>
           </Field>
           <PrimaryButton type="button" disabled={busy || !pick} onClick={() => void act(pick, true)}>Put in charge</PrimaryButton>

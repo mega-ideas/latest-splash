@@ -5,7 +5,7 @@
  */
 
 /** `hasPasskey` is sent to an owner only, with the people to choose from: a rule is given to a passkey on this site, so who has none matters before the last question. */
-export type Member = { userId: string; name: string; role: string; hasPasskey?: boolean };
+export type Member = { userId: string; name: string; role: string; hasPasskey?: boolean; /** The member's own job title, when they have one; then it is said in place of the role word. */ title?: string | null };
 
 const ROLES: Record<string, string> = { admin: 'Owner', maker: 'Staff', checker: 'Approver', viewer: 'Viewer' };
 

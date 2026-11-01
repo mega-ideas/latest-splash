@@ -8,17 +8,19 @@ import 'server-only';
 import { and, eq } from 'drizzle-orm';
 
 import { memberships, users } from '@/lib/db/schema';
+import { plainTitle } from '@/lib/team/declined-by';
 import type { DrizzleDb } from '@/lib/server/wallet-signing-store';
 
-export type OrgMember = { userId: string; name: string; role: string };
+/** `title` is the member's own job title as plain words, or null (then the role word is the title). */
+export type OrgMember = { userId: string; name: string; role: string; title: string | null };
 
 export async function orgMembers(db: DrizzleDb, orgId: string): Promise<OrgMember[]> {
   const rows = await db
-    .select({ userId: users.id, name: users.name, role: memberships.role })
+    .select({ userId: users.id, name: users.name, role: memberships.role, title: memberships.title })
     .from(memberships)
     .innerJoin(users, eq(users.id, memberships.userId))
     .where(and(eq(memberships.orgId, orgId)));
-  return rows.map((r: { userId: string; name: string; role: string }) => ({ userId: r.userId, name: r.name, role: String(r.role) }));
+  return rows.map((r: { userId: string; name: string; role: string; title: string | null }) => ({ userId: r.userId, name: r.name, role: String(r.role), title: plainTitle(r.title) }));
 }
 
 /** Names of the given members of this business; anyone else is simply absent. */

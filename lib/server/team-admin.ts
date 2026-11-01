@@ -50,6 +50,8 @@ import { and, desc, eq, inArray, isNull } from 'drizzle-orm';
 import { GrantRefusedError, grantMembership } from '../auth/authority.ts';
 import { memberships, teamInvitations, users, walletAuthorityEvents, walletFinanceLeads, walletMemberAccess, walletPersonsInCharge } from '../db/schema.ts';
 import { isMembershipRole, type MembershipRole } from '../membership-roles.ts';
+import { plainTitle } from '../team/declined-by.ts';
+import { titleFromInput } from '../team/member-title.ts';
 import { TEAM_ACTIONS, activitySummary, maskEmail, type MemberAccessKind, type Manager, type TeamActivityWire, type TeamMemberWire } from '../team/view.ts';
 import { endFinanceLead, endMemberHolds, memberRole, offboardMember, passkeyAddressesOf, recordAuthorityEvent } from './wallet-authority.ts';
 import type { DrizzleDb } from './wallet-signing-store.ts';
@@ -397,12 +399,77 @@ export async function setMemberAccess(
   return { ok: true, changed: true };
 }
 
+// ─── The job title ──────────────────────────────────────────────────────────
+
+/**
+ * Set (or clear) a member's job title, the "(CFO)" in "Aisha (CFO)". An owner sets anyone's in their
+ * own business; a person sets their own, whatever their role; nobody else sets another person's, the
+ * Finance lead included (403 `owner_only`; anyone else 403 `not_allowed`). The business is the
+ * caller's, so a person of another business reads as absent (404) and an actor who is not a member
+ * of it is refused (403).
+ *
+ * The title is cleaned to plain words (lib/team/member-title.ts `titleFromInput`): empty clears it,
+ * words are kept as cleaned, anything that is not words (a link, markup, only numbers) is refused
+ * (400 `bad_title`) rather than quietly dropped. The same title again changes nothing and writes no
+ * line; a change writes one `member_title_changed` line (who, to whom, from, to, and whether it was
+ * the owner's or the person's own). The row is locked while it is read and written, so two changes at
+ * once make one after the other, and the second finds the first.
+ */
+export function setMemberTitle(
+  db: DrizzleDb,
+  input: { orgId: string; actorUserId: string; userId: string; title: unknown; now?: Clock },
+): Promise<{ ok: true; changed: boolean; title: string | null } | TeamFailure> {
+  return inTransaction(db, async (tx) => {
+    const actorRole = await memberRole(tx, input.orgId, input.actorUserId);
+    if (actorRole === null) return fail(403, 'not_allowed', 'Only a member of this business can set a title.');
+    const own = input.userId === input.actorUserId;
+    if (!own) {
+      const refused = ownerOnly(await teamManager(tx, input.orgId, input.actorUserId), 'set another person’s title');
+      if (refused) return refused;
+    }
+    const [row] = await tx
+      .select({ title: memberships.title })
+      .from(memberships)
+      .where(and(eq(memberships.orgId, input.orgId), eq(memberships.userId, input.userId)))
+      .for('update');
+    if (!row) return fail(404, 'not_a_member', 'No such member of this business.');
+    const wanted = titleFromInput(input.title);
+    if (!wanted.ok) return fail(400, 'bad_title', wanted.error);
+    const current = (row as { title: string | null }).title ?? null;
+    if (wanted.title === current) return { ok: true as const, changed: false, title: wanted.title };
+    const now = clock(input.now);
+    await tx
+      .update(memberships)
+      .set({ title: wanted.title, updatedAt: now })
+      .where(and(eq(memberships.orgId, input.orgId), eq(memberships.userId, input.userId)));
+    await recordAuthorityEvent(tx, {
+      orgId: input.orgId,
+      actorUserId: input.actorUserId,
+      action: 'member_title_changed',
+      subjectUserId: input.userId,
+      detail: { by: own ? 'self' : 'owner', from: plainTitle(current), to: wanted.title },
+      now: () => now,
+    });
+    return { ok: true as const, changed: true, title: wanted.title };
+  });
+}
+
+/** This person's own job title in this business, or null (none set, or not a member of it). */
+export async function titleOf(db: DrizzleDb, orgId: string, userId: string): Promise<string | null> {
+  const [row] = await db
+    .select({ title: memberships.title })
+    .from(memberships)
+    .where(and(eq(memberships.orgId, orgId), eq(memberships.userId, userId)))
+    .limit(1);
+  return plainTitle(row?.title);
+}
+
 // ─── Reading ────────────────────────────────────────────────────────────────
 
 /** Everyone on the team with what they hold. Only this business's people: the join on the membership is the boundary. */
 export async function listTeam(db: DrizzleDb, orgId: string): Promise<TeamMemberWire[]> {
   const rows = await db
-    .select({ userId: users.id, name: users.name, email: users.email, role: memberships.role })
+    .select({ userId: users.id, name: users.name, email: users.email, role: memberships.role, title: memberships.title })
     .from(memberships)
     .innerJoin(users, eq(users.id, memberships.userId))
     .where(eq(memberships.orgId, orgId));
@@ -416,7 +483,7 @@ export async function listTeam(db: DrizzleDb, orgId: string): Promise<TeamMember
     .where(and(eq(walletMemberAccess.orgId, orgId), isNull(walletMemberAccess.revokedAt)));
   const grants = new Map<string, Set<string>>();
   for (const g of held as Array<{ userId: string; access: string }>) grants.set(g.userId, (grants.get(g.userId) ?? new Set()).add(g.access));
-  return (rows as Array<{ userId: string; name: string; email: string; role: string }>)
+  return (rows as Array<{ userId: string; name: string; email: string; role: string; title: string | null }>)
     .map((r) => {
       const role = r.role as MembershipRole;
       const owner = role === 'admin';
@@ -427,6 +494,8 @@ export async function listTeam(db: DrizzleDb, orgId: string): Promise<TeamMember
         name: r.name,
         email: r.email,
         role,
+        // Said as plain words again whatever wrote it (the column is also reachable by Splash's own tools).
+        title: plainTitle(r.title),
         financeLead: lead === r.userId,
         inCharge: charge.has(r.userId) && staff,
         addFunds: owner || (staff && Boolean(mine?.has('add_funds'))),

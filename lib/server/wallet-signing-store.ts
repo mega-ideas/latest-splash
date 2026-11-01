@@ -24,8 +24,8 @@ import { and, asc, eq, gt, gte, inArray, isNotNull, isNull, lte, or, sql } from 
 import type { PgDatabase } from 'drizzle-orm/pg-core';
 
 import { memberships, paymentScheduleRunPayments, users, walletApprovalAsks, walletFinanceLeads, walletSigningRequests, walletSigningSigners, walletSingleSignerConsents } from '../db/schema.ts';
-import { cleanDecliners, plainName, type Decliner, type Decliners } from '../team/declined-by.ts';
-import { memberTitle } from '../team/member-title.ts';
+import { cleanDecliners, plainName, plainTitle, type Decliner, type Decliners } from '../team/declined-by.ts';
+import { memberLabel, memberTitle } from '../team/member-title.ts';
 import type * as schemaModule from '../db/schema.ts';
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -79,14 +79,14 @@ type LiveCard = { name: string; title: string };
  * The name and title of each of these people in this business now. A person who is not a member of
  * it has no card: another business's people, and people who left, read as absent. The title is the
  * Finance lead appointment while the person is still an approver, else the role's word
- * (lib/team/member-title.ts; a member has no title of their own yet).
+ * (lib/team/member-title.ts). The member's own title is memberships.title, read for this business only.
  */
 async function liveCards(db: Pick<DrizzleDb, 'select'>, orgId: string, userIds: string[]): Promise<Map<string, LiveCard>> {
   const out = new Map<string, LiveCard>();
   const ids = [...new Set(userIds)];
   if (ids.length === 0) return out;
   const rows = await db
-    .select({ userId: memberships.userId, role: memberships.role, name: users.name })
+    .select({ userId: memberships.userId, role: memberships.role, title: memberships.title, name: users.name })
     .from(memberships)
     .innerJoin(users, eq(users.id, memberships.userId))
     .where(and(eq(memberships.orgId, orgId), inArray(memberships.userId, ids)));
@@ -95,8 +95,21 @@ async function liveCards(db: Pick<DrizzleDb, 'select'>, orgId: string, userIds: 
     .from(walletFinanceLeads)
     .where(and(eq(walletFinanceLeads.orgId, orgId), isNull(walletFinanceLeads.revokedAt), inArray(walletFinanceLeads.userId, ids)));
   const lead = new Set(leads.map((l) => l.userId));
-  for (const r of rows) out.set(r.userId, { name: r.name, title: memberTitle({ role: r.role, financeLead: lead.has(r.userId) && r.role === 'checker' }) });
+  for (const r of rows) out.set(r.userId, { name: r.name, title: memberTitle({ title: r.title, role: r.role, financeLead: lead.has(r.userId) && r.role === 'checker' }) });
   return out;
+}
+
+/**
+ * "Name (Title)" for one member of this business as they are now, with the parts it is made of, or
+ * null when the person is not a member of it (another business's people and people who left read as
+ * absent). This is the one place a server-built sentence about a person reads their title: the
+ * exchange confirmation (the Travel Rule message's "Sent by" row) and any text built later reads it
+ * here rather than the user row, so a title set in Settings is the title that is said.
+ */
+export async function memberLabelOf(db: Pick<DrizzleDb, 'select'>, orgId: string, userId: string): Promise<{ name: string; title: string; label: string } | null> {
+  const card = (await liveCards(db, orgId, [userId])).get(userId);
+  if (!card) return null;
+  return { name: card.name, title: card.title, label: memberLabel({ name: card.name, title: card.title }) };
 }
 
 /**
@@ -106,14 +119,14 @@ async function liveCards(db: Pick<DrizzleDb, 'select'>, orgId: string, userIds: 
  */
 export async function declineSnapshot(db: Pick<DrizzleDb, 'select'>, orgId: string, userId: string): Promise<{ name: string; title: string }> {
   const live = (await liveCards(db, orgId, [userId])).get(userId);
-  if (live) return { name: plainName(live.name) ?? '', title: plainName(live.title) ?? '' };
+  if (live) return { name: plainName(live.name) ?? '', title: plainTitle(live.title) ?? '' };
   // Not a member of this business (it cannot decline here, but a snapshot is still written): the name alone, and the plainest title.
   const [user] = await db.select({ name: users.name }).from(users).where(eq(users.id, userId)).limit(1);
-  return { name: plainName(user?.name) ?? '', title: plainName(memberTitle({})) ?? '' };
+  return { name: plainName(user?.name) ?? '', title: plainTitle(memberTitle({})) ?? '' };
 }
 
 /** A snapshot or the live card as the person it says; null for both empty. */
-const personFrom = (name: string | null | undefined, title: string | null | undefined): Decliner => ({ name: plainName(name), title: plainName(title) });
+const personFrom = (name: string | null | undefined, title: string | null | undefined): Decliner => ({ name: plainName(name), title: plainTitle(title) });
 
 /**
  * Who declined each of these requests of this business, by the request's own record (a signer's

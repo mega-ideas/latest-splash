@@ -28,10 +28,10 @@ test('a title is plain words: the ones people really write come through unchange
   for (const title of ['CFO', 'Finance lead', 'Operations', 'Co-founder', 'Head of Operations', 'VP Finance', 'Controller']) {
     assert.equal(plainTitle(title), title);
   }
-  assert.equal(plainTitle('Sales and Marketing lead'), 'Sales and Marketing lead', 'a title may say "and": it sits inside its own brackets');
-  assert.equal(plainTitle('Sales & Marketing lead'), 'Sales & Marketing lead');
-  assert.equal(plainTitle('R&D lead'), 'R&D lead');
   assert.equal(plainTitle('  Head   of    Operations \n'), 'Head of Operations', 'spaces and line breaks are collapsed');
+  // The words are the name's words: "and" and symbols end the title there (round four's guard: one account never reads as two people).
+  assert.equal(plainTitle('Sales and Marketing lead'), 'Sales');
+  assert.equal(plainTitle('Sales & Marketing lead'), 'Sales');
   assert.equal(plainTitle('Chef de cuisine'), 'Chef de cuisine');
 });
 
@@ -44,6 +44,7 @@ test('a title has no link, markup, control or hidden character, and no bracket o
   assert.equal(plainTitle('evil.example'), null);
   assert.equal(plainTitle('<b>CFO</b>'), null);
   assert.equal(plainTitle('R&amp;D'), null, 'an entity is not a word');
+  assert.equal(plainTitle('R&D lead'), null, 'a symbol inside a word is not a plain word');
   assert.equal(plainTitle('javascript:alert'), null);
   assert.equal(plainTitle('1234'), null);
   assert.equal(plainTitle('Declined'), null, 'a word that would read as a second sentence is not a title');
@@ -103,9 +104,9 @@ test('"Name (Title)" is made the same way everywhere, each part cleaned on its o
   assert.equal(memberLabel({ name: 'Ben', role: 'checker', financeLead: true }), 'Ben (Finance lead)');
   assert.equal(memberLabel({ name: 'Aisha (CFO), Ben', title: 'Owner), Ben (Owner', role: 'admin' }), 'Aisha CFO Ben (Owner Ben Owner)');
   assert.equal(memberLabel({ name: '<<>>', title: 'CFO', role: 'admin' }), 'CFO');
-  assert.equal(memberLabel({ name: 'Aisha', title: 'Sales and Marketing' }), 'Aisha (Sales and Marketing)');
+  assert.equal(memberLabel({ name: 'Aisha', title: 'Sales and Marketing' }), 'Aisha (Sales)');
   assert.equal(memberLabel({ name: 'Aisha' }), 'Aisha (Member)');
-  assert.equal(declinerLabel({ name: 'Aisha', title: 'Sales and Marketing' }), 'Aisha (Sales and Marketing)', 'a decline snapshot is cleaned with the same title rules');
+  assert.equal(declinerLabel({ name: 'Aisha', title: 'Head of Operations' }), 'Aisha (Head of Operations)', 'a decline snapshot is cleaned with the same title rules');
   assert.equal(declinerLabel({ name: 'Aisha', title: 'B'.repeat(500) }), `Aisha (${'B'.repeat(39)}…)`);
 });
 

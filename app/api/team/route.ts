@@ -1,7 +1,7 @@
 import { NextResponse } from 'next/server';
 
 import { readJsonBody } from '@/lib/server/http';
-import { addTeamMember, fundsAccessOf, listTeam, listTeamActivity, teamManager } from '@/lib/server/team-admin';
+import { addTeamMember, fundsAccessOf, listTeam, listTeamActivity, teamManager, titleOf } from '@/lib/server/team-admin';
 import { listInvitations } from '@/lib/server/team-invitations';
 import { leaveStatusOf, listLeaveRequests } from '@/lib/server/team-leave';
 import { limitTeamChanges, NO_STORE, teamResponse, teamRoute } from '@/lib/server/team-route';
@@ -36,7 +36,9 @@ export async function GET(request: Request) {
   const invitations = manager ? await listInvitations(gate.route.db, { orgId: gate.route.orgId, manager }) : [];
   const leaveRequests = manager ? await listLeaveRequests(gate.route.db, { orgId: gate.route.orgId, actorUserId: gate.route.authority.userId }) : [];
   const leave = await leaveStatusOf(gate.route.db, { orgId: gate.route.orgId, userId: gate.route.authority.userId });
-  return NextResponse.json({ you: { userId: gate.route.authority.userId, role, manager, addFunds: access.addFunds, withdraw: access.withdraw }, members, activity, invitations, leaveRequests, leave }, { headers: NO_STORE });
+  // The caller's own title only: everyone's titles go with the people, to the managers.
+  const title = await titleOf(gate.route.db, gate.route.orgId, gate.route.authority.userId);
+  return NextResponse.json({ you: { userId: gate.route.authority.userId, role, manager, addFunds: access.addFunds, withdraw: access.withdraw, title }, members, activity, invitations, leaveRequests, leave }, { headers: NO_STORE });
 }
 
 export async function POST(request: Request) {

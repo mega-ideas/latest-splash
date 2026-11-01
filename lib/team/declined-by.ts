@@ -6,7 +6,8 @@
  *
  * Each person is "Name (Title)": the name and the title as they were when the
  * person declined (the signing request keeps them), the title being the
- * member's own title when set, else their role ("Owner", "Finance lead").
+ * member's own title when set (Settings, Team; at most 40 characters), else
+ * their role ("Owner", "Finance lead").
  *
  *   History (capped)   Declined by Aisha (CFO) and Ben (Finance lead)
  *                      Declined by Aisha (CFO), Ben (Staff) and 1 more       (two, then the count)
@@ -36,6 +37,8 @@ export type Decliner = { name: string | null; title: string | null };
 export type Decliners = { names: Decliner[]; unnamed: number };
 
 const MAX_NAME = 30;
+/** A title is at most this many characters, the ellipsis of a cut one included (a member's job title, lib/team/member-title.ts). */
+export const TITLE_MAX = 40;
 const ELLIPSIS = '…';
 const WORD = /^[\p{L}\p{M}][\p{L}\p{M}'’.-]*$/u;
 /** A dot between letters that reads as an address (evil.example), unlike the dots of "J.R." or "St." */
@@ -68,6 +71,11 @@ const SCRIPTS: readonly RegExp[] = [
 ];
 const FALLBACK = 'Declined by an owner';
 
+/** What differs between a name and a title is only the length: a name is cut at 30 characters and the ellipsis comes after them; a title is cut so that the ellipsis is the 40th character. The words allowed are the same. */
+type Kind = { max: number; ellipsisCounts: boolean };
+const NAME: Kind = { max: MAX_NAME, ellipsisCounts: false };
+const TITLE: Kind = { max: TITLE_MAX, ellipsisCounts: true };
+
 function isPlainWord(word: string): boolean {
   if (!WORD.test(word) || ADDRESS_LIKE.test(word) || /^www/iu.test(word) || MARK_STACK.test(word)) return false;
   if (NOT_A_NAME_WORD.has(word.toLowerCase())) return false;
@@ -75,7 +83,7 @@ function isPlainWord(word: string): boolean {
 }
 
 /**
- * A name (or a title) as plain words, or null when nothing plain is left. Only a string is one.
+ * A name as plain words, or null when nothing plain is left. Only a string is one.
  *
  * Brackets and commas are removed where they stand, so "Aisha (CFO)" is "Aisha CFO" and
  * "Tan, Aisha" is "Tan Aisha"; the name is then the plain words up to the first word that
@@ -85,8 +93,24 @@ function isPlainWord(word: string): boolean {
  * in the one ellipsis character; cutting a cut name changes nothing.
  */
 export function plainName(raw: unknown): string | null {
+  return plainWords(raw, NAME);
+}
+
+/**
+ * A member's job title as plain words, or null when nothing plain is left: exactly the cleaning of
+ * a name (so it cannot add a bracket, a comma, a link, or a word such as "and" that makes one
+ * account read as two people), with a limit of 40 characters instead of 30, the ellipsis of a cut
+ * title being the 40th. Cutting a cut title changes nothing.
+ */
+export function plainTitle(raw: unknown): string | null {
+  return plainWords(raw, TITLE);
+}
+
+function plainWords(raw: unknown, kind: Kind): string | null {
   if (typeof raw !== 'string') return null;
   const text = raw
+    // Bounded before any pattern runs: a paste of a million characters is cut, it does not cost a million.
+    .slice(0, 4000)
     .normalize('NFKC')
     .replace(DASHES, '-')
     // A defanged address ("evil[.]example") is still an address: the bracketed dot goes back to a dot, so the word stops the name.
@@ -106,9 +130,10 @@ export function plainName(raw: unknown): string | null {
   const joined = plain.join(' ');
   if (joined === '') return null;
   const chars = Array.from(joined);
-  if (chars.length <= MAX_NAME) return cutAlready ? `${joined}${ELLIPSIS}` : joined;
-  const head = chars.slice(0, MAX_NAME);
-  const atWord = chars[MAX_NAME] === ' ' ? -1 : head.lastIndexOf(' ');
+  const room = kind.ellipsisCounts ? kind.max - 1 : kind.max;
+  if (chars.length + (kind.ellipsisCounts && cutAlready ? 1 : 0) <= kind.max) return cutAlready ? `${joined}${ELLIPSIS}` : joined;
+  const head = chars.slice(0, room);
+  const atWord = chars[room] === ' ' ? -1 : head.lastIndexOf(' ');
   return `${(atWord > 0 ? head.slice(0, atWord) : head).join('').trim()}${ELLIPSIS}`;
 }
 
@@ -126,7 +151,7 @@ function personOf(raw: unknown): { name: unknown; title: unknown } {
 export function declinerLabel(person: unknown): string {
   const p = personOf(person);
   const name = plainName(p.name);
-  const title = plainName(p.title);
+  const title = plainTitle(p.title);
   if (name && title) return `${name} (${title})`;
   return name ?? title ?? 'an owner';
 }
@@ -139,7 +164,7 @@ export function cleanDecliners(value: unknown): Decliners {
   for (const raw of Array.isArray(v.names) ? v.names : []) {
     const p = personOf(raw);
     const name = plainName(p.name);
-    const title = plainName(p.title);
+    const title = plainTitle(p.title);
     if (name || title) names.push({ name, title });
     else unnamed += 1;
   }

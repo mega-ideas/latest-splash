@@ -208,6 +208,12 @@ export const memberships = pgTable('memberships', {
   userId: text('user_id').notNull().references(() => users.id, { onDelete: 'cascade' }),
   orgId: text('org_id').notNull().references(() => organizations.id),
   role: userRole('role').notNull(),
+  /**
+   * The member's job title: free text, plain words, at most 40 characters (migration 0083). Null by
+   * default; then the role word is the title. Set by an owner for anyone in the business, or by the
+   * person for themselves (lib/server/team-admin.ts setMemberTitle); read through lib/team/member-title.ts.
+   */
+  title: text('title'),
   /** Who granted it. Null for the first membership in a new organisation,
    *  which has no prior member to do the granting. */
   grantedBy: text('granted_by'),

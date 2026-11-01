@@ -9,6 +9,7 @@ import LeaveRequests from '@/components/team/LeaveRequests';
 import LeaveSection from '@/components/team/LeaveSection';
 import MemberDialog from '@/components/team/MemberDialog';
 import OpenInvitations from '@/components/team/OpenInvitations';
+import OwnTitle from '@/components/team/OwnTitle';
 import TeamActivity from '@/components/team/TeamActivity';
 import { QuietButton } from '@/components/transfer/ui';
 import { PersonInCharge, type InCharge } from '@/components/wallet/Migration';
@@ -74,6 +75,7 @@ export default function TeamCard({
             </span>
           </p>
           {charge.data && charge.data.personsInCharge.length > 0 ? <p className="text-[13px] text-[#326273]">In charge: {charge.data.personsInCharge.map((p) => p.name).join(', ')}.</p> : null}
+          <OwnTitle userId={you.userId} title={you.title} role={you.role} financeLead={false} onChanged={refresh} />
           <LeaveSection leave={leave} onChanged={refresh} />
         </div>
       </Card>
@@ -101,6 +103,8 @@ export default function TeamCard({
         </p>
         {manager === 'owner' ? <p className="text-[13px] leading-5 text-[#326273]">{EXISTING_MEMBERS_FUNDS_NOTE}</p> : null}
 
+        <OwnTitle userId={you.userId} title={you.title} role={you.role} financeLead={manager === 'finance_lead'} onChanged={refresh} />
+
         <ul className="space-y-2" aria-label="Team">
           {members.map((m) => {
             const row = ruleOf.get(m.userId);
@@ -110,7 +114,11 @@ export default function TeamCard({
               <li key={m.userId} className="flex flex-wrap items-center gap-x-3 gap-y-1.5 rounded-xl bg-[#F6F0ED] px-3 py-2.5 text-sm text-[#1F4452]">
                 <UserRound className="h-4 w-4 shrink-0 text-[#145d6a]" aria-hidden="true" />
                 <span className="min-w-0 flex-1 basis-40">
-                  <span className="block truncate font-semibold">{m.name}{m.userId === you.userId ? ' (you)' : ''}</span>
+                  <span className="block truncate font-semibold">
+                    {m.name}
+                    {m.title ? <span className="font-normal text-[#1F4452]"> ({m.title})</span> : null}
+                    {m.userId === you.userId ? <span className="ml-2 text-[13px] font-normal text-[#326273]">You</span> : null}
+                  </span>
                   <span className="block truncate text-[13px] text-[#326273]">{m.email}</span>
                 </span>
                 <span className="ml-auto flex flex-wrap items-center justify-end gap-2">
