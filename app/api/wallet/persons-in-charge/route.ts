@@ -24,7 +24,11 @@ export async function GET(request: Request) {
   if (gate.response) return gate.response;
   const personsInCharge = await listPersonsInCharge(gate.route.db, gate.route.orgId);
   const members = await orgMembers(gate.route.db, gate.route.orgId);
-  const named = personsInCharge.map((p) => ({ ...p, name: members.find((m) => m.userId === p.userId)?.name ?? 'A member' }));
+  // The name, and the person's own title when they have one (never their role: who holds which role is the owners' to see).
+  const named = personsInCharge.map((p) => {
+    const member = members.find((m) => m.userId === p.userId);
+    return { ...p, name: member?.name ?? 'A member', title: member?.title ?? null };
+  });
   // The people to choose from go to an owner only: who holds which role is theirs to decide.
   // Whether each has a passkey on this site goes with them: a spending rule is given to that passkey's
   // address, so the owner learns who cannot be given one before the last question. This business's members only.

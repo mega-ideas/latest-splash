@@ -424,7 +424,7 @@ read the role word. This adds the field.
 | The write | `setMemberTitle`, `titleOf`, `listTeam` (`lib/server/team-admin.ts`); `PUT /api/team/members/:userId/title { title }` |
 | The live card and the snapshot | `liveCards`, `declineSnapshot`, `memberLabelOf` (`lib/server/wallet-signing-store.ts`) |
 | Settings → Team | `components/team/OwnTitle.tsx` (everyone, "Your title"), the "Job title" section of `components/team/MemberDialog.tsx` (an owner, for someone else), both through `components/team/TitleForm.tsx` |
-| Tests | `tests/member-title.test.mjs` (cleaning, labels, trail words, who is offered it, wiring, the migration), `tests/member-title-store.test.mjs` (a real database), the end of `tests/declined-by-history.test.mjs` (the snapshot, History, the panel) |
+| Tests | `tests/member-title.test.mjs` (cleaning, labels, trail words, who is offered it, wiring, the migration), `tests/member-title-store.test.mjs` (a real database), the end of `tests/declined-by-history.test.mjs` (the snapshot, History, the panel), `tests/member-title-review.test.mjs` (the review: flooding, the role beside the title, cut titles, the form, "In charge") |
 
 - **Empty by default.** Nobody is given a title by the migration. With none, the
   title is what it was: the role word, or "Finance lead" for the appointed
@@ -458,6 +458,43 @@ read the role word. This adds the field.
   membership row is locked while it is read and written). A person's own change
   is on the trail too, not only an owner's, because a self-chosen title is what
   another owner reads in "Declined by".
+- **Recent changes cannot be flooded.** Every member may change their own
+  title, so the title lines are the cheapest lines anyone can write. Recent
+  changes shows the latest 50 of the team's real changes (people, roles, access,
+  removals, leaving) and, after them, title lines: one line per person (their
+  latest) and at most ten. A viewer who edits their title all day pushes nothing
+  off the screen the owners use to watch the team. A person's own title changes
+  are also limited to six an hour (`memberTitleSelf`, before the general team
+  limit). The trail itself keeps every edit.
+- **Recent changes names only.** The sentences in Recent changes name the
+  people, not their titles, on purpose: it is a history, and a title read from
+  today would rewrite who someone was when they acted. "Declined by" keeps the
+  title as it was when the person declined; the live lists (the team, "In
+  charge", Person in charge) show the title now.
+- **A title is never a role.** A person cannot give themselves the name of a
+  role (Owner, Approver, Finance lead, Staff, Viewer, Member, Administrator...)
+  as their title (400 `title_is_a_role`), and where an owner decides who has
+  authority (Person in charge, and the picker) the role is shown beside the
+  title: "Maya (CFO), Staff". An owner may use any word for anyone. "In charge"
+  in Settings, shown to people who are not owners, gives the title and never
+  the role.
+- **Cut titles say so.** A title ends at the first word that is not a plain
+  word. When that happens the answer carries the word (`leftOut`) and the page
+  says "Level 2 Support" was kept as "Level", that "2" and everything after it
+  were left out; a title cut like that does not end on "of", "to", "for", "the",
+  "a", "an", "in", "at", "on", "with" or "by" ("Head of 3 teams" is "Head"). A
+  short word with an ampersand inside it (R&D, P&L, M&A) is a word. "and", a
+  spaced ampersand, a slash, a number or a colon still end the title; whether
+  "and" may appear in a title is Sky's call, because round four's guard keeps
+  "and" out of a name so one account cannot read as two people.
+- **Titles stay in the trail.** The old and the new title are copied into the
+  append-only trail line (`from`, `to`). A free-text entry a person later wants
+  erased cannot be: the trail keeps it for good. Titles are cleaned to plain
+  words, shown only to the business's own people, and this is the same standing
+  as any name in the trail.
+- **The form follows the title.** If another owner changes a title while a
+  form is open, the form shows theirs and a save never writes the old one back
+  over it. The error and the counter are read out with the field.
 - **Tenants.** The actor must be a member of the business in the session (403
   otherwise). A person of another business reads as absent (404 `not_a_member`),
   and neither the live card, the team list nor a decline reads another
@@ -481,7 +518,7 @@ read the role word. This adds the field.
   Anything built on the confirmation's own screen that says who is paying, such
   as "Sent by Aisha (CFO)", reads `memberLabelOf(db, orgId, userId)`, which
   returns the title as it is now for this business's member and nothing for
-  anyone else (tested). The invitation email names the sender by name only and
+  anyone else (tested). No screen calls it yet (the exchange confirmation still says the name only); it is ready for the first sentence that needs it. The invitation email names the sender by name only and
   needs nothing from this field.
 - **Words a title cannot hold.** Because a title is cleaned like a name, "Sales
   and Marketing lead" is kept as "Sales", and "R&D lead" is refused: "and" and

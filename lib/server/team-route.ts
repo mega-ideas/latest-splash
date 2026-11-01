@@ -77,6 +77,16 @@ export async function limitTeamChanges(route: TeamRoute): Promise<Response | nul
   );
 }
 
+/**
+ * A person changing their own job title has a tight limit of their own, on top of the general one: every
+ * member may do it and each change is a line on the trail. An owner setting someone else's is not limited
+ * by it (they are an owner, and the general team limit still applies).
+ */
+export async function limitOwnTitleChanges(route: TeamRoute, subjectUserId: string): Promise<Response | null> {
+  if (subjectUserId !== route.authority.userId) return null;
+  return enforceRateLimit({ rule: RATE_LIMITS.memberTitleSelf, key: route.authority.userId, message: 'You changed your title a few times just now. Try again in an hour.' });
+}
+
 /** A service result as a response. */
 export function teamResponse(result: { ok: true } | TeamFailure, body?: unknown, okStatus = 200): Response {
   if (!result.ok) return NextResponse.json({ error: result.error, code: result.code }, { status: result.status, headers: NO_STORE });

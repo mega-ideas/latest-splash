@@ -74,7 +74,7 @@ export default function TeamCard({
                     : 'You cannot add funds or withdraw. An owner can turn either on for you.'}
             </span>
           </p>
-          {charge.data && charge.data.personsInCharge.length > 0 ? <p className="text-[13px] text-[#326273]">In charge: {charge.data.personsInCharge.map((p) => p.name).join(', ')}.</p> : null}
+          {charge.data && charge.data.personsInCharge.length > 0 ? <p className="text-[13px] text-[#326273]">In charge: {charge.data.personsInCharge.map((p) => p.title ? `${p.name} (${p.title})` : p.name).join(', ')}.</p> : null}
           <OwnTitle userId={you.userId} title={you.title} role={you.role} financeLead={false} onChanged={refresh} />
           <LeaveSection leave={leave} onChanged={refresh} />
         </div>
@@ -114,7 +114,7 @@ export default function TeamCard({
               <li key={m.userId} className="flex flex-wrap items-center gap-x-3 gap-y-1.5 rounded-xl bg-[#F6F0ED] px-3 py-2.5 text-sm text-[#1F4452]">
                 <UserRound className="h-4 w-4 shrink-0 text-[#145d6a]" aria-hidden="true" />
                 <span className="min-w-0 flex-1 basis-40">
-                  <span className="block truncate font-semibold">
+                  <span className="block break-words font-semibold">
                     {m.name}
                     {m.title ? <span className="font-normal text-[#1F4452]"> ({m.title})</span> : null}
                     {m.userId === you.userId ? <span className="ml-2 text-[13px] font-normal text-[#326273]">You</span> : null}

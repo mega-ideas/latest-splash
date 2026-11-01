@@ -51,7 +51,7 @@ import { GrantRefusedError, grantMembership } from '../auth/authority.ts';
 import { memberships, teamInvitations, users, walletAuthorityEvents, walletFinanceLeads, walletMemberAccess, walletPersonsInCharge } from '../db/schema.ts';
 import { isMembershipRole, type MembershipRole } from '../membership-roles.ts';
 import { plainTitle } from '../team/declined-by.ts';
-import { titleFromInput } from '../team/member-title.ts';
+import { isRoleWord, TITLE_ROLE_REFUSAL, titleFromInput } from '../team/member-title.ts';
 import { TEAM_ACTIONS, activitySummary, maskEmail, type MemberAccessKind, type Manager, type TeamActivityWire, type TeamMemberWire } from '../team/view.ts';
 import { endFinanceLead, endMemberHolds, memberRole, offboardMember, passkeyAddressesOf, recordAuthorityEvent } from './wallet-authority.ts';
 import type { DrizzleDb } from './wallet-signing-store.ts';
@@ -61,6 +61,8 @@ export type TeamFailure = { ok: false; status: number; code: string; error: stri
 export const fail = (status: number, code: string, error: string): TeamFailure => ({ ok: false, status, code, error });
 const clock = (now?: Clock) => (now ?? (() => new Date()))();
 
+const TITLE_ACTION = 'member_title_changed';
+type TrailRow = typeof walletAuthorityEvents.$inferSelect;
 export const FUNDS_ACCESS_KINDS: readonly MemberAccessKind[] = ['add_funds', 'withdraw'];
 /** Everything an owner can switch on for a person: Add funds, Withdraw, and paying an exchange account alone. */
 export const MEMBER_ACCESS_KINDS: readonly MemberAccessKind[] = ['add_funds', 'withdraw', 'pay_exchange_alone'];
@@ -414,11 +416,16 @@ export async function setMemberAccess(
  * line; a change writes one `member_title_changed` line (who, to whom, from, to, and whether it was
  * the owner's or the person's own). The row is locked while it is read and written, so two changes at
  * once make one after the other, and the second finds the first.
+ *
+ * A person cannot give themselves the name of a role ("Owner", "Approver", "Finance lead"...) as a title
+ * (400 `title_is_a_role`): the owners who decide who is in charge and who signs read these titles, and a
+ * word that sounds like authority must not be one a staff member can choose. An owner may use any word.
+ * If the title was cut at a word that is not plain, the answer carries that word as `leftOut`.
  */
 export function setMemberTitle(
   db: DrizzleDb,
   input: { orgId: string; actorUserId: string; userId: string; title: unknown; now?: Clock },
-): Promise<{ ok: true; changed: boolean; title: string | null } | TeamFailure> {
+): Promise<{ ok: true; changed: boolean; title: string | null; leftOut?: string } | TeamFailure> {
   return inTransaction(db, async (tx) => {
     const actorRole = await memberRole(tx, input.orgId, input.actorUserId);
     if (actorRole === null) return fail(403, 'not_allowed', 'Only a member of this business can set a title.');
@@ -435,8 +442,10 @@ export function setMemberTitle(
     if (!row) return fail(404, 'not_a_member', 'No such member of this business.');
     const wanted = titleFromInput(input.title);
     if (!wanted.ok) return fail(400, 'bad_title', wanted.error);
+    if (actorRole !== 'admin' && isRoleWord(wanted.title)) return fail(400, 'title_is_a_role', TITLE_ROLE_REFUSAL);
+    const left = wanted.leftOut ? { leftOut: wanted.leftOut } : {};
     const current = (row as { title: string | null }).title ?? null;
-    if (wanted.title === current) return { ok: true as const, changed: false, title: wanted.title };
+    if (wanted.title === current) return { ok: true as const, changed: false, title: wanted.title, ...left };
     const now = clock(input.now);
     await tx
       .update(memberships)
@@ -450,7 +459,7 @@ export function setMemberTitle(
       detail: { by: own ? 'self' : 'owner', from: plainTitle(current), to: wanted.title },
       now: () => now,
     });
-    return { ok: true as const, changed: true, title: wanted.title };
+    return { ok: true as const, changed: true, title: wanted.title, ...left };
   });
 }
 
@@ -506,14 +515,33 @@ export async function listTeam(db: DrizzleDb, orgId: string): Promise<TeamMember
     .sort((a, b) => a.name.localeCompare(b.name) || a.userId.localeCompare(b.userId));
 }
 
-/** The latest team lines of the trail for one business, oldest first, with names and a sentence. */
+/** Title edits are the cheapest line a member can write, so they get a small place of their own in Recent changes. */
+const MAX_TITLE_LINES = 10;
+
+/**
+ * The latest team lines of the trail for one business, oldest first, with names and a sentence.
+ *
+ * The latest `limit` lines are the team's real changes (people added, roles, access, removals, leaving).
+ * Job titles do not compete with them: a person's many edits read as one line (their latest, one line per
+ * person), at most ten such lines, added after. A viewer who edits their title all day therefore pushes
+ * nothing off the screen the owners use to watch the team. The trail itself keeps every edit.
+ */
 export async function listTeamActivity(db: DrizzleDb, orgId: string, limit = 50): Promise<TeamActivityWire[]> {
-  const rows = await db
+  const others: TrailRow[] = await db
     .select()
     .from(walletAuthorityEvents)
-    .where(and(eq(walletAuthorityEvents.orgId, orgId), inArray(walletAuthorityEvents.action, [...TEAM_ACTIONS])))
+    .where(and(eq(walletAuthorityEvents.orgId, orgId), inArray(walletAuthorityEvents.action, TEAM_ACTIONS.filter((a) => a !== TITLE_ACTION))))
     .orderBy(desc(walletAuthorityEvents.seq))
     .limit(limit);
+  const titleLines: TrailRow[] = await db
+    .select()
+    .from(walletAuthorityEvents)
+    .where(and(eq(walletAuthorityEvents.orgId, orgId), eq(walletAuthorityEvents.action, TITLE_ACTION)))
+    .orderBy(desc(walletAuthorityEvents.seq))
+    .limit(200);
+  const seenSubject = new Set<string | null>();
+  const latestTitles = titleLines.filter((r) => (seenSubject.has(r.subjectUserId) ? false : (seenSubject.add(r.subjectUserId), true))).slice(0, MAX_TITLE_LINES);
+  const rows = [...others, ...latestTitles].sort((a, b) => Number(b.seq) - Number(a.seq));
   const ids = [...new Set(rows.flatMap((r: { actorUserId: string; subjectUserId: string | null }) => [r.actorUserId, r.subjectUserId]).filter((x: string | null): x is string => Boolean(x) && !String(x).startsWith('operator:') && !String(x).startsWith('system:')))];
   const names = new Map<string, string>();
   if (ids.length > 0) {

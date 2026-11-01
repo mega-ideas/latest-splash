@@ -7,7 +7,7 @@ import { call, errorText, type SigningView } from '@/components/transfer/api';
 import SignPanel from '@/components/transfer/SignPanel';
 import { Field, PrimaryButton, QuietButton, SelectInput } from '@/components/transfer/ui';
 import { shortAddress } from '@/lib/payments/stablecoin-lane';
-import { memberTitle } from '@/lib/team/member-title';
+import { titleAndRole } from '@/lib/team/member-title';
 import { describeSignError, signApprovalWithPasskey } from '@/lib/wallet/sui-signers';
 import { personsInChargeView, type Member } from '@/lib/wallet-page/members';
 import { migrationRows, type Authority, type FundsRow, type MigrationRow } from '@/lib/wallet-page/migration';
@@ -16,7 +16,13 @@ import { WALLET_LABELS } from './SetupWallet';
 
 type Found = FundsRow & { name: string };
 type Migration = { businessWallet: string | null; you: { userId: string; authority: Authority }; members: Found[] };
-export type InCharge = { personsInCharge: Array<{ userId: string; name: string }>; members: Member[] };
+export type InCharge = { personsInCharge: Array<{ userId: string; name: string; title?: string | null }>; members: Member[] };
+
+/** "CFO" or "CFO, Staff": the title, and the role beside it when the title does not already say it. */
+const titleWithRole = (m: Member) => {
+  const { title, role } = titleAndRole(m);
+  return role ? `${title}, ${role}` : title;
+};
 
 const LABELS = { ...WALLET_LABELS, working: 'Moving your USDC', done: 'Your USDC is in the business wallet', doneNote: 'It now shows in the wallet balance.', deadNote: 'Nothing moved. You can start the move again.' };
 
@@ -180,7 +186,7 @@ export function PersonInCharge({ given, onChanged }: { given?: InCharge; onChang
         <ul className="space-y-1.5">
           {view.inCharge.map((m) => (
             <li key={m.userId} className="flex flex-wrap items-center justify-between gap-2 text-sm text-[#1F4452]">
-              <span className="font-semibold">{m.name} <span className="font-normal text-[#326273]">({memberTitle(m)})</span></span>
+              <span className="font-semibold">{m.name} <span className="font-normal text-[#326273]">({titleWithRole(m)})</span></span>
               <QuietButton type="button" disabled={busy} onClick={() => void act(m.userId, false)}>Take back</QuietButton>
             </li>
           ))}
@@ -191,7 +197,7 @@ export function PersonInCharge({ given, onChanged }: { given?: InCharge; onChang
           <Field label="Put someone in charge" htmlFor="pic-pick" className="w-full min-w-0 sm:w-auto sm:flex-1">
             <SelectInput id="pic-pick" value={pick} onChange={(e) => setPick(e.target.value)}>
               <option value="">Choose a team member</option>
-              {view.candidates.map((m) => <option key={m.userId} value={m.userId}>{m.name} ({memberTitle(m)})</option>)}
+              {view.candidates.map((m) => <option key={m.userId} value={m.userId}>{m.name} ({titleWithRole(m)})</option>)}
             </SelectInput>
           </Field>
           <PrimaryButton type="button" disabled={busy || !pick} onClick={() => void act(pick, true)}>Put in charge</PrimaryButton>

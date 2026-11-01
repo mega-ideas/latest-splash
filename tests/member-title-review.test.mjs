@@ -135,7 +135,7 @@ test('a person cannot give themselves a role’s name as a title: only an owner 
   assert.equal((await setMemberTitle(db, { ...base, actorUserId: 'u-owner', userId: 'u-owner', title: 'Owner' })).ok, true);
   assert.equal((await setMemberTitle(db, { ...base, actorUserId: 'u-owner', userId: 'u-maker', title: 'Staff' })).ok, true);
   const lines = (await listAuthorityEvents(db, 'acme')).filter((e) => e.action === 'member_title_changed');
-  assert.equal(lines.length, 3, 'a refused title writes nothing');
+  assert.equal(lines.length, 4, 'a refused title writes nothing: only the four that were accepted');
   await client.close();
 });
 
@@ -204,7 +204,7 @@ test('the form follows the title when someone else changes it, and carries its e
   const form = code(read('components/team/TitleForm.tsx'));
   assert.match(form, /previous/i, 'it notices that the title it was given changed');
   assert.match(form, /aria-invalid=\{error \? true : undefined\}/);
-  assert.match(form, /aria-describedby=\{`\$\{id\}-help`/, 'the help is still read');
+  assert.match(form, /aria-describedby=\{`\$\{id\}-help \$\{id\}-count/, 'the help and the counter are read with the field');
   assert.match(form, /errorId=\{`\$\{id\}-error`\}/, 'the error is linked to the input through the field');
   assert.match(form, /hintId=\{`\$\{id\}-count`\}/);
   assert.match(form, /savedTitleMessage\(/, 'the message about what was kept');
@@ -216,10 +216,10 @@ test('the form follows the title when someone else changes it, and carries its e
 
 test('in the team list a long title wraps instead of being cut off', () => {
   const card = read('components/settings/TeamCard.tsx');
-  const line = card.split('\n').find((l) => l.includes('{m.name}')) ?? '';
-  const block = card.slice(card.indexOf('{members.map((m) => {'), card.indexOf('<AddPersonForm'));
-  assert.doesNotMatch(block.slice(block.indexOf('{m.name}') - 200, block.indexOf('{m.name}') + 400), /truncate/, `name and title: ${line.trim()}`);
-  assert.match(block, /break-words/);
+  const open = card.match(/<span className="([^"]*)">\s*\{m\.name\}/);
+  assert.ok(open, 'the name and title share one span');
+  assert.doesNotMatch(open[1], /truncate/, 'the name and title are not cut off');
+  assert.match(open[1], /break-words/);
 });
 
 // ─── 5. In charge, and the trail ────────────────────────────────────────────

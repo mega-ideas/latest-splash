@@ -71,13 +71,31 @@ const SCRIPTS: readonly RegExp[] = [
 ];
 const FALLBACK = 'Declined by an owner';
 
-/** What differs between a name and a title is only the length: a name is cut at 30 characters and the ellipsis comes after them; a title is cut so that the ellipsis is the 40th character. The words allowed are the same. */
-type Kind = { max: number; ellipsisCounts: boolean };
-const NAME: Kind = { max: MAX_NAME, ellipsisCounts: false };
-const TITLE: Kind = { max: TITLE_MAX, ellipsisCounts: true };
+/**
+ * What differs between a name and a title: the length (a name is cut at 30 characters and the ellipsis comes after them; a
+ * title is cut so that the ellipsis is the 40th character), and two kindnesses to a title that a name does not need. A short
+ * word with one ampersand inside it (R&D, P&L, M&A) is a word. And a title cut at a word that is not plain does not end on a
+ * connector ("Head of 3 teams" is "Head", not "Head of"). The words allowed are otherwise the same.
+ */
+type Kind = { max: number; ellipsisCounts: boolean; title: boolean };
+const NAME: Kind = { max: MAX_NAME, ellipsisCounts: false, title: false };
+const TITLE: Kind = { max: TITLE_MAX, ellipsisCounts: true, title: true };
 
-function isPlainWord(word: string): boolean {
-  if (!WORD.test(word) || ADDRESS_LIKE.test(word) || /^www/iu.test(word) || MARK_STACK.test(word)) return false;
+/** A short word of letters with one ampersand between them: R&D, P&L, M&A, AT&T. Too short to hold a second person's name. */
+const AMPERSAND_WORD = /^\p{L}+&\p{L}+$/u;
+const AMPERSAND_WORD_MAX = 6;
+/** Words a title cannot end on after it was cut: what follows them was left out. */
+const TRAILING_CONNECTORS = new Set(['of', 'to', 'for', 'the', 'a', 'an', 'in', 'at', 'on', 'with', 'by']);
+/** The word a title stopped at is said back to the person who typed it: never more than this. */
+const LEFT_OUT_MAX = 20;
+
+function isPlainWord(word: string, kind: Kind): boolean {
+  if (kind.title && word.includes('&')) {
+    if (!AMPERSAND_WORD.test(word) || Array.from(word).length > AMPERSAND_WORD_MAX) return false;
+  } else if (!WORD.test(word)) {
+    return false;
+  }
+  if (ADDRESS_LIKE.test(word) || /^www/iu.test(word) || MARK_STACK.test(word)) return false;
   if (NOT_A_NAME_WORD.has(word.toLowerCase())) return false;
   return SCRIPTS.filter((script) => script.test(word)).length <= 1;
 }
@@ -93,7 +111,7 @@ function isPlainWord(word: string): boolean {
  * in the one ellipsis character; cutting a cut name changes nothing.
  */
 export function plainName(raw: unknown): string | null {
-  return plainWords(raw, NAME);
+  return plainWords(raw, NAME).text;
 }
 
 /**
@@ -103,11 +121,20 @@ export function plainName(raw: unknown): string | null {
  * title being the 40th. Cutting a cut title changes nothing.
  */
 export function plainTitle(raw: unknown): string | null {
-  return plainWords(raw, TITLE);
+  return plainWords(raw, TITLE).text;
 }
 
-function plainWords(raw: unknown, kind: Kind): string | null {
-  if (typeof raw !== 'string') return null;
+/**
+ * The same cleaning, and the word it stopped at (at most 20 characters of it): what a person who typed
+ * "Level 2 Support" is told, that "2" and everything after it was left out. Null when nothing was left out.
+ */
+export function plainTitleDetail(raw: unknown): { title: string | null; stoppedAt: string | null } {
+  const { text, stoppedAt } = plainWords(raw, TITLE);
+  return { title: text, stoppedAt };
+}
+
+function plainWords(raw: unknown, kind: Kind): { text: string | null; stoppedAt: string | null } {
+  if (typeof raw !== 'string') return { text: null, stoppedAt: null };
   const text = raw
     // Bounded before any pattern runs: a paste of a million characters is cut, it does not cost a million.
     .slice(0, 4000)
@@ -122,19 +149,27 @@ function plainWords(raw: unknown, kind: Kind): string | null {
     .trim();
   const cutAlready = CUT_MARK.test(text);
   const plain: string[] = [];
+  let stoppedAt: string | null = null;
   for (const word of text.replace(CUT_MARK, '').split(/\s+/u)) {
     if (word === '') continue;
-    if (!isPlainWord(word)) break;
+    if (!isPlainWord(word, kind)) {
+      stoppedAt = Array.from(word).slice(0, LEFT_OUT_MAX).join('');
+      break;
+    }
     plain.push(word);
   }
+  // A title that was cut at a word is not left hanging on "of" or "the".
+  if (kind.title && stoppedAt !== null) {
+    while (plain.length > 0 && TRAILING_CONNECTORS.has(plain[plain.length - 1].toLowerCase())) plain.pop();
+  }
   const joined = plain.join(' ');
-  if (joined === '') return null;
+  if (joined === '') return { text: null, stoppedAt };
   const chars = Array.from(joined);
   const room = kind.ellipsisCounts ? kind.max - 1 : kind.max;
-  if (chars.length + (kind.ellipsisCounts && cutAlready ? 1 : 0) <= kind.max) return cutAlready ? `${joined}${ELLIPSIS}` : joined;
+  if (chars.length + (kind.ellipsisCounts && cutAlready ? 1 : 0) <= kind.max) return { text: cutAlready ? `${joined}${ELLIPSIS}` : joined, stoppedAt };
   const head = chars.slice(0, room);
   const atWord = chars[room] === ' ' ? -1 : head.lastIndexOf(' ');
-  return `${(atWord > 0 ? head.slice(0, atWord) : head).join('').trim()}${ELLIPSIS}`;
+  return { text: `${(atWord > 0 ? head.slice(0, atWord) : head).join('').trim()}${ELLIPSIS}`, stoppedAt };
 }
 
 /** A person as the record gives them (an entry that is a plain string is a name with no title). */

@@ -17,16 +17,17 @@ import { CircleAlert, X, type LucideIcon } from 'lucide-react';
 
 export const CONTROL = 'h-11 w-full rounded-xl border border-[#326273]/25 bg-white px-3 text-base text-[#0c3e48] outline-none transition-colors md:text-sm placeholder:text-[#326273] focus:border-[#0d6370] focus:ring-2 focus:ring-[#0d6370]/20 disabled:cursor-not-allowed disabled:bg-[#F6F0ED]';
 
-export function Field({ label, hint, error, children, className = '', htmlFor }: { label: string; hint?: string; error?: string | null; children: ReactNode; className?: string; htmlFor?: string }) {
+/** `hintId` and `errorId` let the control point at them with aria-describedby, so a screen reader reads the counter and the reason with the field. */
+export function Field({ label, hint, error, children, className = '', htmlFor, hintId, errorId }: { label: string; hint?: string; error?: string | null; children: ReactNode; className?: string; htmlFor?: string; hintId?: string; errorId?: string }) {
   return (
     <div className={className}>
       <div className="flex items-baseline justify-between gap-2">
         <label htmlFor={htmlFor} className="text-[13px] font-semibold text-[#1F4452]">{label}</label>
-        {hint ? <span className="text-[13px] text-[#326273]">{hint}</span> : null}
+        {hint ? <span id={hintId} className="text-[13px] text-[#326273]">{hint}</span> : null}
       </div>
       <div className="mt-1.5">{children}</div>
       {error ? (
-        <p role="alert" className="mt-1.5 flex items-start gap-1.5 text-[13px] font-medium text-[var(--error)]">
+        <p id={errorId} role="alert" className="mt-1.5 flex items-start gap-1.5 text-[13px] font-medium text-[var(--error)]">
           <CircleAlert className="mt-0.5 h-3.5 w-3.5 shrink-0" aria-hidden="true" />
           <span>{error}</span>
         </p>

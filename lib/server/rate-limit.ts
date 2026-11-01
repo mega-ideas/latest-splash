@@ -97,6 +97,8 @@ export const RATE_LIMITS = {
   // Adding, changing and removing people, the Finance lead, and Add funds / Withdraw access: authority changes, so few per hour.
   teamChangeUser: { bucket: 'team-change:user', limit: 60, windowMs: HOUR },
   teamChangeOrg: { bucket: 'team-change:org', limit: 200, windowMs: HOUR },
+  // A person changing their own job title: every member may, and each change is a line on the trail, so a handful an hour is plenty.
+  memberTitleSelf: { bucket: 'member-title:self', limit: 6, windowMs: HOUR },
   // Asking for, cancelling and lowering a limit: a handful a day is plenty; per person.
   limitChangeUser: { bucket: 'limit-change:user', limit: 30, windowMs: HOUR },
   // The Wallet page reads the balance and the funds in personal wallets from the chain on every load; per person, high enough that reloads are never refused.
