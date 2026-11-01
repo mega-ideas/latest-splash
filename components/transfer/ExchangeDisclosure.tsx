@@ -113,7 +113,8 @@ export default function ExchangeDisclosure({
             {text.rows.map((row) => (
               <div key={row.label} className="flex flex-col gap-0.5 px-3 py-2.5 sm:flex-row sm:items-baseline sm:justify-between sm:gap-6">
                 <dt className="text-[#326273]">{row.label}</dt>
-                <dd className="min-w-0 break-words font-semibold text-[#0c3e48] sm:text-right">{row.value}</dd>
+                {/* An address is one unbroken string: it breaks anywhere, in a steady face, rather than leaving a stray pair of characters on a line of its own. */}
+                <dd className={`min-w-0 font-semibold text-[#0c3e48] sm:text-right ${/^0x[0-9a-f]{40,}$/i.test(row.value) ? 'break-all font-mono text-[13px] leading-5' : 'break-words'}`}>{row.value}</dd>
               </div>
             ))}
           </dl>
