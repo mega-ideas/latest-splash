@@ -20,8 +20,16 @@
  *   - The provider is given an idempotency key (the invitation and the attempt),
  *     so even a send whose outcome was lost and is claimed again is recognised
  *     and dropped by the provider, not delivered twice.
- *   - Nothing reaches a log but the invitation's id and the kind of failure: no
- *     key, no address, no link.
+ *   - A send whose outcome is not known (a timeout, a lost connection, a server
+ *     error, or an email that went but could not be recorded) stays `sending`:
+ *     it is not shown as failed and not sent again at once, and when it is
+ *     claimed again after 5 minutes the provider gets the SAME key. Only an
+ *     answered refusal (a client error) is `failed`, and only then is the next
+ *     attempt a new one with a new key.
+ *   - A withdrawal or an end that lands between the claim and the send stops it.
+ *   - Nothing reaches a log but the invitation's id and the kind of failure (the
+ *     HTTP status or the error's name): no key, no address, no link. A send that
+ *     could not go because email is not set up is logged too, with the reason.
  *   - The link is made only where production would allow one (https, a public
  *     name). Otherwise nothing is sent and the owner is told email is not set up.
  *
@@ -123,14 +131,33 @@ async function run(db: DrizzleDb, input: Input, mode: 'first' | 'again'): Promis
   const transport = input.transport === undefined ? realTransport(env) : input.transport;
   const link = invitationLink(env.NEXT_PUBLIC_APP_URL, inv.id, { NODE_ENV: env.NODE_ENV });
   if (!transport || transport.name !== 'resend' || !link) {
+    // Nobody operating the platform sees the owner's alert, so the log says why nothing went: the invitation and the reason, never an address or a link.
+    const reason = !transport || transport.name !== 'resend' ? 'no email sender is set up' : 'the app address cannot be used in a link';
+    console.warn(`[invitation-email] the email for ${inv.id} was not sent (${reason})`);
     await settle('not_configured');
     return { ok: true, state: 'not_configured', sent: false, sentAt: null };
   }
 
+  // Preparing the message. Nothing has been sent yet, so anything that goes wrong here is a plain failure.
+  let message: ReturnType<typeof invitationEmail>;
   try {
     const [inviter] = await db.select({ name: users.name }).from(users).where(eq(users.id, inv.invitedBy)).limit(1);
     const [business] = await db.select({ name: organizations.name }).from(organizations).where(eq(organizations.id, inv.orgId)).limit(1);
-    const message = invitationEmail({ inviterName: inviter?.name ?? '', businessName: business?.name ?? '', link, expiresAt: inv.expiresAt });
+    // A withdrawal or an end that landed since the claim stops the email: it would only be a pointless message about a closed invitation.
+    const [still] = await db.select({ status: teamInvitations.status }).from(teamInvitations).where(eq(teamInvitations.id, inv.id)).limit(1);
+    if (!still || still.status !== 'pending') {
+      await settle('failed');
+      return NO_LONGER_OPEN();
+    }
+    message = invitationEmail({ inviterName: inviter?.name ?? '', businessName: business?.name ?? '', link, expiresAt: inv.expiresAt, now });
+  } catch (error) {
+    console.warn(`[invitation-email] the email for ${inv.id} was not sent (${errorKind(error)})`);
+    await settle('failed').catch(() => undefined);
+    return { ok: true, state: 'failed', sent: false, sentAt: null };
+  }
+
+  let providerRef: string | null;
+  try {
     const result = await transport.sendMessage({
       to: inv.email,
       subject: message.subject,
@@ -138,15 +165,41 @@ async function run(db: DrizzleDb, input: Input, mode: 'first' | 'again'): Promis
       html: message.html,
       idempotencyKey: `splash-invitation-${inv.id}-${attempt}`,
     });
-    await settle('sent', { emailSentAt: now, emailMessageRef: result.providerRef });
-    return { ok: true, state: 'sent', sent: true, sentAt: now.toISOString() };
+    providerRef = result.providerRef;
   } catch (error) {
-    // The kind of failure and the invitation's id, nothing else: never the key, the address or the link.
-    const kind = error instanceof EmailDeliveryError ? error.message : error instanceof Error ? error.name : 'unknown error';
-    console.warn(`[invitation-email] the email for ${inv.id} was not sent (${kind})`);
-    await settle('failed');
-    return { ok: true, state: 'failed', sent: false, sentAt: null };
+    if (refusedByProvider(error)) {
+      // The provider answered and said no: the message did not go, and the next attempt is a new one with a new key.
+      console.warn(`[invitation-email] the email for ${inv.id} was not sent (${errorKind(error)})`);
+      await settle('failed');
+      return { ok: true, state: 'failed', sent: false, sentAt: null };
+    }
+    // A timeout, a lost connection or a server error: the provider may well have the message. The row stays "sending", so
+    // the owner is not told it failed, a click cannot send a second email at once, and once the window passes the next
+    // attempt reuses this key, which the provider recognises as the same message.
+    console.warn(`[invitation-email] the email for ${inv.id} may or may not have gone (${errorKind(error)})`);
+    return { ok: true, state: 'sending', sent: false, sentAt: null };
   }
+
+  try {
+    await settle('sent', { emailSentAt: now, emailMessageRef: providerRef });
+  } catch (error) {
+    // The email went; only the record of it did not. Leave it "sending" (not "failed"): a repeat then carries the same key.
+    console.warn(`[invitation-email] the email for ${inv.id} went but could not be recorded (${errorKind(error)})`);
+    return { ok: true, state: 'sending', sent: true, sentAt: now.toISOString() };
+  }
+  return { ok: true, state: 'sent', sent: true, sentAt: now.toISOString() };
+}
+
+/** What may be logged about a failure: the HTTP status the provider gave, or the error's name. Never its words, which can quote the key or the address. */
+function errorKind(error: unknown): string {
+  if (error instanceof EmailDeliveryError && error.status) return `HTTP ${error.status}`;
+  return error instanceof Error ? error.name : 'unknown error';
+}
+
+/** The provider answered, and the answer was a refusal of this message (a client error), not a busy or slow server. */
+function refusedByProvider(error: unknown): boolean {
+  if (!(error instanceof EmailDeliveryError) || error.status === null) return false;
+  return error.status >= 400 && error.status < 500 && error.status !== 408 && error.status !== 409;
 }
 
 /** The first send, right after the invitation is made. Claims only an invitation never tried, so a retry of the invitation sends nothing. */

@@ -276,12 +276,13 @@ async function myWire(tx: DrizzleDb, r: Row, businessesHeld: number): Promise<My
   };
 }
 
-export type InvitationPageState = 'open' | 'accepted' | 'declined' | 'withdrawn' | 'expired';
+export type InvitationPageState = 'open' | 'accepted' | 'already_member' | 'declined' | 'withdrawn' | 'expired';
 export const INVITATION_CLOSED_WORDS = {
   withdrawn: 'The person who sent this invitation took it back. It can no longer be accepted. Ask them to send a new one if you still want to join.',
   expired: `This invitation ended after ${INVITATION_DAYS} days. Ask the person who sent it to send a new one.`,
   declined: 'You declined this invitation. If you change your mind, ask the person who sent it to send a new one.',
   accepted: 'You accepted this invitation, and you are on the team.',
+  already_member: 'You are already on this team.',
 } as const;
 
 /**
@@ -309,7 +310,8 @@ export function invitationStatusFor(
     if (row.status !== 'pending') return closed('withdrawn');
     if (!(await senderStillManages(tx, row))) return closed('withdrawn');
     const held = (await tx.select({ orgId: memberships.orgId }).from(memberships).where(eq(memberships.userId, input.userId))) as Array<{ orgId: string }>;
-    if (held.some((h) => h.orgId === row.orgId)) return closed('accepted');
+    // Still pending, yet already on the team: added directly, not by this invitation, so it is not said to have been accepted.
+    if (held.some((h) => h.orgId === row.orgId)) return closed('already_member');
     return { ok: true as const, state: 'open' as const, invitation: await myWire(tx, row, held.length) };
   });
 }

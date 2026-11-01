@@ -108,7 +108,12 @@ export default function InvitationPage({ invitationId }: { invitationId: string 
         {shown.kind === 'refused' ? (
           <div className="space-y-3">
             <p role="alert" className="text-[15px] leading-6 text-[#1F4452]">{shown.message}</p>
-            <Link href="/dashboard" className="inline-flex min-h-11 items-center text-sm font-semibold text-[#0d6370] underline underline-offset-2">Go to Home</Link>
+            <div className="flex flex-wrap items-center gap-x-5">
+              {shown.verify ? (
+                <Link href="/verify-email" className="inline-flex min-h-11 items-center text-sm font-semibold text-[#0d6370] underline underline-offset-2">Get a new confirmation email</Link>
+              ) : null}
+              <Link href="/dashboard" className="inline-flex min-h-11 items-center text-sm font-semibold text-[#0d6370] underline underline-offset-2">Go to Home</Link>
+            </div>
           </div>
         ) : null}
       </section>

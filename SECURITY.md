@@ -1057,8 +1057,18 @@ The business's owners run their team, not Splash support
   invitations read as absent). With no real sender set up, or no link production
   would allow, nothing is sent and the owner is told so in an alert; a console
   sender never counts as sent. Logs hold the invitation's id and the kind of
-  failure, never the key, address or link. No per-sender invitation limit exists
-  for now; it is to be revisited before launch. Test:
+  failure, never the key, address or link. Splash sends this from its own
+  address with an owner's own words in it, so the inviter's and the business's
+  names are stripped of anything a mail client would link (web addresses, other
+  schemes, bare domains, email addresses, numeric hosts, in look-alike forms too)
+  and of invisible characters: the only link in the email is the invitation's.
+  A send whose outcome is unknown (a timeout, a lost connection, a server error)
+  stays "sending" and is retried with the same provider key, so it cannot become
+  a second email. No per-sender invitation limit exists for now; it is to be
+  revisited before launch. The only brakes left are 25 open invitations per
+  business and the team-change limit (60 an hour per person, 200 per business);
+  they do not stop an owner from inviting, withdrawing and inviting an address
+  again, so this is an abuse path to weigh before launch. Test:
   `tests/invitation-email.test.mjs`.
 - **Leaving (1 Nov).** Any member can ask to leave; nothing changes until an
   owner approves. Only an owner decides (review of 2 Nov: a Finance lead's

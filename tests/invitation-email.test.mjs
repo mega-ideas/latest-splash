@@ -51,6 +51,7 @@ registerHooks({
       const resolved = nextResolve(`${specifier}.js`, context);
       return { ...resolved, url: `${resolved.url}?esm-shim` };
     }
+    if (specifier === 'next/navigation') return nextResolve('next/navigation.js', context);
     return nextResolve(specifier, context);
   },
   load(url, context, nextLoad) {
@@ -941,7 +942,10 @@ test('the owner screen and the invitation page render: sent, failed, not set up,
   assert.match(lead, /An owner can send the email\./);
   assert.doesNotMatch(lead, /Send the email again/);
 
-  const waiting = renderToStaticMarkup(createElement(InvitationPage, { invitationId: 'inv_1' }));
+  const routerContext = await import('next/dist/shared/lib/app-router-context.shared-runtime.js');
+  const AppRouterContext = routerContext.AppRouterContext ?? routerContext.default.AppRouterContext;
+  const router = { push() {}, replace() {}, refresh() {}, back() {}, forward() {}, prefetch() {} };
+  const waiting = renderToStaticMarkup(createElement(AppRouterContext.Provider, { value: router }, createElement(InvitationPage, { invitationId: 'inv_1' })));
   assert.match(waiting, /Opening your invitation/);
   assert.doesNotMatch(waiting, /Accept the invitation/, 'nothing is offered, and nothing is accepted, before the invitation has been read');
 });

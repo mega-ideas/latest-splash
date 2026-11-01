@@ -128,7 +128,8 @@ export default function AddPersonForm({ manager, onChanged }: { manager: Manager
 
       {error ? <Note tone="error">{error}</Note> : null}
       <div aria-live="polite">{done ? <Note>{done}</Note> : null}</div>
-      {mailProblem ? <Note tone="error">{mailProblem}</Note> : null}
+      {/* Said once here, politely; the open-invitations list below keeps the alert for as long as the problem stands. */}
+      <div aria-live="polite">{mailProblem ? <Note tone="warn">{mailProblem}</Note> : null}</div>
       <PrimaryButton type="submit" disabled={!ready}>{busy ? (mode === 'invite' ? 'Sending…' : 'Adding…') : ADD_CHOICES[mode].action}</PrimaryButton>
     </form>
   );

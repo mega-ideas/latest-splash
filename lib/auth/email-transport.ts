@@ -53,9 +53,12 @@ export type TransportEnv = {
 };
 
 export class EmailDeliveryError extends Error {
-  constructor(message: string) {
+  /** The HTTP status the provider answered with, when it answered at all. */
+  readonly status: number | null;
+  constructor(message: string, status: number | null = null) {
     super(message);
     this.name = 'EmailDeliveryError';
+    this.status = status;
   }
 }
 
@@ -129,7 +132,7 @@ export function createResendTransport(input: { apiKey: string; from: string; fet
       signal: AbortSignal.timeout(10_000),
     });
     if (!response.ok) {
-      throw new EmailDeliveryError(`resend returned HTTP ${response.status} for a ${what} message`);
+      throw new EmailDeliveryError(`resend returned HTTP ${response.status} for a ${what} message`, response.status);
     }
     return response;
   }

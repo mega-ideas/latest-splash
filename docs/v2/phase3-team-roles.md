@@ -140,7 +140,7 @@ and never printed), now taking an optional page of its own and an
 
 - **What it says.** Subject "Aisha invited you to join Acme on Splash". Plain
   text and a simple 600px page: who invited them (the sender's name), the
-  business, what it is, that it is open for 7 days and the date it ends (UTC),
+  business, what it is, the date and time it ends (UTC) and about how many days are left,
   and one button, "Open the invitation". Sentence case, no emoji, no images (so
   no tracking pixel), no marketing, no amount, no other business, no other
   person. Every inserted value is cleaned to plain words (control characters and
@@ -181,9 +181,49 @@ and never printed), now taking an optional page of its own and an
 - **Logs.** An id and the kind of failure ("resend returned HTTP 422...", or the
   error's name). Never the key, the address or the link.
 
+- **A name cannot bring a stranger's link.** Splash sends this email from its own
+  address, and an owner chooses their own name and the business's name. So in the
+  subject, the text and the page, anything a mail client would link is taken out
+  of those two names: a web address, any other scheme (`mailto:`, `javascript:`),
+  a bare domain, a `www.` name, an email address and a numeric host, in full-width
+  and look-alike forms too. A name that was only a link becomes "Someone" or "a
+  business". The only link in the email is the invitation's (tested: exactly one).
+  Invisible characters (every Unicode format character, the grapheme joiner, the
+  Hangul fillers, variation selectors and the tag block) are removed. A name such
+  as `St.Mary` or `Acme.io` loses its text for the same reason; ordinary names
+  (`Dr. Aisha`, `Sdn. Bhd.`, `v2.5`) are untouched.
+- **Unknown is not failed.** If the provider answers with a refusal (a client
+  error), the email did not go: it is shown as failed and the next send uses a new
+  key. If there is no answer (a timeout, a lost connection, a server error), or the
+  email went but writing "sent" failed, the invitation stays "sending": the owner
+  reads "The email may already be on its way", nothing can be sent at once, and
+  after 5 minutes the owner may send again with the **same** key, which Resend
+  recognises as the same message. A withdrawal that lands between the claim and
+  the send stops the email.
+- **What the email says about time.** "The invitation ends on 9 November 2026 at
+  09:00 UTC. There are about 7 days left." The days left are counted when the
+  email is sent, so a resend on day five says "about 2 days left". It is in UTC
+  and says so; the app shows the viewer's own time, so the two can differ by a day
+  near midnight.
+- **Server log.** An email that could not go because email is not set up logs the
+  invitation's id and the reason (no sender, or an app address that cannot be a
+  link), once per attempt, so someone operating the platform can see it. Nothing
+  more than the id and the kind (the HTTP status or the error's name) is logged.
+- **A sent email that never arrived.** There is no "send again" for an email
+  recorded as sent: that is what "once" means. The owner can withdraw the
+  invitation and send a new one, which sends a new email. Offering a resend after
+  a cooldown is a product decision for Sky and is not built.
+
+The abuse limits that remain:
 There is no per-sender invitation limit for now; it is to be revisited before launch.
+What still bounds how much email an owner can cause:
+at most 25 open invitations per business;
+60 team changes an hour for one person and 200 for one business (every invitation, withdrawal and "Send the email again" counts as one);
+and one email per invitation unless the first failed.
+These are the only brakes, and they do not stop an owner from inviting, withdrawing and inviting the same address again within them, which sends a new email each time.
+To withdraw the invitation and send a new one is also the only way to email an address again after "sent".
 (The one cap that already existed, 25 open invitations per business, is unchanged
-and is not a per-sender limit; no rate limit or daily cap was added for the email.)
+and is not a per-sender limit, so it stays; no rate limit or daily cap was added for the email.)
 
 Tests: `tests/invitation-email.test.mjs`.
 
