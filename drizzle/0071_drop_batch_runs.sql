@@ -1,0 +1,15 @@
+-- Drop batch_runs, the table of the v1 custody payout runs.
+--
+-- Migration 0011 made it for POST /api/batches/authorize, which paid a payroll
+-- file out of the shared SettlementPool (splash_custody) under one run key.
+-- v2 retired splash_custody from mainnet and removed that route, its status
+-- route, its store and its repository (v2 Phase 3, docs/v2/phase3-batch.md).
+-- Batch payouts are paid from the business's own wallet and recorded in
+-- wallet_batches. Nothing writes batch_runs and nothing reads it: the route,
+-- the staff tables and the repository that did are gone, and no other table
+-- has a foreign key to it.
+--
+-- The table's own indexes and its foreign key to organizations go with it.
+-- 0011 is not edited: a database that applied it still has its file, and this
+-- one takes the table away. IF EXISTS makes a second run a no-op.
+DROP TABLE IF EXISTS "batch_runs";

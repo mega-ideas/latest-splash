@@ -7,9 +7,8 @@
  * (node_modules/drizzle-orm/pg-core/dialect.js, migrate()). An entry whose
  * `when` is not later than the one before it is therefore skipped on every
  * database that has applied the one before, and nothing says so: the deploy
- * goes green and the table is not there. This is how Phase 2's 0055 to 0057
- * would have been skipped on a database that had applied Phase 3's old 0055 to
- * 0060 (docs/v2/migration-renumber.md).
+ * goes green and the table is not there. Migrations are numbered once, in the
+ * order they are applied, and the journal's `when` rises with the number.
  *
  * scripts/check-migration-journal.mjs checks names, idx and file order. It must
  * check `when` too.

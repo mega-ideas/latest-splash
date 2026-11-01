@@ -924,43 +924,6 @@ export const fundingEvents = pgTable('funding_events', {
   uniqueIndex('funding_provider_ref_unique').on(table.provider, table.providerReference),
 ]);
 
-/**
- * A payroll run: many recipients paid under one authorization, one settlement
- * digest, one replay key.
- *
- * The replay key is the reason this is a table and not a Map. It exists so a
- * dropped response leg plus a re-submit does not pay every recipient twice
- * out of the shared pool — and a Map-based guard forgot everything on
- * restart, which is exactly when an operator retries.
- */
-export const batchRuns = pgTable('batch_runs', {
-  id: text('id').primaryKey(),
-  orgId: text('org_id').notNull().references(() => organizations.id),
-  /** The on-chain BusinessAccount the run settles from. Recorded, not used
-   *  for scoping — an account id falls back to a value shared across orgs. */
-  accountId: text('account_id'),
-  state: text('state').notNull(),
-  rowCount: integer('row_count').notNull(),
-  acceptedRows: integer('accepted_rows').notNull(),
-  blockedRows: integer('blocked_rows').notNull(),
-  totalAmountMinor: bigint('total_amount_minor', { mode: 'bigint' }).notNull(),
-  currency: text('currency').notNull().default('USD'),
-  targetCurrency: text('target_currency'),
-  idempotencyKey: text('idempotency_key').notNull(),
-  digest: text('digest'),
-  packageId: text('package_id'),
-  /** Which proposal authorized this run, when it needed a second approver. */
-  proposalId: text('proposal_id'),
-  demo: boolean('demo').notNull().default(false),
-  ...timestamps,
-}, (table) => [
-  /** The replay guard itself. A unique index rather than a read-then-write:
-   *  two submissions of the same file arriving together would both find
-   *  nothing and both insert. */
-  uniqueIndex('batch_runs_idempotency_unique').on(table.orgId, table.idempotencyKey),
-  index('batch_runs_org_created_idx').on(table.orgId, table.createdAt),
-]);
-
 export const payouts = pgTable('payouts', {
   id: text('id').primaryKey(),
   orgId: text('org_id').notNull().references(() => organizations.id),

@@ -21,10 +21,10 @@ import test from 'node:test';
  *   - Its readers were a staff table on /admin/transactions and the staff
  *     transaction list, both of which read the same store.
  *
- * What stays, on purpose: the `batch_runs` table and its shipped migration
- * (history is not dropped), and the BATCH_PAYOUT proposal kind (Zeke's drafts
- * and old approvals still carry it). An approval of one is recorded and moves
- * nothing, and says so.
+ * What stays, on purpose: the BATCH_PAYOUT proposal kind (Zeke's drafts and
+ * old approvals still carry it). An approval of one is recorded and moves
+ * nothing, and says so. The `batch_runs` table went later, by its own
+ * migration (0071; tests/p3-cleanup.test.mjs).
  */
 
 const root = new URL('..', import.meta.url);
@@ -112,12 +112,13 @@ test('the Batch payouts page and the wallet batch routes are the only batch path
   assert.match(walletRoute, /requireSessionAccount\(/, 'the org comes from the session, never the request');
 });
 
-test('the shipped migration and the history table stay: history is not dropped', async () => {
-  assert.equal(await exists('drizzle/0011_batch_runs.sql'), true);
+test('the shipped migration stays as written, and a later one drops the table it made', async () => {
+  assert.equal(await exists('drizzle/0011_batch_runs.sql'), true, 'an applied migration is never edited or removed');
   const journal = JSON.parse(await readFile(at('drizzle/meta/_journal.json'), 'utf8'));
   assert.ok(journal.entries.some((entry) => entry.tag === '0011_batch_runs'));
+  assert.ok(journal.entries.some((entry) => entry.tag === '0071_drop_batch_runs'));
   const schema = await readFile(at('lib/db/schema.ts'), 'utf8');
-  assert.match(schema, /pgTable\('batch_runs'/);
+  assert.doesNotMatch(schema, /pgTable\('batch_runs'/);
 });
 
 // ── An old approval of a payout run moves nothing, and says so ──────────────
