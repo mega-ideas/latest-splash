@@ -391,6 +391,12 @@ test('the payment details are shown exactly as they are sent, the person’s nam
 
 // ─── 8. The page: only a purpose that was not accepted is the person's to change ───
 
+test('the message lays an address out as one steady string that breaks anywhere, not as words that leave two characters alone on a line', () => {
+  const panel = read('components/transfer/ExchangeDisclosure.tsx');
+  assert.match(panel, /break-all font-mono/);
+  assert.match(panel, /0x\[0-9a-f\]\{40,\}/);
+});
+
 test('the page treats only a refused purpose as the person’s to fix; any other refusal hands them to the owners', () => {
   const panel = read('components/transfer/ExchangeDisclosure.tsx');
   assert.match(panel, /bad_purpose/);
