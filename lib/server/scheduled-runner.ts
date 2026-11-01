@@ -101,6 +101,7 @@ import { WALLET_SPONSOR_DAILY_BUDGET_MIST, assertPurposeShape } from './wallet-s
 import { sponsoredBudgetSince, type DrizzleDb } from './wallet-signing-store.ts';
 import { assertSponsorable, SponsorRefused } from './wallet-sponsor.ts';
 import { createBatch, getBatch, reviewBatch } from './wallet-batches.ts';
+import { declinedByLabel } from '../team/declined-by.ts';
 import { resolvePayee, TRANSFER_INTENT_LIFETIME_MS, type PayeeInput } from './wallet-transfers.ts';
 
 /** How long the quote of an automatic payment lasts: it is paid within seconds. */
@@ -442,7 +443,7 @@ async function followApproval(d: ScheduleDeps, runId: string): Promise<number> {
     }
     case 'declined':
     case 'withdrawn': {
-      const skipped = await moveRun(d.db, d.orgId, run.id, { status: 'skipped', reasonCode: status, reason: status === 'declined' ? 'An owner declined this one. Nothing was paid.' : 'The request was withdrawn. Nothing was paid.', updatedAt: now }, from);
+      const skipped = await moveRun(d.db, d.orgId, run.id, { status: 'skipped', reasonCode: status, reason: status === 'declined' ? `${declinedByLabel(batch.declinedBy)}. Nothing was paid.` :'The request was withdrawn. Nothing was paid.', updatedAt: now }, from);
       return skipped ? 0 : 0;
     }
     default:
