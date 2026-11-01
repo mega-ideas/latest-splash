@@ -203,16 +203,48 @@ export async function claimRun(db: DrizzleDb, orgId: string, id: string, now: Da
 }
 
 /**
- * Announce a run's grace window, once: set when its first automatic payment may
- * be claimed and release the lease, only while the run is still waiting to start
- * and has no window. A second caller finds one and gets null. Another business's
- * run reads as absent.
+ * Open a run's grace window, once: set when its first automatic payment may be
+ * claimed, only while the run is still waiting to start and has no window. A
+ * second caller finds one and gets null. The caller's lease on the run is kept
+ * until the owners have been told (`confirmGraceNotice`) or the window is closed
+ * again (`closeGraceWindow`), so no other pass works on the run in between.
+ * Another business's run reads as absent.
  */
 export async function openGraceWindow(db: DrizzleDb, orgId: string, id: string, input: { startsAt: Date; windowVersion: number; now: Date }): Promise<RunRow | null> {
   const [row] = await db
     .update(paymentScheduleRuns)
-    .set({ startsAt: input.startsAt, windowVersion: input.windowVersion, claimedAt: null, updatedAt: input.now })
+    .set({ startsAt: input.startsAt, windowVersion: input.windowVersion, updatedAt: input.now })
     .where(and(eq(paymentScheduleRuns.orgId, orgId), eq(paymentScheduleRuns.id, id), eq(paymentScheduleRuns.status, 'scheduled'), isNull(paymentScheduleRuns.startsAt)))
+    .returning();
+  return row ?? null;
+}
+
+/**
+ * Record that an owner was told about the window that starts at `startsAt`, and
+ * release the lease. Only for that very window: a window moved or closed since
+ * (a time edit, a Skip) is not confirmed by a notice that was about another.
+ */
+export async function confirmGraceNotice(db: DrizzleDb, orgId: string, id: string, startsAt: Date, now: Date): Promise<boolean> {
+  const rows = await db
+    .update(paymentScheduleRuns)
+    .set({ noticeRunningAt: now, claimedAt: null, updatedAt: now })
+    .where(and(eq(paymentScheduleRuns.orgId, orgId), eq(paymentScheduleRuns.id, id), eq(paymentScheduleRuns.status, 'scheduled'), eq(paymentScheduleRuns.startsAt, startsAt)))
+    .returning({ id: paymentScheduleRuns.id });
+  return rows.length > 0;
+}
+
+/**
+ * Close a window that has not been announced to anyone: no start, no notice
+ * recorded, so the next pass opens a fresh window with its full warning. Only
+ * the window that starts at `startsAt`, and only while it is unannounced.
+ * `keepLease` holds the caller's lease on the run (it goes on to open the new
+ * window itself); otherwise the lease is released.
+ */
+export async function closeGraceWindow(db: DrizzleDb, orgId: string, id: string, startsAt: Date, now: Date, opts: { keepLease?: boolean } = {}): Promise<RunRow | null> {
+  const [row] = await db
+    .update(paymentScheduleRuns)
+    .set({ startsAt: null, windowVersion: null, noticeRunningAt: null, ...(opts.keepLease ? {} : { claimedAt: null }), updatedAt: now })
+    .where(and(eq(paymentScheduleRuns.orgId, orgId), eq(paymentScheduleRuns.id, id), eq(paymentScheduleRuns.status, 'scheduled'), eq(paymentScheduleRuns.startsAt, startsAt), isNull(paymentScheduleRuns.noticeRunningAt)))
     .returning();
   return row ?? null;
 }

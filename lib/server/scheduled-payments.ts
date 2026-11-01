@@ -109,8 +109,11 @@ export const fail = (status: number, code: string, error: string, details?: Reco
 export type ScheduleDeps = BatchDeps & {
   /** The scheduled payer's signer, or why there is none (lib/server/scheduled-payer-signer.ts). */
   payer: () => Promise<PayerResult>;
-  /** Tell the owners something about a schedule. A notice that does not go out never undoes what happened. */
-  notify: (notice: ScheduleNotice) => Promise<void>;
+  /**
+   * Tell the owners something about a schedule. Answers how many owners it reached. A notice that does not go out never undoes
+   * what happened, but the warning window before an automatic payment is given only if this answers above zero.
+   */
+  notify: (notice: ScheduleNotice) => Promise<number>;
 };
 
 // ─── Who may do what ────────────────────────────────────────────────────────

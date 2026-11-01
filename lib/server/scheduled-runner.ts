@@ -42,6 +42,12 @@
  * longer passes, a changed schedule included, hands the run back to "ask me
  * first". A window of 0 pays at the due time as it always did.
  *
+ * The window fails closed on delivery. The notice is recorded as sent only if it
+ * reached at least one owner (the notifier says how many); when it reached no one
+ * the window is closed again and the next pass opens a fresh one. A window that
+ * ends with no notice recorded is never paid on: the run goes back to "ask me
+ * first" (window_not_announced). If no owner can be told for a day, the run lapses.
+ *
  * Fail closed. Without the scheduled payer's KMS key in production, without
  * the allowance, without the gas sponsor, with automatic payments paused, or
  * with the chain unreadable, nothing is paid automatically.
@@ -99,6 +105,8 @@ import {
   listRunPayments,
   moveRun,
   openGraceWindow,
+  closeGraceWindow,
+  confirmGraceNotice,
   paidBefore,
   stampNotice,
   withLock,
@@ -203,11 +211,9 @@ export async function runScheduledPayments(deps: RunnerDeps): Promise<RunnerResu
       if (!run) return;
       if (run.status === 'scheduled') {
         if (run.dueAt.getTime() > d.now().getTime()) return;
-        // Its window is announced and still open: nothing is claimed or paid until it ends (a Skip or Stop can still end the run).
-        if (run.startsAt && run.startsAt.getTime() > d.now().getTime()) {
-          result.notices += await announceWindow(d, run.id);
-          return;
-        }
+        // Its window is open and an owner was told: nothing is claimed or paid until it ends (a Skip or Stop can still end the run).
+        // A window nobody was told about is not waited on: startRun opens a fresh one, with its full warning.
+        if (run.startsAt && run.noticeRunningAt && run.startsAt.getTime() > d.now().getTime()) return;
         result.started += 1;
         result.notices += await startRun(d, run.id);
       } else if (run.status === 'waiting_approval' || (run.status === 'approved' && run.ranAs !== 'auto')) {
@@ -276,7 +282,7 @@ async function tell(
   sch: ScheduleRow,
   run: RunRow,
   more: { totalMinor?: bigint; feeMinor?: bigint; itemCount?: number; reason?: string | null; startsAtMs?: number | null; graceMinutes?: number | null } = {},
-): Promise<void> {
+): Promise<number> {
   const notice: ScheduleNotice = {
     kind,
     orgId: d.orgId,
@@ -295,8 +301,10 @@ async function tell(
     startsAtMs: more.startsAtMs ?? null,
     graceMinutes: more.graceMinutes ?? null,
   };
-  // A notice that does not go out never undoes the run.
-  await d.notify(notice).catch(() => undefined);
+  // A notice that does not go out never undoes the run. How many owners it reached is the answer; a notifier that fails, or
+  // that says nothing, reached no one.
+  const reached = await d.notify(notice).catch(() => 0);
+  return typeof reached === 'number' && reached > 0 ? reached : 0;
 }
 
 // ─── 2. Starting a run ──────────────────────────────────────────────────────
@@ -318,8 +326,8 @@ async function startRun(d: ScheduleDeps, runId: string): Promise<number> {
     return 0;
   }
 
-  // The window was announced and has not ended: there is nothing to start yet.
-  if (run.startsAt && run.startsAt.getTime() > now.getTime()) return 0;
+  // The window was announced to an owner and has not ended: there is nothing to start yet.
+  if (run.startsAt && run.noticeRunningAt && run.startsAt.getTime() > now.getTime()) return 0;
 
   const claimed = await claimRun(d.db, d.orgId, run.id, now, RUN_CLAIM_LEASE_MS);
   if (!claimed) return 0;
@@ -331,19 +339,31 @@ async function startRun(d: ScheduleDeps, runId: string): Promise<number> {
 
   // The mode the schedule is in now decides: switching to "ask me first" takes effect for this very run.
   if (sch.mode === 'auto') {
+    let current = claimed;
+    // The window protects the owners only if one of them was told. One that ended with no notice recorded is never paid on:
+    // the run goes back to "ask me first". One still open, with no notice recorded (the runner stopped between opening it and
+    // telling anyone), is closed and opened again, so the warning is a full one.
+    if (current.startsAt && !current.noticeRunningAt) {
+      if (current.startsAt.getTime() <= now.getTime()) {
+        return prepareApproval(d, sch, current, { code: 'window_not_announced', text: fallbackWords('window_not_announced') });
+      }
+      const closed = await closeGraceWindow(d.db, d.orgId, current.id, current.startsAt, now, { keepLease: true });
+      if (!closed) return 0;
+      current = closed;
+    }
     // Every check is made when the window opens (so nothing is announced that could not be paid) and again when it ends.
     const checked = await evaluateAuto(d, sch);
-    if (!checked.ok) return prepareApproval(d, sch, claimed, { code: checked.code, text: checked.text });
-    if (claimed.startsAt) {
+    if (!checked.ok) return prepareApproval(d, sch, current, { code: checked.code, text: checked.text });
+    if (current.startsAt) {
       // The window has ended. What was announced is what is paid: a schedule changed since is handed back.
-      if (claimed.windowVersion !== null && claimed.windowVersion !== sch.version) {
-        return prepareApproval(d, sch, claimed, { code: 'changed_in_window', text: fallbackWords('changed_in_window') });
+      if (current.windowVersion !== null && current.windowVersion !== sch.version) {
+        return prepareApproval(d, sch, current, { code: 'changed_in_window', text: fallbackWords('changed_in_window') });
       }
-      return executeAuto(d, sch, claimed, checked);
+      return executeAuto(d, sch, current, checked);
     }
     const grace = await graceMinutesOf(d.db, d.orgId);
-    if (grace > 0) return openWindow(d, sch, claimed, checked, grace);
-    return executeAuto(d, sch, claimed, checked);
+    if (grace > 0) return openWindow(d, sch, current, checked, grace);
+    return executeAuto(d, sch, current, checked);
   }
   return prepareApproval(d, sch, claimed, null);
 }
@@ -351,31 +371,30 @@ async function startRun(d: ScheduleDeps, runId: string): Promise<number> {
 // ─── The grace window ───────────────────────────────────────────────────────
 
 /**
- * Announce the window: the first payment may be claimed GRACE minutes from now,
- * the "starting" notice goes out with that time, and the run stays `scheduled`
- * (so a Skip or a Stop still ends it, with nothing paid). Once per run; the
+ * Open the window and tell the owners: the first payment may be claimed GRACE
+ * minutes from now, the "starting" notice goes out with that time, and the run
+ * stays "scheduled" (so a Skip or a Stop still ends it, with nothing paid). The
  * start is fixed here and a change to the setting later does not move it.
+ *
+ * The notice is recorded as sent only when it reached at least one owner. When it
+ * reached no one (the mail provider is down, no owner has an address) the window
+ * is closed again, so nothing is paid on the strength of a warning nobody
+ * received, and the next pass opens a fresh window with its full length. The
+ * lease on the run is held across the telling, so no other pass opens or closes
+ * the window meanwhile.
  */
 async function openWindow(d: ScheduleDeps, sch: ScheduleRow, run: RunRow, checked: CheckedRun, grace: number): Promise<number> {
   const now = d.now();
   const startsAt = new Date(now.getTime() + grace * MINUTE_MS);
   const opened = await openGraceWindow(d.db, d.orgId, run.id, { startsAt, windowVersion: sch.version, now });
   if (!opened) return 0;
-  if (!(await stampNotice(d.db, d.orgId, opened.id, 'noticeRunningAt', now))) return 0;
-  await tell(d, 'running', sch, opened, { totalMinor: checked.totalMinor, feeMinor: checked.feeMinor, itemCount: checked.rows.length, startsAtMs: startsAt.getTime(), graceMinutes: grace });
-  return 1;
-}
-
-/** A window opened but its notice did not go out (the runner stopped between the two): say it now, once. */
-async function announceWindow(d: ScheduleDeps, runId: string): Promise<number> {
-  const now = d.now();
-  const run = await getRun(d.db, d.orgId, runId);
-  if (!run || run.status !== 'scheduled' || !run.startsAt || run.noticeRunningAt) return 0;
-  const sch = await getSchedule(d.db, d.orgId, run.scheduleId);
-  if (!sch || sch.mode !== 'auto') return 0;
-  if (!(await stampNotice(d.db, d.orgId, run.id, 'noticeRunningAt', now))) return 0;
-  await tell(d, 'running', sch, run, { totalMinor: sch.totalMinor, feeMinor: sch.feeMinor, itemCount: sch.itemCount, startsAtMs: run.startsAt.getTime(), graceMinutes: await graceMinutesOf(d.db, d.orgId) });
-  return 1;
+  const reached = await tell(d, 'running', sch, opened, { totalMinor: checked.totalMinor, feeMinor: checked.feeMinor, itemCount: checked.rows.length, startsAtMs: startsAt.getTime(), graceMinutes: grace });
+  if (reached > 0) {
+    await confirmGraceNotice(d.db, d.orgId, opened.id, startsAt, d.now());
+    return 1;
+  }
+  await closeGraceWindow(d.db, d.orgId, opened.id, startsAt, d.now());
+  return 0;
 }
 
 // ─── Mode A: prepare the batch and ask ──────────────────────────────────────

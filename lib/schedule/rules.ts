@@ -187,6 +187,7 @@ export const FALLBACK_CODES = [
   'balance_short',
   'policy_unreadable',
   'changed_in_window',
+  'window_not_announced',
 ] as const;
 export type FallbackCode = (typeof FALLBACK_CODES)[number];
 
@@ -212,6 +213,7 @@ export const FALLBACK_TEXT: Record<FallbackCode, string> = {
   balance_short: 'Your wallet does not hold enough USDC for this run and its fees, so it needs your attention.',
   policy_unreadable: 'Splash could not read your spending policy, so this run needs your approval.',
   changed_in_window: 'The schedule was changed after the notice that this run was starting, so what was announced is not what would be paid. This run needs your approval.',
+  window_not_announced: 'The warning that this run was about to start was not sent to your owners, so it was not paid automatically. This run needs your approval.',
 };
 
 /** The reason, with the payee it is about when it names one. */
