@@ -38,6 +38,7 @@ import { and, asc, eq, lte, sql } from 'drizzle-orm';
 
 import { memberships, organizations, teamInvitations, users } from '../db/schema.ts';
 import { isMembershipRole, type MembershipRole } from '../membership-roles.ts';
+import { inviteEmailWire } from '../team/invitation-email.ts';
 import { INVITATION_DAYS, ON_A_BUSINESS, maskEmail, type InvitationWire, type MyInvitationWire } from '../team/view.ts';
 import { fail, inTransaction, lockPerson, teamManager, type TeamFailure } from './team-admin.ts';
 import { memberRole, recordAuthorityEvent } from './wallet-authority.ts';
@@ -73,8 +74,8 @@ async function atomic<T>(db: DrizzleDb, fn: (tx: DrizzleDb) => Promise<T>): Prom
 }
 
 const NOT_FOUND = () => fail(404, 'not_found', 'That invitation was not found.');
-const NO_LONGER_OPEN = () => fail(410, 'no_longer_open', 'This invitation is no longer open. Ask the person who sent it to send a new one.');
-const EXPIRED = () => fail(410, 'expired', `This invitation ended after ${INVITATION_DAYS} days. Ask the person who sent it to send a new one.`);
+export const NO_LONGER_OPEN = () => fail(410, 'no_longer_open', 'This invitation is no longer open. Ask the person who sent it to send a new one.');
+export const EXPIRED = () => fail(410, 'expired', `This invitation ended after ${INVITATION_DAYS} days. Ask the person who sent it to send a new one.`);
 const VERIFY_EMAIL = () => fail(403, 'verify_email', 'Verify your email address first. Then you can see and answer invitations sent to it.');
 
 const normalizeEmail = (value: unknown): string => (typeof value === 'string' ? value.trim().toLowerCase() : '');
@@ -197,6 +198,7 @@ export async function listInvitations(
         createdAt: r.createdAt.toISOString(),
         expiresAt: r.expiresAt.toISOString(),
         canWithdraw: input.manager === 'finance_lead' ? r.role !== 'admin' : true,
+        delivery: inviteEmailWire(r, { now, owner: input.manager === 'owner' }),
       });
     }
     return out;
@@ -253,19 +255,62 @@ export function invitationsFor(db: DrizzleDb, input: { userId: string; now?: Clo
     for (const r of rows) {
       if (held.some((h) => h.orgId === r.orgId)) continue;
       if (!(await senderStillManages(tx, r))) continue;
-      const [org] = await tx.select({ name: organizations.name }).from(organizations).where(eq(organizations.id, r.orgId)).limit(1);
-      out.push({
-        id: r.id,
-        businessName: org?.name ?? 'A business',
-        role: r.role as MembershipRole,
-        invitedByName: await nameOfUser(tx, r.invitedBy),
-        invitedByEmailMask: await maskedEmailOfUser(tx, r.invitedBy),
-        expiresAt: r.expiresAt.toISOString(),
-        canAccept: held.length === 0,
-        blockedReason: held.length === 0 ? null : ON_A_BUSINESS,
-      });
+      out.push(await myWire(tx, r, held.length));
     }
     return out;
+  });
+}
+
+/** One invitation as the invited person sees it. It names the inviting business and no other. */
+async function myWire(tx: DrizzleDb, r: Row, businessesHeld: number): Promise<MyInvitationWire> {
+  const [org] = await tx.select({ name: organizations.name }).from(organizations).where(eq(organizations.id, r.orgId)).limit(1);
+  return {
+    id: r.id,
+    businessName: org?.name ?? 'A business',
+    role: r.role as MembershipRole,
+    invitedByName: await nameOfUser(tx, r.invitedBy),
+    invitedByEmailMask: await maskedEmailOfUser(tx, r.invitedBy),
+    expiresAt: r.expiresAt.toISOString(),
+    canAccept: businessesHeld === 0,
+    blockedReason: businessesHeld === 0 ? null : ON_A_BUSINESS,
+  };
+}
+
+export type InvitationPageState = 'open' | 'accepted' | 'declined' | 'withdrawn' | 'expired';
+export const INVITATION_CLOSED_WORDS = {
+  withdrawn: 'The person who sent this invitation took it back. It can no longer be accepted. Ask them to send a new one if you still want to join.',
+  expired: `This invitation ended after ${INVITATION_DAYS} days. Ask the person who sent it to send a new one.`,
+  declined: 'You declined this invitation. If you change your mind, ask the person who sent it to send a new one.',
+  accepted: 'You accepted this invitation, and you are on the team.',
+} as const;
+
+/**
+ * What the page behind the link in the invitation email shows. Only the
+ * signed-in person whose VERIFIED email the invitation was sent to is told
+ * anything: anyone else, with the link or without, gets exactly the answer
+ * for an id that does not exist. Opening the page changes nothing except that
+ * a past-end invitation is marked ended, as every other look does.
+ */
+export function invitationStatusFor(
+  db: DrizzleDb,
+  input: { userId: string; invitationId: string; now?: Clock },
+): Promise<{ ok: true; state: 'open'; invitation: MyInvitationWire } | { ok: true; state: Exclude<InvitationPageState, 'open'>; message: string } | TeamFailure> {
+  const now = clock(input.now);
+  return atomic(db, async (tx) => {
+    const found = await mineOrFailure(tx, input.userId, input.invitationId);
+    if (isFailure(found)) return found;
+    if (found.row.status === 'pending' && found.row.expiresAt.getTime() <= now.getTime()) await expireDue(tx, { orgId: found.row.orgId, email: found.row.email }, now);
+    const [row] = (await tx.select().from(teamInvitations).where(eq(teamInvitations.id, found.row.id)).limit(1)) as Row[];
+    if (!row) return NOT_FOUND();
+    const closed = (state: Exclude<InvitationPageState, 'open'>) => ({ ok: true as const, state, message: INVITATION_CLOSED_WORDS[state] });
+    if (row.status === 'accepted') return closed('accepted');
+    if (row.status === 'declined') return closed('declined');
+    if (row.status === 'expired') return closed('expired');
+    if (row.status !== 'pending') return closed('withdrawn');
+    if (!(await senderStillManages(tx, row))) return closed('withdrawn');
+    const held = (await tx.select({ orgId: memberships.orgId }).from(memberships).where(eq(memberships.userId, input.userId))) as Array<{ orgId: string }>;
+    if (held.some((h) => h.orgId === row.orgId)) return closed('accepted');
+    return { ok: true as const, state: 'open' as const, invitation: await myWire(tx, row, held.length) };
   });
 }
 

@@ -31,6 +31,10 @@ export type EmailMessage = {
   text: string;
   /** A paragraph of `text` that is exactly this URL becomes a link in HTML. */
   link?: string;
+  /** A page the caller built itself (every inserted value already escaped). Sent as given instead of the generic one. */
+  html?: string;
+  /** Lets the provider recognise a repeat of one send and drop it. Never a secret. */
+  idempotencyKey?: string;
 };
 
 export interface EmailTransport {
@@ -115,10 +119,12 @@ export function createConsoleTransport(env: TransportEnv = process.env): EmailTr
 /** Resend over plain HTTPS. No SDK: one endpoint, one bearer token. */
 export function createResendTransport(input: { apiKey: string; from: string; fetch?: typeof fetch }): EmailTransport {
   const doFetch = input.fetch ?? globalThis.fetch;
-  async function post(to: string, subject: string, text: string, html: string, what: string) {
+  async function post(to: string, subject: string, text: string, html: string, what: string, idempotencyKey?: string) {
+    const headers: Record<string, string> = { Authorization: `Bearer ${input.apiKey}`, 'Content-Type': 'application/json' };
+    if (idempotencyKey) headers['Idempotency-Key'] = idempotencyKey;
     const response = await doFetch('https://api.resend.com/emails', {
       method: 'POST',
-      headers: { Authorization: `Bearer ${input.apiKey}`, 'Content-Type': 'application/json' },
+      headers,
       body: JSON.stringify({ from: input.from, to: [to], subject, text, html }),
       signal: AbortSignal.timeout(10_000),
     });
@@ -134,7 +140,8 @@ export function createResendTransport(input: { apiKey: string; from: string; fet
       await post(message.to, subject, text, html, message.kind);
     },
     async sendMessage(message) {
-      const response = await post(message.to, message.subject, message.text, htmlFor(message.text, message.link ?? null), 'notice');
+      const html = message.html ?? htmlFor(message.text, message.link ?? null);
+      const response = await post(message.to, message.subject, message.text, html, 'notice', message.idempotencyKey);
       const body = (await response.json().catch(() => null)) as { id?: unknown } | null;
       return { providerRef: typeof body?.id === 'string' ? body.id : null };
     },

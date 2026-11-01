@@ -8,6 +8,7 @@
  * same server rule.
  */
 import type { MembershipRole } from '../membership-roles.ts';
+import type { InviteEmailWire } from './invitation-email.ts';
 
 export const FINANCE_LEAD_NAME = 'Finance lead';
 
@@ -33,7 +34,17 @@ export type TeamMemberWire = {
 export type TeamActivityWire = { id: string; action: string; createdAt: string; actorName: string; subjectName: string | null; summary: string };
 
 /** One open invitation, as a manager sees it. The full address is here; the trail keeps only a masked one. */
-export type InvitationWire = { id: string; email: string; role: MembershipRole; invitedByName: string; createdAt: string; expiresAt: string; canWithdraw: boolean };
+export type InvitationWire = {
+  id: string;
+  email: string;
+  role: MembershipRole;
+  invitedByName: string;
+  createdAt: string;
+  expiresAt: string;
+  canWithdraw: boolean;
+  /** The email the person was sent: whether it went, what to tell the owner, and whether this manager may send it again. */
+  delivery: InviteEmailWire;
+};
 
 /** One open request to leave, as a manager sees it, with whether this manager may decide it. */
 export type LeaveRequestWire = { id: string; userId: string; name: string; email: string; role: MembershipRole; createdAt: string; canDecide: boolean; whyNot: string | null };
@@ -95,7 +106,7 @@ export const ON_A_BUSINESS =
 export const ADD_CHOICES = {
   invite: {
     title: 'Send an invitation',
-    body: 'They see it after they sign in and choose to accept or decline. It ends after 7 days, and you can withdraw it before then.',
+    body: 'We email them, and they see it after they sign in and choose to accept or decline. It ends after 7 days, and you can withdraw it before then.',
     action: 'Send invitation',
   },
   direct: {

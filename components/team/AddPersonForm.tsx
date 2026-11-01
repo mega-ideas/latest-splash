@@ -6,6 +6,7 @@ import { call, errorText } from '@/components/transfer/api';
 import { Field, PrimaryButton, SelectInput, TextInput } from '@/components/transfer/ui';
 import { Note } from '@/components/wallet/parts';
 import type { MembershipRole } from '@/lib/membership-roles';
+import { INVITE_EMAIL_WORDS } from '@/lib/team/invitation-email';
 import { ADD_CHOICES, INVITATION_DAYS, ROLE_NAME, ROLE_SENTENCE, roleChoicesFor, roleWithArticle, type Manager } from '@/lib/team/view';
 
 type Mode = 'invite' | 'direct';
@@ -29,6 +30,7 @@ export default function AddPersonForm({ manager, onChanged }: { manager: Manager
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [done, setDone] = useState<string | null>(null);
+  const [mailProblem, setMailProblem] = useState<string | null>(null);
   if (choices.length === 0) return null;
 
   const address = email.trim();
@@ -38,9 +40,10 @@ export default function AddPersonForm({ manager, onChanged }: { manager: Manager
     setBusy(true);
     setError(null);
     setDone(null);
+    setMailProblem(null);
     const answer =
       mode === 'invite'
-        ? await call<{ created?: boolean }>('/api/team/invitations', { body: { email: address, role } })
+        ? await call<{ created?: boolean; delivery?: { state?: string; sent?: boolean } }>('/api/team/invitations', { body: { email: address, role } })
         : await call('/api/team', { body: { email: address, role, confirmed: true } });
     setBusy(false);
     if (!answer.ok) {
@@ -48,12 +51,16 @@ export default function AddPersonForm({ manager, onChanged }: { manager: Manager
       return;
     }
     if (mode === 'invite') {
-      const created = (answer.body as { created?: boolean } | null)?.created !== false;
+      const body = answer.body as { created?: boolean; delivery?: { state?: string } } | null;
+      const created = body?.created !== false;
+      const state = body?.delivery?.state;
+      // The invitation stands whatever happened to the email, and the owner is told which it was.
       setDone(
         created
-          ? `Invitation sent to ${address} as ${roleWithArticle(role)}. They see it after they sign in with that email, and it ends in ${INVITATION_DAYS} days.`
+          ? `Invitation sent to ${address} as ${roleWithArticle(role)}. ${state === 'sent' ? 'We emailed them, and they' : 'They'} see it after they sign in with that email, and it ends in ${INVITATION_DAYS} days.`
           : `${address} already has an open invitation as ${roleWithArticle(role)}. It is unchanged.`,
       );
+      setMailProblem(created && state !== undefined && state !== 'sent' && state !== 'sending' ? (state === 'not_configured' ? INVITE_EMAIL_WORDS.not_configured : INVITE_EMAIL_WORDS.failed) : null);
     } else {
       setDone(`${address} was added as ${roleWithArticle(role)}.`);
     }
@@ -121,6 +128,7 @@ export default function AddPersonForm({ manager, onChanged }: { manager: Manager
 
       {error ? <Note tone="error">{error}</Note> : null}
       <div aria-live="polite">{done ? <Note>{done}</Note> : null}</div>
+      {mailProblem ? <Note tone="error">{mailProblem}</Note> : null}
       <PrimaryButton type="submit" disabled={!ready}>{busy ? (mode === 'invite' ? 'Sending…' : 'Adding…') : ADD_CHOICES[mode].action}</PrimaryButton>
     </form>
   );

@@ -263,9 +263,9 @@ test('a failed send keeps the invitation: it still shows after sign-in, and the 
   assert.equal(mine.length, 1, 'the person still sees it in the app');
   assert.equal(mine[0].businessName, 'Acme Trading');
   const view = await ownerView(db);
-  assert.equal(view.email.state, 'failed');
-  assert.equal(view.email.canResend, true);
-  assert.equal(view.email.message, 'We could not send the email. The invitation is still waiting for them. Try sending the email again.');
+  assert.equal(view.delivery.state, 'failed');
+  assert.equal(view.delivery.canResend, true);
+  assert.equal(view.delivery.message, 'We could not send the email. The invitation is still waiting for them. Try sending the email again.');
   await client.close();
 });
 
@@ -282,8 +282,8 @@ test('the owner sends the email again after a failure: once per click, and no mo
   assert.equal(third.sent, false);
   assert.equal(good.calls.length, 1);
   const view = await ownerView(db);
-  assert.equal(view.email.state, 'sent');
-  assert.equal(view.email.canResend, false);
+  assert.equal(view.delivery.state, 'sent');
+  assert.equal(view.delivery.canResend, false);
   await client.close();
 });
 
@@ -333,8 +333,8 @@ test('only an owner sends the email again: the Finance lead, staff and strangers
   assert.equal((await rowOf(db, invitation.id)).emailState, 'failed', 'and nothing changed');
   // What the Finance lead sees: the state in words, but no button.
   const leadView = await ownerView(db, { manager: 'finance_lead' });
-  assert.equal(leadView.email.canResend, false);
-  assert.equal(leadView.email.state, 'failed');
+  assert.equal(leadView.delivery.canResend, false);
+  assert.equal(leadView.delivery.state, 'failed');
   // The other business sees none of it.
   assert.deepEqual(await listInvitations(db, { orgId: 'northwind', manager: 'owner', now: () => T0 }), []);
   await client.close();
@@ -463,10 +463,10 @@ test('with no email sender set up the invitation works in the app and the owner 
   assert.equal((await rowOf(db, invitation.id)).emailState, 'not_configured');
   assert.equal((await invitationsFor(db, { userId: 'u-free', now: () => T0 })).length, 1, 'the invitation is in the app');
   const view = await ownerView(db);
-  assert.equal(view.email.state, 'not_configured');
-  assert.match(view.email.message, /^No email was sent\./);
-  assert.match(view.email.message, /waiting in the app/);
-  assert.equal(view.email.canResend, true, 'once email is set up the owner can send it');
+  assert.equal(view.delivery.state, 'not_configured');
+  assert.match(view.delivery.message, /^No email was sent\./);
+  assert.match(view.delivery.message, /waiting in the app/);
+  assert.equal(view.delivery.canResend, true, 'once email is set up the owner can send it');
   const later = sender();
   const sentNow = await resend(db, invitation.id, later.transport);
   assert.equal(sentNow.state, 'sent');
@@ -606,4 +606,27 @@ test('the pages and the words never use what the copy rules forbid', () => {
   assert.doesNotMatch(view, /coming soon|\bdemo\b|testnet|non-custodial/i);
   const page = read('app/dashboard/invitation/[invitationId]/page.tsx');
   assert.doesNotMatch(page, /coming soon|\bdemo\b|testnet|non-custodial|coral/i);
+});
+
+test('the owner screen shows sent, failed and not-set-up in words, loudly where it matters, and only an owner gets the button', () => {
+  const list = read('components/team/OpenInvitations.tsx');
+  assert.match(list, /d\.canResend/, 'the button follows what the server said this manager may do');
+  assert.match(list, /role="alert"/, 'a failed or missing email is an alert, not a hint');
+  assert.match(list, /\/email`, \{ method: 'POST'/, 'one POST per click');
+  assert.match(list, /disabled=\{anyBusy\}/, 'the button is off while any send is running');
+  assert.match(list, /An owner can send the email\./);
+  const words = read('lib/team/invitation-email.ts');
+  assert.match(words, /We could not send the email\. The invitation is still waiting for them\. Try sending the email again\./);
+  const form = read('components/team/AddPersonForm.tsx');
+  assert.match(form, /INVITE_EMAIL_WORDS\.not_configured/);
+  assert.match(form, /INVITE_EMAIL_WORDS\.failed/);
+});
+
+test('the invitation page keeps the dashboard sign-in, hides the banner for itself, and accepts nothing on open', () => {
+  const page = read('components/team/InvitationPage.tsx');
+  assert.match(page, /\/status`/);
+  assert.ok(page.indexOf('/status`') < page.indexOf("/${decision}`"), 'it reads first; accepting is a separate press');
+  assert.doesNotMatch(page, /useEffect\([^]*?\/accept/, 'no accept inside the effect that runs on open');
+  assert.match(read('components/team/InvitationBanner.tsx'), /startsWith\('\/dashboard\/invitation\/'\)/);
+  assert.match(read('app/dashboard/layout.tsx'), /redirect\(loginRedirectFor/, 'a signed-out visit signs in and comes back');
 });

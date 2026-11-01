@@ -1037,7 +1037,29 @@ The business's owners run their team, not Splash support
   (`teamRoute`), the answering routes use a gate that needs a signed-in account
   and nothing else (`inviteeRoute`, refusing with no database), every change is
   rate limited, and `tests/team-routes.test.mjs` fails if anything else calls
-  the new functions. Nothing is emailed.
+  the new functions.
+- **The invitation email (2 Nov; Sky's decision of 1 Nov).** The invited person
+  is also emailed, through Resend (`lib/server/invitation-email.ts`, migration
+  0082). What it does: tells a named person that a named inviter asked them to
+  join a named business, that it is open for 7 days, and links to one page. What
+  it does NOT do: it carries no token and grants nothing. The link is the app
+  address plus the invitation's id; opening it requires sign-in, shows the
+  invitation only to the account whose verified email it was sent to (anyone
+  else, and an unknown id, read the same "not found"), and accepts nothing; Accept
+  is a button. A forwarded or over-the-shoulder email therefore cannot be used to
+  join. It holds no amount, no other business and no other person, escapes every
+  inserted value (a name cannot add a header line or markup), and has no image,
+  so no tracking pixel. The send is claimed with one UPDATE on the invitation,
+  so a retry, a double click or two owners send once, and the provider gets an
+  idempotency key. A failed send never loses the invitation and is shown to the
+  owner in plain words with an owner-only "Send the email again" (one send per
+  click, never for a sent, ended or withdrawn invitation, other businesses'
+  invitations read as absent). With no real sender set up, or no link production
+  would allow, nothing is sent and the owner is told so in an alert; a console
+  sender never counts as sent. Logs hold the invitation's id and the kind of
+  failure, never the key, address or link. No per-sender invitation limit exists
+  for now; it is to be revisited before launch. Test:
+  `tests/invitation-email.test.mjs`.
 - **Leaving (1 Nov).** Any member can ask to leave; nothing changes until an
   owner approves. Only an owner decides (review of 2 Nov: a Finance lead's
   approval ended access but could not take the spending rule back, so it left a

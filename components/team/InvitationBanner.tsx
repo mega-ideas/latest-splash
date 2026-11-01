@@ -1,7 +1,7 @@
 'use client';
 
 import { MailOpen } from 'lucide-react';
-import { useRouter } from 'next/navigation';
+import { usePathname, useRouter } from 'next/navigation';
 import { useEffect, useState } from 'react';
 
 import LocalTime from '@/components/LocalTime';
@@ -20,6 +20,7 @@ import { PLAIN_DATE, roleWithArticle, type MyInvitationWire } from '@/lib/team/v
  */
 export default function InvitationBanner() {
   const router = useRouter();
+  const pathname = usePathname();
   const [invitations, setInvitations] = useState<MyInvitationWire[]>([]);
   const [busy, setBusy] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -34,7 +35,8 @@ export default function InvitationBanner() {
     };
   }, []);
 
-  if (invitations.length === 0) return null;
+  // The page behind the link in the invitation email shows its own invitation with the same two buttons; two sets would only confuse.
+  if (invitations.length === 0 || pathname?.startsWith('/dashboard/invitation/')) return null;
 
   async function answer(i: MyInvitationWire, decision: 'accept' | 'decline') {
     setBusy(`${decision}:${i.id}`);

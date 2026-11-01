@@ -1684,6 +1684,14 @@ export const teamInvitations = pgTable('team_invitations', {
   expiresAt: timestamp('expires_at', { withTimezone: true }).notNull(),
   decidedAt: timestamp('decided_at', { withTimezone: true }),
   decidedBy: text('decided_by'),
+  /** The email the invited person gets (migration 0082): null, sending, sent, failed or not_configured. */
+  emailState: text('email_state'),
+  /** Sends claimed. Part of the key given to the mail provider. */
+  emailAttempts: integer('email_attempts').notNull().default(0),
+  emailAttemptAt: timestamp('email_attempt_at', { withTimezone: true }),
+  emailSentAt: timestamp('email_sent_at', { withTimezone: true }),
+  /** The provider's message id, when it gives one. Not a secret. */
+  emailMessageRef: text('email_message_ref'),
 }, (table) => [
   uniqueIndex('team_invitations_one_open').on(table.orgId, table.email).where(sql`${table.status} = 'pending'`),
   index('team_invitations_email_idx').on(table.email, table.status),

@@ -130,10 +130,62 @@ this is the right person" first, and `POST /api/team` refuses without
   the other is refused with the plain sentence above; a race between two
   accepts rolls back the later one.
 
-Nothing is emailed: the invitation is waiting when the person signs in. If Sky
-wants a notification email as well, it goes through the Resend adapter (with a
-sandbox implementation, failing closed in production without a key), and the
-email would carry no link that grants anything.
+### The email (Sky's decision of 1 Nov: invitees also get an email, through Resend)
+
+`lib/server/invitation-email.ts`, words and markup in `lib/team/invitation-email.ts`,
+migration 0082. Reused, not rebuilt: the Resend transport in
+`lib/auth/email-transport.ts` (plain `fetch`, the key read from `EMAIL_API_KEY`
+and never printed), now taking an optional page of its own and an
+`Idempotency-Key`.
+
+- **What it says.** Subject "Aisha invited you to join Acme on Splash". Plain
+  text and a simple 600px page: who invited them (the sender's name), the
+  business, what it is, that it is open for 7 days and the date it ends (UTC),
+  and one button, "Open the invitation". Sentence case, no emoji, no images (so
+  no tracking pixel), no marketing, no amount, no other business, no other
+  person. Every inserted value is cleaned to plain words (control characters and
+  line breaks become spaces, long names are cut) and escaped.
+- **What the link is.** The app address plus `/dashboard/invitation/<id>`: an
+  id, no token, no query. Opening it asks the person to sign in (the dashboard
+  sends a signed-out visit to sign in and back to that page only) and shows the
+  invitation **only to the account whose verified email it was sent to**. Anyone
+  else, link in hand or not, reads "not found", exactly as for an id that does
+  not exist. Nothing is accepted by opening the page: Accept is a button. So a
+  forwarded email grants nothing. In production the link is made only on https
+  and a public name; otherwise nothing is sent and the owner is told email is
+  not set up.
+- **Once.** The invitation is made first and stands whatever happens next. The
+  send is *claimed* with one UPDATE of `email_state` to `sending`; only the call
+  that wins sends, and the outcome is recorded on the invitation (`sent` with the
+  time and the provider's message id, `failed`, or `not_configured`). A retry of
+  the invitation, a repeat of the delivery, a double click and two owners at
+  once send once. The provider also gets the key `splash-invitation-<id>-<n>`,
+  so a send whose outcome was lost, claimed again after 5 minutes, is recognised
+  and dropped by the provider.
+- **A failed send loses nothing.** The invitation still shows after sign-in.
+  Settings, Team, Open invitations shows, in an alert, "We could not send the
+  email. The invitation is still waiting for them. Try sending the email again."
+  with a **Send the email again** button.
+- **The button.** Owner-only (the Finance lead sees the state and "An owner can
+  send the email."), one send per click, none for an email that already went,
+  none once the invitation has ended or been withdrawn (the link then says so in
+  plain words: "This invitation ended after 7 days..." or "The person who sent
+  this invitation took it back..."). Another business's invitation reads as
+  absent. A never-tried invitation from before the migration shows "No email has
+  been sent for this invitation yet" with the same button.
+- **No sender set up.** The invitation works in the app only, and the owner is
+  told in an alert, never silently: "No email was sent. Email is not set up for
+  Splash, so this invitation is waiting in the app only." A console sender (the
+  development default) is not counted as sent. Once email is set up the owner
+  can send it with the same button.
+- **Logs.** An id and the kind of failure ("resend returned HTTP 422...", or the
+  error's name). Never the key, the address or the link.
+
+There is no per-sender invitation limit for now; it is to be revisited before launch.
+(The one cap that already existed, 25 open invitations per business, is unchanged
+and is not a per-sender limit; no rate limit or daily cap was added for the email.)
+
+Tests: `tests/invitation-email.test.mjs`.
 
 ## Leaving the team
 
