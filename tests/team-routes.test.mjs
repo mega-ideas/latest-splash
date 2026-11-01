@@ -34,6 +34,18 @@ const TEAM_ROUTES = {
   'app/api/team/members/[userId]/route.ts': { PATCH: 'changeTeamMemberRole', DELETE: 'removeTeamMember' },
   'app/api/team/members/[userId]/access/route.ts': { PUT: 'setMemberAccess' },
   'app/api/team/finance-lead/route.ts': { POST: 'appointFinanceLead', DELETE: 'revokeFinanceLead' },
+  'app/api/team/invitations/route.ts': { POST: 'sendInvitation' },
+  'app/api/team/invitations/[invitationId]/route.ts': { DELETE: 'withdrawInvitation' },
+  'app/api/team/leave/route.ts': { POST: 'requestToLeave', DELETE: 'withdrawLeaveRequest' },
+  'app/api/team/leave-requests/[requestId]/approve/route.ts': { POST: 'approveLeaveRequest' },
+  'app/api/team/leave-requests/[requestId]/decline/route.ts': { POST: 'declineLeaveRequest' },
+};
+
+/** Answering an invitation: the person has no membership to check, so these start at the invitee gate instead. */
+const INVITEE_ROUTES = {
+  'app/api/team/invitations/mine/route.ts': { GET: null },
+  'app/api/team/invitations/[invitationId]/accept/route.ts': { POST: 'acceptInvitation' },
+  'app/api/team/invitations/[invitationId]/decline/route.ts': { POST: 'declineInvitation' },
 };
 
 function handler(text, method) {
@@ -98,8 +110,12 @@ test('the team gate reads the business from the session and fails closed without
 });
 
 test('nothing outside the team routes (and the service itself) calls a team-changing function: a new route cannot skip the rules', () => {
-  const names = ['addTeamMember', 'changeTeamMemberRole', 'removeTeamMember', 'appointFinanceLead', 'revokeFinanceLead', 'setMemberAccess'];
-  const allowed = new Set(Object.keys(TEAM_ROUTES).concat(['lib/server/team-admin.ts']));
+  const names = [
+    'addTeamMember', 'changeTeamMemberRole', 'removeTeamMember', 'appointFinanceLead', 'revokeFinanceLead', 'setMemberAccess',
+    'sendInvitation', 'withdrawInvitation', 'acceptInvitation', 'declineInvitation',
+    'requestToLeave', 'withdrawLeaveRequest', 'approveLeaveRequest', 'declineLeaveRequest',
+  ];
+  const allowed = new Set(Object.keys(TEAM_ROUTES).concat(Object.keys(INVITEE_ROUTES), ['lib/server/team-admin.ts', 'lib/server/team-invitations.ts', 'lib/server/team-leave.ts']));
   const offenders = [];
   for (const file of [...walk('app/'), ...walk('lib/'), ...walk('components/')]) {
     if (!/\.(ts|tsx)$/.test(file) || allowed.has(file)) continue;
@@ -234,4 +250,67 @@ test('the staff console\'s grant and revoke are on the trail too, under the oper
   const memberships = code(read('lib/server/memberships.ts'));
   assert.match(memberships, /member_added/);
   assert.match(memberships, /operator:/);
+});
+
+/* ── Invitations and leaving (v2 Phase 3, Sky's decision of 1 Nov) ─────── */
+
+test('the invitee routes start at the invitee gate, read no body or business from the request, and are rate limited per person', () => {
+  for (const [path, methods] of Object.entries(INVITEE_ROUTES)) {
+    assert.ok(existsSync(new URL(path, root)), path);
+    const text = code(read(path));
+    assert.doesNotMatch(text, /body\.|searchParams|readJsonBody/, `${path} takes nothing from the request but the invitation id in the path`);
+    for (const [method, service] of Object.entries(methods)) {
+      const h = code(handler(text, method));
+      assert.match(h, /await inviteeRoute\(request\)/, `${path} ${method} opens with the gate`);
+      assert.match(h, /if \(gate\.response\) return gate\.response;/, `${path} ${method}`);
+      if (!service) continue;
+      assert.match(h, /await limitInviteeChanges\(gate\.route\)/, `${path} ${method}`);
+      assert.ok(h.indexOf('limitInviteeChanges') < h.indexOf(service), `${path} ${method} limits first`);
+      assert.match(h, new RegExp(`${service}\\(gate\\.route\\.db, \\{ userId: gate\\.route\\.userId, invitationId`), `${path} ${method} acts as the signed-in person`);
+    }
+  }
+});
+
+test('the invitee gate asks for a signed-in customer and an account behind the session; with no database it refuses', () => {
+  const gate = code(read('lib/server/team-route.ts'));
+  const start = gate.indexOf('export async function inviteeRoute');
+  const body = gate.slice(start, gate.indexOf('export async function limitInviteeChanges'));
+  assert.match(body, /requireCustomerRequest\(request\)/);
+  assert.match(body, /!process\.env\.DATABASE_URL/);
+  assert.match(body, /status: 403/);
+  assert.match(body, /eq\(users\.email, auth\.session\.email/, 'the account is found by the session, never by the request');
+  assert.doesNotMatch(body, /liveWalletContext|requireSessionAccount/);
+});
+
+test('adding directly needs the owner to confirm they have the right person; an invitation does not need that', () => {
+  const direct = code(handler(read('app/api/team/route.ts'), 'POST'));
+  assert.match(direct, /body\.confirmed !== true/);
+  assert.ok(direct.indexOf('confirmed') < direct.indexOf('addTeamMember('), 'refused before anything is written');
+  assert.match(direct, /confirm_person/);
+  assert.doesNotMatch(code(read('app/api/team/invitations/route.ts')), /confirmed/);
+});
+
+test('approving a request to leave takes the rule back through the spending-rules revoke path, for an owner only', () => {
+  const approve = code(handler(read('app/api/team/leave-requests/[requestId]/approve/route.ts'), 'POST'));
+  assert.ok(approve.indexOf('approveLeaveRequest(') < approve.indexOf('revokeLeaverRules('), 'the membership ends first, then the rule revoke opens');
+  assert.match(approve, /authority\.role === 'OWNER'/);
+  const helper = code(read('lib/server/team-leave-rules.ts'));
+  assert.match(helper, /revokeOrphanedRules\(/, 'the existing revoke path, which the wallet owners sign');
+  assert.match(helper, /route\.authority\.role !== 'OWNER'/);
+  assert.match(helper, /limitWalletRequests\(/);
+  assert.doesNotMatch(helper, /signTransaction|executeTransaction|signAndExecute/, 'it opens a request; it signs nothing');
+});
+
+test('GET /api/team sends the open invitations and requests to leave to a manager only, and the caller\'s own leave state to anyone on the team', () => {
+  const get = code(handler(read('app/api/team/route.ts'), 'GET'));
+  assert.match(get, /manager \? await listInvitations\(/);
+  assert.match(get, /manager \? await listLeaveRequests\(/);
+  assert.match(get, /leaveStatusOf\(gate\.route\.db, \{ orgId: gate\.route\.orgId, userId: gate\.route\.authority\.userId/);
+});
+
+test('no route puts an invitation secret in a URL: there is no token anywhere in the invitation code', () => {
+  for (const path of ['lib/server/team-invitations.ts', 'app/api/team/invitations/route.ts', 'app/api/team/invitations/mine/route.ts', 'app/api/team/invitations/[invitationId]/accept/route.ts']) {
+    assert.doesNotMatch(code(read(path)), /\btoken\b|searchParams|createHash|randomBytes/i, path);
+  }
+  assert.match(read('drizzle/0073_team_invitations_and_leaving.sql'), /NO token/);
 });
