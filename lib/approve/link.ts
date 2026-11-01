@@ -27,10 +27,17 @@ const REQUEST_ID = /^[A-Za-z0-9_-]{8,80}$/;
 export const RETURN_HEADER = 'x-splash-return';
 
 const PATH_PREFIX = '/dashboard/approve/';
+/** The page one invitation's link opens (v2 Phase 3, the invitation email). Same rules as the Approve link: an id, nothing else. */
+const INVITATION_PREFIX = '/dashboard/invitation/';
 
 /** The address of one request's Approve screen, or null for an id that is not a plain identifier. */
 export function approvePath(id: string): string | null {
   return typeof id === 'string' && REQUEST_ID.test(id) ? `${PATH_PREFIX}${id}` : null;
+}
+
+/** The address of one invitation's page, or null for an id that is not a plain identifier. */
+export function invitationPath(id: string): string | null {
+  return typeof id === 'string' && REQUEST_ID.test(id) ? `${INVITATION_PREFIX}${id}` : null;
 }
 
 /** Names that only mean something on one machine or one network. */
@@ -67,13 +74,12 @@ function isProduction(env: { NODE_ENV?: string }): boolean {
 }
 
 /**
- * The full link for a signing message, or null where none may be sent.
+ * The full link to one path of this app, or null where none may be sent.
  * Only the origin of the configured address is used, so a path, a query, a
  * fragment or credentials in it never reach a message. In production (which an
  * unset NODE_ENV is) the address must be https on a public name.
  */
-export function approveLink(appUrl: string | undefined | null, id: string, env: { NODE_ENV?: string }): string | null {
-  const path = approvePath(id);
+function appLink(appUrl: string | undefined | null, path: string | null, env: { NODE_ENV?: string }): string | null {
   if (!path) return null;
   let url: URL;
   try {
@@ -87,15 +93,29 @@ export function approveLink(appUrl: string | undefined | null, id: string, env: 
   return `${url.protocol}//${host}${url.port ? `:${url.port}` : ''}${path}`;
 }
 
+/** The full link for a signing message, or null where none may be sent. */
+export function approveLink(appUrl: string | undefined | null, id: string, env: { NODE_ENV?: string }): string | null {
+  return appLink(appUrl, approvePath(id), env);
+}
+
+/** The full link in an invitation email, or null where none may be sent. It carries an id and no secret: opening it asks for sign-in and accepts nothing. */
+export function invitationLink(appUrl: string | undefined | null, id: string, env: { NODE_ENV?: string }): string | null {
+  return appLink(appUrl, invitationPath(id), env);
+}
+
 /**
- * Where to go after signing in: the Approve screen of one request, or null
- * (Home). The only shape accepted is exactly `/dashboard/approve/<id>`; another
+ * Where to go after signing in: the Approve screen of one request, or one
+ * invitation's page, or null (Home). The only shapes accepted are exactly
+ * `/dashboard/approve/<id>` and `/dashboard/invitation/<id>`; another
  * site, another path, a query, a fragment, a doubled slash or a dot segment is
  * Home, so a link can never carry a person somewhere the product did not choose.
  */
 export function safeApproveReturn(value: unknown): string | null {
-  if (typeof value !== 'string' || !value.startsWith(PATH_PREFIX)) return null;
-  return approvePath(value.slice(PATH_PREFIX.length)) === value ? value : null;
+  if (typeof value !== 'string') return null;
+  if (value.startsWith(PATH_PREFIX)) return approvePath(value.slice(PATH_PREFIX.length)) === value ? value : null;
+  // The one other place a link may bring a signed-out person back to: the invitation they were emailed.
+  if (value.startsWith(INVITATION_PREFIX)) return invitationPath(value.slice(INVITATION_PREFIX.length)) === value ? value : null;
+  return null;
 }
 
 /**
