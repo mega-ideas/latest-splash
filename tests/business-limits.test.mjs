@@ -191,7 +191,7 @@ test('the 10,000 USDC second-approval line is not raised by this path: a per-pay
 
 test('a stored figure above the ceiling is never believed, and an approved one above it is clamped when it starts', async () => {
   const { db } = await seeded();
-  await db.insert(schema.businessLimits).values({ orgId: 'acme', kind: 'days', value: 9_999n, source: 'raised', changedBy: 'u-owner' });
+  await db.insert(schema.businessLimits).values({ orgId: 'acme', kind: 'days', value: 9_999n, heldMax: 9_999n, source: 'raised', changedBy: 'u-owner' });
   assert.equal((await currentLimits(db, 'acme', at(T0.getTime()))).days, 366n);
   const decidedAt = new Date(T0.getTime() - 2 * LIMIT_NOTICE_MS);
   await db.insert(schema.businessLimitRequests).values({
@@ -498,13 +498,15 @@ test('lowering a limit cancels a request still open for it, so it is not raised 
   assert.equal((await rowOf(db, m.request.id)).status, 'pending');
 });
 
-test('a lowered limit can be raised again only by asking Splash, from the lowered figure', async () => {
+test('a lowered limit goes back up to what the business held by Restore, and above that only by asking Splash, from the lowered figure', async () => {
   const { db } = await seeded();
   await lowerLimit(db, { orgId: 'acme', actorUserId: 'u-owner', kind: 'daily', value: '1,000', now: at(T0.getTime()) });
   const above = await ask(db, { requested: '1,000' });
   assert.match(above.error, /not higher than your limit of 1,000 USDC/);
-  const made = await ask(db, { requested: '4,000' });
-  assert.equal(made.ok, true, 'back to 4,000 is a higher limit and is asked for like any other');
+  const back = await ask(db, { requested: '4,000' });
+  assert.equal(back.code, 'restore_instead', 'back to a figure the business held is its own to put back (tests/limits-keep-restore.test.mjs)');
+  const made = await ask(db, { requested: '6,000' });
+  assert.equal(made.ok, true, 'more than the business ever held is asked for like any other higher limit');
   assert.equal((await rowOf(db, made.request.id)).currentValue, U(1_000));
 });
 
