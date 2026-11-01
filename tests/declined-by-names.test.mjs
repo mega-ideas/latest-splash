@@ -95,3 +95,16 @@ test('a name cannot read as another person, an extra person or a different sente
   assert.equal(plainName('Ahmad bin Ali'), 'Ahmad bin Ali', 'a surname particle is not a joiner');
   assert.equal(plainName('Anderson Brandt'), 'Anderson Brandt', '"and" inside a word is not the word "and"');
 });
+
+// ─── Layout: a long label wraps inside its row instead of running past it ───
+
+test('the status pill never grows past its row: it caps at the row width and wraps its words', async () => {
+  const { readFileSync } = await import('node:fs');
+  const parts = readFileSync(new URL('../components/wallet/parts.tsx', import.meta.url), 'utf8');
+  const pill = parts.match(/export function Pill[\s\S]*?\n}/)?.[0] ?? '';
+  assert.match(pill, /max-w-full/, 'a "Declined by A, B and 1 more" label can be 80 characters, wider than a phone');
+  assert.match(pill, /text-left/, 'a wrapped label reads from the left, not centred under its first line');
+  assert.doesNotMatch(pill, /whitespace-nowrap|truncate/, 'the words are never cut off');
+  const history = readFileSync(new URL('../components/history/HistoryPage.tsx', import.meta.url), 'utf8');
+  assert.match(history, /<Pill tone=\{entry\.status\.tone\}>/, 'History says its status through the shared pill');
+});
