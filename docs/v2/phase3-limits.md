@@ -15,8 +15,8 @@ nothing. Nothing here moves money and nothing under `move/` changed.
 | Starts what is due, tells the owners | `app/api/cron/limit-changes` (every 15 minutes) |
 | Settings, Limits | `components/settings/LimitsCard.tsx` |
 | Operator console, Limit requests | `app/admin/(console)/limits`, `components/admin/AdminLimitRequests.tsx` |
-| Tables | `business_limits`, `business_limit_requests` (migration 0078) |
-| Trail | `wallet_authority_events` (append-only), six new actions |
+| Tables | `business_limits`, `business_limit_requests` (migration 0078); `held_max`, the kept limits and the restore action (migration 0079) |
+| Trail | `wallet_authority_events` (append-only), seven new actions |
 
 ## The four limits
 
@@ -28,8 +28,8 @@ the most Splash will ever grant, in code.
 |---|---|---|---|
 | One automatic payment | 2,000 USDC | 10,000 USDC | the allowance an owner asks for; every payment of an automatic run |
 | In a day | 5,000 USDC | 50,000 USDC | the allowance; the daily limit automatic runs reserve against |
-| In a month | 20,000 USDC | 500,000 USDC | the allowance (the network holds it) |
-| How long an allowance lasts | 90 days | 366 days | the allowance |
+| In a month | 20,000 USDC | 500,000 USDC | the allowance (the network holds its own rate); every automatic run, over the last 30 days |
+| How long an allowance lasts | 90 days | 366 days | the next allowance an owner gives |
 
 The ceilings: **one payment is the 10,000 USDC an owner must always approve**
 (`AUTO_APPROVAL_CEILING_MINOR`); a year is `ALLOWANCE_MAX_DAYS`; 500,000 a
@@ -39,6 +39,42 @@ Sky should confirm it, and the monthly figure, before mainnet.** The
 second-approval line itself (the SpendPolicy's, 10,000 USDC by default) is not
 a limit here: only owners edit it, and this path never raises it. The page says
 so under the list.
+
+## A business that already runs keeps what it runs on
+
+The standard figures are 2,000 a payment and 5,000 a day. Before limits, the
+Automatic form took up to 10,000 a payment and a year, and an owner's daily
+limit was their own. So that nothing stops on the day this deploys,
+**migration 0079 writes a limit row for every business whose signed allowance or
+daily limit is above the standard** (source `raised`, `changed_by`
+`system:migration`, never above the ceiling, a `limit_change_applied` line on the
+trail). What it keeps: the owners' daily limit; and, for a payment, a month and
+the days, the latest allowance an owner asked for whose signing request executed
+or is still being signed (the `automatic_allowance_requested` line and its
+`wallet_signing_requests` row). A business at or below the standard gets no row.
+The page tells the owners the truth about it ("your business already ran on this
+before limits arrived, so it keeps it"). `tests/limits-keep-restore.test.mjs` runs
+the migration over a business with a 5,000 allowance and an 8,000 daily limit
+and then pays a 4,000 run. Decision for Sky: if the standard figures should be
+only starting points, nothing here needs to change; it keeps what each business
+runs on either way.
+
+## An owner undoes their own lowering at once
+
+`business_limits.held_max` is the highest figure a business has legitimately held
+for a limit: the standard, a figure it kept at migration, or a raise Splash
+approved and that started. **Restore** (Settings, Limits; `POST
+/api/limits/restore`; `restoreLimit`) puts a lowered limit back up to it at once,
+for owners only, with no request and no notice, because it is the owner's own
+change. A figure above `held_max` is a request to Splash as before, with the 24
+hour notice. Asking Splash for a figure the business already held is answered
+`restore_instead` ("choose Restore"), so a mistake is never routed through
+review. Lowering to under a tenth of the limit shows a plain warning and the
+button reads "Lower it anyway" (a "2" for "2,000" is usually a missing zero); it
+goes through either way, because the owner can put it back at once. Lowering
+still cancels a request open for that limit, including one Splash approved and
+that has not started, because the owner has just said they want it lower: that
+grant is not held (it was never in force), so the owner would ask again.
 
 A limit is one number per business. There is no cross-limit rule on the
 limits themselves (a payment above the day limit would be refused when an
@@ -87,7 +123,8 @@ wider. The console has one configured staff login today with the role
    (the same owner notifier the schedules use, `tellOwners`), once for
    "approved, starts at ...", once for "declined, and why", once for "started".
    A notice that reached nobody is not recorded as sent and is tried again by
-   the cron. In the app, Settings, Limits shows the request waiting, what the
+   the cron. If the limit has already started by then, the owners get the
+   "started" notice alone; "it will start" is not sent after the fact. In the app, Settings, Limits shows the request waiting, what the
    limit is until then, and **Cancel this request**.
 4. **Cancel.** Any owner can cancel until the moment it starts (one
    millisecond before is cancellable; at the moment it starts it is not:
@@ -134,24 +171,38 @@ payment-contract banner and its link and words are about the contract.
   A limit Splash raised does not raise what the owners never chose. The status
   the page shows and the cap the runner checks and reserves against are the
   same figure.
+- The monthly limit, at run time: the last 30 days of automatic payments
+  (`autoPaidSince`, payments and fees, paid or set aside), this run included,
+  must fit it. It is checked when the run is evaluated and again under the same
+  lock that reserves the daily limit, so two runs cannot both pass a limit that
+  fits one. A run that does not fit is handed back (`monthly_limit`). So lowering
+  the monthly limit takes effect at the next run even for an allowance already
+  signed. "In a month" means any 30 days, not a calendar month.
+- A run that is not given the business's per-payment or monthly limit is handed
+  back (`AutoFacts` requires both, and the check refuses when a limit is missing).
 
-An allowance already on the network keeps its terms until the owners change it:
-lowering the monthly limit or the number of days does not shorten a signed
-allowance, which is the owners' own, instant to revoke or reissue. The per-payment
-and daily limits are checked at every automatic run, so lowering those takes
-effect on the next one.
+The one limit that is not checked at a run is the length of an allowance. It holds
+for the next allowance an owner gives: an allowance already given keeps its length
+until the owners give it again or take it back, which is theirs and instant. The
+lower sheet says so in those words. A signed allowance is not re-checked against
+the limits when the owners sign it; the per-payment, daily and monthly limits are
+checked at every run, so nothing a late change lets through is paid above them.
 
-The older operating controls (per-transfer 50,000 and daily 250,000 USD in
-Settings, Controls; `org_settings`) are the owners' own and instant, and are
-unchanged. They are not Splash limits.
+**The older operating controls** (per-transfer 50,000 and daily 250,000 USD in
+Settings, Controls; `org_settings`) govern payments the team sends; they are the
+owners' own and instant, and are not Splash limits. They do not apply to
+automatic payments, and the Limits here do not apply to them. Each card now says
+so and links to the other. Question for Sky: should Controls ever become part of
+this model? Today they stay separate.
 
 ## The trail
 
 Every action is a line in `wallet_authority_events` with who did it: an
 owner's user id, `operator:<email>` for staff, `system:limits` when the notice
-runs out. Actions: `limit_raise_requested`, `limit_request_approved`,
-`limit_request_declined`, `limit_request_cancelled`, `limit_lowered`,
-`limit_change_applied`. The migration widens the table's action check; the
+runs out, `system:migration` for a limit kept at migration. Actions:
+`limit_raise_requested`, `limit_request_approved`, `limit_request_declined`,
+`limit_request_cancelled`, `limit_lowered`, `limit_restored`,
+`limit_change_applied`. The migrations widen the table's action check; the
 trigger that refuses updates and deletes is unchanged. They are not shown in the
 team activity list (that list names the team actions it wants).
 
@@ -174,10 +225,30 @@ lower sheet) are in the session's `screens-p3-limits` folder. The dev server ran
 without `.env.local`, `USE_MOCK_APIS=true`, signed in as the repo's seeded
 operator and the dev staff login.
 
+## The staff queue
+
+`/admin/limits` shows open requests oldest first, with the business, who asked,
+the figure, the ceiling, the reason, and how many requests the business made
+before. What was decided lately is sorted by when it was decided. After a
+decision is saved the card closes; a refresh that fails is said on the page. Two
+staff deciding the same request at once decide it once (the other is told
+`already_decided`; tested). Not built: the business's KYB tier and recent
+usage on the card, and a second staff approval above a set size. Both are
+decisions for Sky (below).
+
 ## Needs Sky
 
 - The daily (50,000) and monthly (500,000) ceilings above.
 - Whether support staff should ever see the queue read-only (today: no).
+- Whether a grant above a set size (for example a daily limit above 20,000) needs
+  a second staff approval, and whether the card should show the business's KYB
+  tier and recent usage. Today one compliance or operations approver can grant up
+  to the ceilings, and the trail names who.
+- Whether the standard figures are limits or starting points (see "A business that
+  already runs keeps what it runs on"), and whether Controls should join the model.
+- Schedule `/api/cron/limit-changes` every 15 minutes in production. Without it a
+  limit still starts on the next read, but the owners are not told it started
+  until something else runs the notices; treat the schedule as a deploy gate.
 - The existing review item still open from scheduled batches: one stolen payer
   key is bounded per day only by the monthly cap. A network-held daily cap needs
   a `splash_spend` change and is Sebastian's; this section does not touch it.

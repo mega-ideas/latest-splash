@@ -2686,7 +2686,16 @@ Spec: `docs/v2/phase3-limits.md`. No Move change.
   `operator:<email>`, or `system:limits`).
 - **Enforcement**: an allowance above a limit is refused; an automatic payment
   above the per-payment limit hands the run back; the daily limit never exceeds
-  the business's. An allowance already signed keeps its terms until the owners
-  change it.
+  the business's; the last 30 days of automatic payments must fit the monthly
+  limit (checked again under the reservation lock). A run not given the
+  business's limits is handed back, never paid without them. The length of an
+  allowance holds for the next allowance an owner gives.
+- **Keeping what runs** (migration 0079): a business whose signed allowance or
+  daily limit was above the standard keeps it, never above a ceiling, with a
+  `system:migration` line on the trail, so automatic payments do not stop on
+  deploy.
+- **Restore**: an owner puts a limit they lowered back at once, up to the highest
+  figure the business has held (`held_max`); nothing above it without Splash and
+  the 24 hour notice. Trail action `limit_restored`.
 - **Not covered**: the 50,000 / 500,000 ceilings need Sebastian and Sky's review;
   a network-held daily cap still needs a `splash_spend` change.

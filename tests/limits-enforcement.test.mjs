@@ -181,3 +181,19 @@ test('the business’s daily limit holds even when the owners’ own daily limit
   assert.equal(run.reasonCode, 'daily_cap', '500 + 750.50 and their fees are over 1,000');
   assert.equal(t.spent(), 0);
 });
+
+test('the business’s monthly limit holds when a run is paid, not only when an allowance is asked for: lowered under the run, it is handed back with nothing paid', async () => {
+  const t = await ready();
+  // The allowance the owners signed still says 20,000 a month on the network; the business's limit is now 1,000.
+  ok(await lowerLimit(t.w.db, { orgId: 'acme', actorUserId: 'u-founder', kind: 'monthly', value: '1,000', now: () => at(t0) }));
+  await t.clock(at(FIRST.getTime() - 20 * HOUR));
+  await runScheduledPayments(runner(t));
+  await t.clock(FIRST);
+  await runScheduledPayments(runner(t));
+  const [run] = await listRuns(t.w.db, 'acme');
+  assert.equal(run.status, 'waiting_approval');
+  assert.equal(run.reasonCode, 'monthly_limit', '500 + 750.50 and their fees are over 1,000 in the last 30 days');
+  assert.match(run.reason, /over your monthly limit/);
+  assert.equal(t.spent(), 0, 'nothing was paid');
+  assert.equal(t.signed.length, 0, 'the scheduled payer signed nothing');
+});
