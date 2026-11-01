@@ -78,7 +78,8 @@ const TONES: Record<Tone, string> = {
 };
 
 export function Pill({ tone, children }: { tone: Tone; children: ReactNode }) {
-  return <span className={`inline-flex shrink-0 items-center rounded-full px-2.5 py-1 text-[12px] font-semibold ${TONES[tone]}`}>{children}</span>;
+  // max-w-full: a label such as "Declined by A, B and 1 more" can be wider than a phone, so it wraps inside its row instead of running past it. rounded-2xl is the same stadium as rounded-full on one line and a soft box on two.
+  return <span className={`inline-flex max-w-full shrink-0 items-center rounded-2xl px-2.5 py-1 text-left text-[12px] font-semibold leading-snug ${TONES[tone]}`}>{children}</span>;
 }
 
 export function Note({ children, tone = 'plain' }: { children: ReactNode; tone?: 'plain' | 'warn' | 'error' }) {
