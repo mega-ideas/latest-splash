@@ -41,7 +41,7 @@ export default function StepSend({ batch, onBatch, onSettled, onRestart }: { bat
           {dead ? <CircleAlert className="h-5 w-5" aria-hidden="true" /> : <Loader2 className="h-5 w-5 animate-spin motion-reduce:animate-none" aria-hidden="true" />}
         </span>
         <div>
-          <h2 className="text-xl font-extrabold text-[#0c3e48]">{dead ? (batch.status === 'declined' ? declinedByLabel(batch.declinedBy) : DEAD_TITLE[batch.status] ?? 'The batch did not go through') : 'Sending the batch'}</h2>
+          <h2 className="break-words text-xl font-extrabold text-[#0c3e48]">{dead ? (batch.status === 'declined' ? declinedByLabel(batch.declinedBy) : DEAD_TITLE[batch.status] ?? 'The batch did not go through') : 'Sending the batch'}</h2>
           <p className="text-sm text-[#326273]">
             {dead
               ? 'Nothing was paid: every payment in a batch is made together or not at all. You can start the batch again.'

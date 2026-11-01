@@ -250,7 +250,7 @@ export default function BatchFlow() {
         <p className="border-t border-[#326273]/10 px-4 py-2 text-sm font-bold text-[#0c3e48] sm:hidden">Step {step} of 5: {STEPS[step - 1]}</p>
       </nav>
 
-      <div className="grid gap-4 lg:grid-cols-[minmax(0,1fr)_320px]">
+      <div className="grid grid-cols-1 gap-4 lg:grid-cols-[minmax(0,1fr)_320px]">
         <section className="dash-surface min-w-0 p-4 sm:p-6" aria-label={STEPS[step - 1]}>
           {ctxState === 'loading' ? (
             <p role="status" className="text-sm text-[#326273]">Loading…</p>
@@ -292,7 +292,7 @@ export default function BatchFlow() {
         <aside className="space-y-3" aria-label="This batch">
           <div className="rounded-2xl bg-[#0c3e48] p-4 text-white">
             <div className="font-mono text-[12px] font-bold uppercase tracking-[0.14em] text-white/80">This batch</div>
-            <div className="mt-2 text-xl font-extrabold">{made ? statusWords(made.batch) : rows.length > 0 ? `${rows.length} ${rows.length === 1 ? 'row' : 'rows'}` : 'Not started'}</div>
+            <div className="mt-2 break-words text-xl font-extrabold">{made ? statusWords(made.batch) : rows.length > 0 ? `${rows.length} ${rows.length === 1 ? 'row' : 'rows'}` : 'Not started'}</div>
             <dl className="mt-3 grid grid-cols-2 gap-3 border-t border-white/15 pt-3 text-sm">
               <div>
                 <dt className="font-mono text-[12px] uppercase tracking-[0.12em] text-white/75">You pay in</dt>
