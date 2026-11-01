@@ -236,7 +236,8 @@ test('a database fault is not read as "another request holds this key": it surfa
 test('a withdrawn ask reads as withdrawn, not failed', async () => {
   const t = await setup();
   const made = await T.createTransfer(t.deps(), STAFF, request(t));
-  const out = await cancelApprovalAsk(t.w.db, { orgId: 'acme', userId: 'u-two', askId: made.ask.id });
+  // The ask was made at the test clock (T0): withdrawing it at the real clock would find it expired once the real date passes its window.
+  const out = await cancelApprovalAsk(t.w.db, { orgId: 'acme', userId: 'u-two', askId: made.ask.id, now: t.deps().now });
   assert.equal(out.ok, true);
   const view = await T.getTransfer(t.deps(), made.transfer.id);
   assert.equal(view.status, 'withdrawn');
