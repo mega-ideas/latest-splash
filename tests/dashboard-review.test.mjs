@@ -171,10 +171,6 @@ test('a failure, an error or an unscreened state never takes the gold accent', a
 });
 
 test('the named failure states use --error, and attention states --warn', async () => {
-  const proof = await source('components/SettlementProofDrawer.tsx');
-  assert.doesNotMatch(proof, GOLD, 'a proof that did not verify is an error, not a highlight');
-  assert.match(proof, /XCircle className="h-4 w-4 text-\[var\(--error\)\]"/);
-
   const step = await source('components/transfer/StepReview.tsx');
   assert.match(step, /role="alert" className="flex items-start gap-2 rounded-xl border border-\[var\(--error\)\]\/40 bg-\[var\(--error-bg\)\]/, 'a quote that failed is an error');
 
@@ -207,21 +203,8 @@ test('the drawer closes when the window grows past the phone layout or the page 
 
 /* ── Quote holds and Treasury ──────────────────────────────────────── */
 
-test('active quote holds are listed on Transfer, newest first, expired ones left out', async () => {
-  const { activeRateHolds, holdTimeLeft } = await import('../lib/dashboard/rate-holds.ts');
-  const now = Date.parse('2026-10-25T12:00:00Z');
-  const hold = (id, state, holdUntil, createdAt) => ({ id, corridorCurrency: 'PHP', rate: '56.4', state, holdUntil, createdAt });
-  const holds = [
-    hold('old', 'ACTIVE', '2026-10-26T10:00:00Z', '2026-10-24T10:00:00Z'),
-    hold('new', 'ACTIVE', '2026-10-27T11:00:00Z', '2026-10-25T11:00:00Z'),
-    hold('lapsed', 'ACTIVE', '2026-10-25T11:59:59Z', '2026-10-23T11:59:59Z'),
-    hold('used', 'EXECUTED', '2026-10-27T00:00:00Z', '2026-10-25T00:00:00Z'),
-  ];
-  assert.deepEqual(activeRateHolds(holds, now).map((h) => h.id), ['new', 'old']);
-  assert.equal(holdTimeLeft('2026-10-26T10:30:00Z', now), '22h 30m');
-  assert.equal(holdTimeLeft('2026-10-25T12:00:30Z', now), 'under a minute');
-
-  // The Rate holds page is gone (brief 5.1); the hold is shown where it is used, on the review, from the quote's own expiry.
+test('a quote hold is shown where it is used, on the review', async () => {
+  // The Rate holds page is gone (brief 5.1), and so is the list of holds that Transfer once drew; the hold is shown on the review, from the quote's own expiry.
   const review = await source('components/transfer/StepReview.tsx');
   assert.match(review, /Rate held for/);
   assert.match(review, /Get a new rate/);

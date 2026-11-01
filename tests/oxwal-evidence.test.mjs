@@ -60,16 +60,10 @@ test('audit receipt persists evidence and audit route verifies it', async () => 
   assert.match(auditRoute, /proof: await settlementProof/);
 });
 
-test('receipt exposes a collapsed independent settlement proof drawer', async () => {
-  const drawer = await source('components/SettlementProofDrawer.tsx');
+test('the Transfer receipt links to the transaction on Sui', async () => {
   const receiptStep = await source('components/transfer/StepReceipt.tsx');
 
-  assert.match(drawer, /View independent settlement proof/);
-  assert.match(drawer, /\/api\/audit\/\$\{transferIntentId\}/);
-  assert.match(drawer, /Walrus blob/);
-  assert.match(drawer, /Seal policy/);
-  assert.match(drawer, /Hash match/);
-  // The Transfer receipt is the payment's own rows with a link that opens the transaction on Sui (v2 brief 5.4); the drawer stays for receipts of earlier payments.
+  // The Transfer receipt is the payment's own rows with a link that opens the transaction on Sui (v2 brief 5.4). The proof drawer that once sat beside it had no page left to show it and is removed.
   assert.match(receiptStep, /Check this payment on Sui/);
   assert.match(receiptStep, /rel="noopener noreferrer"/);
 });

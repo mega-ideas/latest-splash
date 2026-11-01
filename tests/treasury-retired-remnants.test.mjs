@@ -7,13 +7,11 @@ import test from 'node:test';
  * What the retired custodial Smart Treasury left behind (v2 D9, the 5.7
  * review). Treasury is USDY in the business's own Splash Wallet; the ledger
  * Splash held answers 410 at /api/treasury (CUSTODIAL_TREASURY_LEDGER_ON is
- * false). Three places still spoke for that ledger:
+ * false). Two places still spoke for that ledger:
  *
  * - The copilot's fallback card pitched "Smart Treasury (Ondo USDY, T-bill)"
  *   for "Idle Available cash", naming the issuer without the signed-partner
  *   check.
- * - SettlementEngineFlow kept an unused 'treasury' variant: "Withdraw T+1-T+3
- *   to Available", "Approval-gated simulation".
  * - The two treasury crons gated the ledger on the custody phase alone, not on
  *   CUSTODIAL_TREASURY_LEDGER_ON, so turning the custody phase on reopened it.
  */
@@ -38,12 +36,6 @@ test('the copilot has no Smart Treasury card, whatever the custody phase and exe
   assert.deepEqual(await copilot.getCopilotSuggestions('org-a', true, true), [], 'custody on, execution on: still nothing');
   const text = await source('lib/server/copilot.ts');
   assert.doesNotMatch(text, /Smart Treasury \(|Ondo/, 'no ledger pitch, no hard-coded issuer name');
-});
-
-test('SettlementEngineFlow has no treasury variant', async () => {
-  const text = await source('components/dashboard/SettlementEngineFlow.tsx');
-  assert.doesNotMatch(text, /'treasury'|treasury:/, 'no treasury variant');
-  assert.doesNotMatch(text, /T\+1|Approval-gated simulation|to Available/, 'no ledger copy');
 });
 
 for (const cron of ['settle-withdrawals', 'accrue-yield']) {

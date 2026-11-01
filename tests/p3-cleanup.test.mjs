@@ -196,6 +196,9 @@ const GONE = [
   'lib/server/usdt-ttl-guard.ts',
   'lib/server/ptb.ts',
   'scripts/fund-settlement-pool.mjs',
+  // The two logos only the settlement-flow diagram drew.
+  'public/stripe-logo.svg',
+  'public/airwallex-logo.png',
 ];
 
 test('files with no caller are removed', async () => {
@@ -231,6 +234,12 @@ test('nothing imports, links or names what was removed', async () => {
   const runbook = await readFile(at('docs/KEY-CEREMONY-RUNBOOK.md'), 'utf8');
   const row = runbook.split('\n').find((line) => line.includes('SettlementPool funded')) ?? '';
   assert.match(row, /removed/, 'the dated record says the script has since been removed');
+});
+
+test('the image allow-list no longer admits the removed logo', async () => {
+  const config = await readFile(at('next.config.ts'), 'utf8');
+  assert.doesNotMatch(config, /airwallex-logo/);
+  assert.match(config, /splash-main-icon\.png/, 'the icon every page uses is still admitted');
 });
 
 test('the settlement-flow styles went with the component, and nothing else in the stylesheet changed meaning', async () => {

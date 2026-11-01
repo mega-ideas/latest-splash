@@ -488,7 +488,7 @@ hold simultaneously; three now do, one is blocked on the contract:
 |---|---|
 | `BusinessAccount.is_verified` | ✅ true on `0x23fbe1…` |
 | Fresh peg (bundled `update_peg`) | ✅ passes |
-| **SettlementPool funded** | ✅ fixed — was **0**; `scripts/fund-settlement-pool.mjs` added, pool now holds 2.1 SUI |
+| **SettlementPool funded** | ✅ fixed — was **0**; `scripts/fund-settlement-pool.mjs` added (since removed with the v1 custody batch), pool now holds 2.1 SUI |
 | **DeepBook liquidity guard** | ❌ **unsatisfiable on the deployed contract** |
 
 **Configuration discovered and applied** (`.env.local`):

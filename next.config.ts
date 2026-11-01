@@ -39,7 +39,6 @@ const nextConfig: NextConfig = {
       { pathname: "/isometric/**", search: "" },
       { pathname: "/partners/**", search: "" },
       { pathname: "/splash-main-icon.png", search: "" },
-      { pathname: "/airwallex-logo.png", search: "" },
       { pathname: "/sumsub-logo.png", search: "" },
       { pathname: "/deepbook-mark.png", search: "" },
     ],

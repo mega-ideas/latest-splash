@@ -190,13 +190,6 @@ test("the landing, the delivery step and the overview show Splash's bank fee thr
 
 // ─── L7c: no retired funding fee tier ──────────────────────────────────────
 
-test('the funding selector shows no retired fee tier', () => {
-  const selector = read('components/funding/FundingSelector.tsx');
-  assert.doesNotMatch(selector, /Applied fee/, 'no "Applied fee" badge');
-  assert.doesNotMatch(selector, /\{selection\.feeTier\}/, 'the selection tier is not rendered');
-  assert.doesNotMatch(selector, /'(?:STANDARD|DISCOUNT) fee'/, 'no tier named as a fee on a button');
-});
-
 test("the audit record's funding line names the method and asset, not a retired fee tier", () => {
   const audit = read('app/dashboard/audit/[intentId]/page.tsx');
   assert.doesNotMatch(audit, /funding\.feeTier/, 'the record does not print the tier');
