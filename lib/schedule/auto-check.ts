@@ -63,6 +63,11 @@ export type AutoFacts = {
   /** Recipient (normalised address) -> what the running-total window counts for everyone together. */
   runningTotals: Record<string, string>;
   dailyCapMinor: bigint;
+  /**
+   * The business's own limit for one automatic payment (Settings, Limits): the standard, a lower one the owners chose,
+   * or a higher one Splash approved and whose notice has passed. A payment above it is the owners'. Absent: no such limit is checked.
+   */
+  perPaymentLimitMinor?: bigint;
   /** What automatic runs paid, or are paying, in the last 24 hours. */
   dailyUsedMinor: bigint;
   /** What the wallet can spend now, or null when it could not be read. */
@@ -144,6 +149,8 @@ export function evaluateAutoRun(facts: AutoFacts, items: AutoItemFacts[]): AutoV
     const amount = item.saved.amountMinor;
     const fee = item.currentFeeMinor;
     if (amount > threshold) return refuse('above_approval_line', item);
+    // The business's limit for one automatic payment, whatever the allowance on the network says.
+    if (facts.perPaymentLimitMinor != null && amount > facts.perPaymentLimitMinor) return refuse('over_payment_limit', item);
 
     // The same plan a staff member's payment is judged by, with each payment counted against the next.
     const plan = approvalPlan({

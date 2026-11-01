@@ -70,7 +70,6 @@ import {
   NOT_STARTED_REASON,
   RUN_CLAIM_LEASE_MS,
   SUBMIT_LEASE_MS,
-  ALLOWANCE_DEFAULTS,
   dueDateOf,
   fallbackWords,
   nextDueAfter,
@@ -82,6 +81,8 @@ import {
 } from '../schedule/rules.ts';
 import { scheduledRunPath, type NoticeKind, type ScheduleNotice } from '../schedule/notice.ts';
 import { sheetRowsFromBody } from '../batch/sheet.ts';
+import { effectiveDailyCap } from '../limits/rules.ts';
+import { currentLimits } from './business-limits.ts';
 import { recipientPayable } from './business-wallet.ts';
 import { staffRulePaymentTx } from './spend-rules-builders.ts';
 import { readStaffRule } from './spend-rules.ts';
@@ -573,7 +574,9 @@ async function evaluateAuto(d: ScheduleDeps, sch: ScheduleRow): Promise<CheckedR
     });
   }
 
-  const dailyCap = (await dailyCapOf(d.db, d.orgId)).capMinor ?? BigInt(ALLOWANCE_DEFAULTS.dailyUsdc) * 1_000_000n;
+  // The business's own limits (Settings, Limits) hold too: the owners' daily limit never lifts the business's.
+  const limits = await currentLimits(d.db, d.orgId, d.now);
+  const dailyCap = effectiveDailyCap((await dailyCapOf(d.db, d.orgId)).capMinor, limits);
   const dailyUsed = await autoPaidSince(d.db, d.orgId, new Date(now.getTime() - 24 * 3_600_000));
   const balance = d.walletBalance ? await d.walletBalance().catch(() => null) : null;
   const verdict = evaluateAutoRun(
@@ -590,6 +593,7 @@ async function evaluateAuto(d: ScheduleDeps, sch: ScheduleRow): Promise<CheckedR
       policy: rule?.facts.policy ?? null,
       runningTotals: rule?.facts.runningTotals ?? {},
       dailyCapMinor: dailyCap,
+      perPaymentLimitMinor: limits.per_payment,
       dailyUsedMinor: dailyUsed,
       walletBalanceMinor: balance,
     },
@@ -632,7 +636,8 @@ async function executeAuto(d: ScheduleDeps, sch: ScheduleRow, run: RunRow, check
   });
   // Reserve the run under the daily limit: one business's runners take this lock one after the other, each counting what the
   // earlier ones have set aside, so two runs working different schedules cannot both pass a limit that fits only one.
-  const cap = (await dailyCapOf(d.db, d.orgId)).capMinor ?? BigInt(ALLOWANCE_DEFAULTS.dailyUsdc) * 1_000_000n;
+  const businessLimits = await currentLimits(d.db, d.orgId, d.now);
+  const cap = effectiveDailyCap((await dailyCapOf(d.db, d.orgId)).capMinor, businessLimits);
   const reserved = await withLock(d.db, `scheduled-cap|${d.orgId}`, async (tx) => {
     const used = await autoPaidSince(tx, d.orgId, new Date(now.getTime() - 24 * 3_600_000));
     if (used + checked.totalMinor + checked.feeMinor > cap) return 'over_cap' as const;

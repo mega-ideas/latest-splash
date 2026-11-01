@@ -63,10 +63,12 @@ import {
   type ScheduleMode,
   type ScheduleStatus,
 } from '../schedule/rules.ts';
+import { allowanceLimitProblems, effectiveDailyCap } from '../limits/rules.ts';
 import { scheduledRunPath, SCHEDULED_PATH, type ScheduleNotice } from '../schedule/notice.ts';
 import type { AutomaticStatus, ItemView, RunView, ScheduleView } from '../schedule/views.ts';
 import { parseAmountMinor } from '../transfer/plan.ts';
 import { automaticSummary, paymentsOfSchedules, summaryDigest, type AutomaticSummary } from '../schedule/summary.ts';
+import { currentLimits } from './business-limits.ts';
 import { recipientPayable, type WalletContext } from './business-wallet.ts';
 import { listOrgOwners } from './near-threshold-store.ts';
 import {
@@ -759,6 +761,7 @@ function spendOf(deps: ScheduleDeps): Promise<SpendContext | null> {
 export async function automaticStatus(deps: ScheduleDeps): Promise<AutomaticStatus> {
   const settings = await getSettings(deps.db, deps.orgId);
   const cap = await dailyCapOf(deps.db, deps.orgId);
+  const limits = await currentLimits(deps.db, deps.orgId, deps.now);
   const payer = await deps.payer();
   const now = deps.now();
   const used = await autoPaidSince(deps.db, deps.orgId, new Date(now.getTime() - 24 * 3_600_000));
@@ -789,7 +792,8 @@ export async function automaticStatus(deps: ScheduleDeps): Promise<AutomaticStat
     graceMinutes: await graceMinutesOf(deps.db, deps.orgId),
     pausedBy: settings?.pausedBy ?? null,
     pausedAt: settings?.pausedAt ? settings.pausedAt.toISOString() : null,
-    dailyCapMinor: (cap.capMinor ?? BigInt(ALLOWANCE_DEFAULTS.dailyUsdc) * 1_000_000n).toString(),
+    dailyCapMinor: effectiveDailyCap(cap.capMinor, limits).toString(),
+    limits: { perPaymentMinor: limits.per_payment.toString(), dailyMinor: limits.daily.toString(), monthlyMinor: limits.monthly.toString(), days: Number(limits.days) },
     pendingDailyCapMinor: cap.pending ? cap.pending.capMinor.toString() : null,
     dailyUsedMinor: used.toString(),
     allowance,
@@ -864,6 +868,9 @@ export async function requestAllowance(deps: ScheduleDeps, actor: Actor, input: 
   // What was typed is read one way, here and on the page; the request and the summary are both built from `form`.
   const { form, problems } = parseAllowanceInput(input);
   if (problems.length > 0) return fail(400, 'bad_allowance', problems.join(' '), { problems });
+  // The business's own limits (Settings, Limits): a standard, a lower one the owners chose, or a higher one Splash approved and whose notice has passed.
+  const overLimit = allowanceLimitProblems(form, await currentLimits(deps.db, deps.orgId, deps.now));
+  if (overLimit.length > 0) return fail(400, 'above_limit', overLimit.join(' '), { problems: overLimit });
   const payer = await deps.payer();
   if (!payer.ok) return fail(409, 'payer_unavailable', 'Automatic payments are not switched on for your business here yet, so there is nothing to give an allowance to.');
   const sc = await spendOf(deps);

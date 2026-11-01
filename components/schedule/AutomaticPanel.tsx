@@ -8,6 +8,7 @@ import { call, errorText } from '@/components/transfer/api';
 import { Field, Modal, PrimaryButton, QuietButton, TextInput } from '@/components/transfer/ui';
 import { newKey, Note, Pill } from '@/components/wallet/parts';
 import { formatUsdc } from '@/lib/fees/copy';
+import { allowanceLimitProblems, type LimitValues } from '@/lib/limits/rules';
 import { ALLOWANCE_DEFAULTS, GRACE_MAX_MINUTES, allowanceSentence, dayMonthYearWords, graceWords, parseAllowanceInput, parseGraceMinutes } from '@/lib/schedule/rules';
 import { MONTHLY_CAVEAT, automaticSummary, paymentsOfSchedules, summaryDigest, type AutomaticSummary } from '@/lib/schedule/summary';
 import type { AutomaticStatus, ScheduleView } from '@/lib/schedule/views';
@@ -191,10 +192,13 @@ function WarningWindow({ status, onChanged }: { status: AutomaticStatus; onChang
 type Step = 'form' | 'review' | 'asked';
 
 function AllowanceModal({ open, onClose, onAsked, status, schedules }: { open: boolean; onClose: () => void; onAsked: () => void; status: AutomaticStatus; schedules: ScheduleView[] }) {
-  const [perPayment, setPerPayment] = useState(String(ALLOWANCE_DEFAULTS.perPaymentUsdc));
-  const [daily, setDaily] = useState(String(ALLOWANCE_DEFAULTS.dailyUsdc));
-  const [monthly, setMonthly] = useState(String(ALLOWANCE_DEFAULTS.monthlyUsdc));
-  const [days, setDays] = useState(String(ALLOWANCE_DEFAULTS.expiresInDays));
+  // Start from the standard figures, or the business's own limits where they are lower.
+  const business: LimitValues = { per_payment: BigInt(status.limits.perPaymentMinor), daily: BigInt(status.limits.dailyMinor), monthly: BigInt(status.limits.monthlyMinor), days: BigInt(status.limits.days) };
+  const startAt = (standard: number, limit: bigint, unit: bigint) => String(Math.min(standard, Number(limit / unit)));
+  const [perPayment, setPerPayment] = useState(startAt(ALLOWANCE_DEFAULTS.perPaymentUsdc, business.per_payment, 1_000_000n));
+  const [daily, setDaily] = useState(startAt(ALLOWANCE_DEFAULTS.dailyUsdc, business.daily, 1_000_000n));
+  const [monthly, setMonthly] = useState(startAt(ALLOWANCE_DEFAULTS.monthlyUsdc, business.monthly, 1_000_000n));
+  const [days, setDays] = useState(startAt(ALLOWANCE_DEFAULTS.expiresInDays, business.days, 1n));
   const [step, setStep] = useState<Step>('form');
   // The clock the end date is counted from; read again when the owner moves to the summary.
   const [now, setNow] = useState(() => Date.now());
@@ -205,7 +209,9 @@ function AllowanceModal({ open, onClose, onAsked, status, schedules }: { open: b
   const [fromServer, setFromServer] = useState<AutomaticSummary | null>(null);
 
   // What was typed is read the way the server reads it, and the summary is built from that same result.
-  const { form, problems } = parseAllowanceInput({ perPaymentUsdc: perPayment, dailyUsdc: daily, monthlyUsdc: monthly, expiresInDays: days });
+  const { form, problems: typed } = parseAllowanceInput({ perPaymentUsdc: perPayment, dailyUsdc: daily, monthlyUsdc: monthly, expiresInDays: days });
+  // The business's own limits hold on the page as they do on the server: the same sentences.
+  const problems = [...typed, ...allowanceLimitProblems(form, business)];
   const { payments, schedules: running, firstPaymentMs } = paymentsOfSchedules(schedules);
   const built = automaticSummary({ payments, schedules: running, form, graceMinutes: status.graceMinutes, nowMs: now, firstPaymentMs });
   const summary = fromServer ?? built;

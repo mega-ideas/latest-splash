@@ -91,5 +91,7 @@ export type AutomaticStatus = {
         renewsAtMs: string | null;
       };
   defaults: typeof ALLOWANCE_DEFAULTS;
+  /** The business's own limits now (Settings, Limits): the most an allowance may ask for. Amounts in USDC minor units, the length in days. */
+  limits: { perPaymentMinor: string; dailyMinor: string; monthlyMinor: string; days: number };
 };
 
