@@ -3,7 +3,6 @@
 import { useState } from 'react';
 import Image from 'next/image';
 import Link from 'next/link';
-import { useRouter } from 'next/navigation';
 import { FileText, Layers, RotateCcw, Send, TrendingUp, type LucideIcon } from 'lucide-react';
 
 import { usePhone } from '@/components/dashboard/Device';
@@ -21,7 +20,6 @@ import {
   ZekeRecent,
 } from '@/components/oxwal/ZekeDeskCards';
 import { ZEKE_LIMIT, deskSubtitle } from '@/lib/agent/zeke-desk';
-import { stashBatchDraft } from '@/lib/batch-parse';
 import { formatUsdc } from '@/lib/payments/stablecoin-lane';
 import { useOxwalThread } from '@/lib/oxwal/use-oxwal-thread';
 import { useWalletUsdc, useZekeDesk } from '@/lib/oxwal/use-zeke-desk';
@@ -73,9 +71,9 @@ const STARTERS = (name: string): Starter[] => [
   },
   {
     title: 'Build a batch',
-    body: `Upload a payout sheet. ${name} checks every row.`,
+    body: `Attach a payout sheet. ${name} checks every row.`,
     icon: Layers,
-    href: '/dashboard/batch',
+    prompt: 'I want to prepare a batch of payouts. What do you need from me?',
   },
   {
     title: 'Plan idle cash',
@@ -86,7 +84,6 @@ const STARTERS = (name: string): Starter[] => [
 ];
 
 export default function OxwalDeskPage() {
-  const router = useRouter();
   const phone = usePhone();
   const [input, setInput] = useState('');
 
@@ -100,6 +97,10 @@ export default function OxwalDeskPage() {
     assistantName,
     threadRef,
     submitPrompt,
+    attachSheet,
+    confirmSheet,
+    prepareSheet,
+    dismissSheet,
     approveInChat,
     resetThread,
   } = useOxwalThread({ welcome: ZEKE_LIMIT, resumeHandoff: true });
@@ -114,6 +115,8 @@ export default function OxwalDeskPage() {
     setInput('');
   }
 
+  const sheetActions = { prepare: (id: string) => void prepareSheet(id), confirm: confirmSheet, dismiss: dismissSheet };
+
   function startOver() {
     resetThread();
     setInput('');
@@ -126,10 +129,7 @@ export default function OxwalDeskPage() {
     onChange: setInput,
     onSubmit: () => ask(input),
     onChipSubmit: ask,
-    onFilePrepared: (batch: Parameters<typeof stashBatchDraft>[0]) => {
-      stashBatchDraft(batch);
-      router.push('/dashboard/batch?draft=1');
-    },
+    onSheet: (sheet: Parameters<typeof attachSheet>[0]) => void attachSheet(sheet),
     chips: [],
     disabled: isSending,
   };
@@ -159,7 +159,7 @@ export default function OxwalDeskPage() {
         </header>
         <div ref={threadRef} className="min-h-0 flex-1 space-y-4 overflow-y-auto px-4 py-4" aria-live="polite">
           {thread.map((item) => (
-            <ThreadRow key={item.id} item={item} onRetry={(prompt) => ask(prompt)} chatApprovals={chatApprovals} clockMs={clockMs} onApprove={(proposal) => void approveInChat(proposal)} />
+            <ThreadRow key={item.id} item={item} onRetry={(prompt) => ask(prompt)} chatApprovals={chatApprovals} clockMs={clockMs} onApprove={(proposal) => void approveInChat(proposal)} sheetActions={sheetActions} />
           ))}
           {streamingText && <StreamingRow text={streamingText} />}
           {isSending && !streamingText && <ThinkingRow />}
@@ -259,7 +259,7 @@ export default function OxwalDeskPage() {
                   onRetry={(prompt) => ask(prompt)}
                   chatApprovals={chatApprovals}
                   clockMs={clockMs}
-                  onApprove={(proposal) => void approveInChat(proposal)}
+                  onApprove={(proposal) => void approveInChat(proposal)} sheetActions={sheetActions}
                 />
               ))}
               {streamingText && <StreamingRow text={streamingText} />}

@@ -1,43 +1,49 @@
 'use client';
 
 /**
- * Reading an uploaded batch sheet in the browser (v2 brief 5.6). Nothing is
- * sent anywhere from here: the rows go to the review step, where the server
- * matches each to a recipient the business saved. Cells are kept exactly as
- * written (no currency sign is stripped), so "RM 20k" is refused in review
- * rather than read as 20.
+ * Handing a payout sheet to the server (v2 Phase 3). The browser does not read
+ * the sheet any more: it takes the file as text (a CSV) or as bytes (a
+ * spreadsheet), checks only its size and kind, and sends it to
+ * POST /api/wallet/batches/sheet, where the rows are read by fixed rules
+ * (lib/batch/ingest.ts), the same for Zeke's composer and for Batch payouts.
+ * Cells are never stripped or reshaped here, and nothing is stored.
  */
-import Papa from 'papaparse';
-import readXlsxFile from 'read-excel-file/universal';
+import { call, errorText, type Answer } from '@/components/transfer/api';
 
-import { BATCH_MAX_PAYMENTS, rowsFromRecords, type SheetRow } from './sheet';
-
-/** A sheet larger than this is not a batch of at most BATCH_MAX_PAYMENTS rows. */
-const MAX_FILE_BYTES = 512 * 1024;
+/** The server's own cap; a larger file is refused here without being sent. */
+export const MAX_FILE_BYTES = 256 * 1024;
 
 export class SheetFileError extends Error {}
 
-export async function readSheetFile(file: File): Promise<SheetRow[]> {
+export type SheetPayload =
+  | { kind: 'text'; name: string | null; text: string; source: 'file' | 'pasted' }
+  | { kind: 'xlsx'; name: string | null; base64: string; source: 'file' };
+
+function toBase64(bytes: Uint8Array): string {
+  let binary = '';
+  for (let i = 0; i < bytes.length; i += 0x8000) binary += String.fromCharCode(...bytes.subarray(i, i + 0x8000));
+  return btoa(binary);
+}
+
+export async function readSheetFile(file: File): Promise<SheetPayload> {
   if (file.size > MAX_FILE_BYTES) throw new SheetFileError('That file is too large to be a batch. A batch is at most 20 payments.');
   const ext = file.name.split('.').pop()?.toLowerCase();
-  let records: Array<Record<string, unknown>>;
-  if (ext === 'csv') {
-    records = await new Promise((resolve, reject) => {
-      Papa.parse<Record<string, unknown>>(file, { header: true, skipEmptyLines: true, complete: ({ data }) => resolve(data), error: (error) => reject(new SheetFileError(error.message)) });
-    });
-  } else if (ext === 'xlsx') {
-    const [first] = await readXlsxFile(await file.arrayBuffer());
-    const [header = [], ...body] = first?.data ?? [];
-    const keys = header.map((h) => (h == null ? '' : String(h)).trim());
-    records = body.map((cells) => Object.fromEntries(keys.map((key, i) => [key, cells[i] instanceof Date ? (cells[i] as Date).toISOString().slice(0, 10) : cells[i] == null ? '' : String(cells[i])]).filter(([key]) => key)));
-  } else {
-    throw new SheetFileError('Upload a .csv or .xlsx file.');
-  }
-  const rows = rowsFromRecords(records);
-  if (rows.length === 0) throw new SheetFileError('The file has no rows. The columns are recipient, amount and reference.');
-  if (rows.length > BATCH_MAX_PAYMENTS + 5) throw new SheetFileError(`The file has ${rows.length} rows. A batch is at most ${BATCH_MAX_PAYMENTS} payments: split it into smaller files.`);
-  return rows;
+  if (ext === 'xlsx') return { kind: 'xlsx', name: file.name, base64: toBase64(new Uint8Array(await file.arrayBuffer())), source: 'file' };
+  if (ext === 'csv' || ext === 'tsv' || ext === 'txt') return { kind: 'text', name: file.name, text: await file.text(), source: 'file' };
+  throw new SheetFileError('Upload a .csv or .xlsx file.');
 }
+
+export function pastedSheet(text: string): SheetPayload {
+  return { kind: 'text', name: null, text, source: 'pasted' };
+}
+
+/** Send a sheet. `review: false` asks for the rows only (Batch payouts reviews them on its next step). */
+export async function sendSheet<T>(payload: SheetPayload, options: { review: boolean }): Promise<Answer<T>> {
+  const body = payload.kind === 'xlsx' ? { kind: 'xlsx', base64: payload.base64 } : { kind: 'text', text: payload.text };
+  return call<T>('/api/wallet/batches/sheet', { body: { ...body, name: payload.name ?? undefined, source: payload.source, review: options.review } });
+}
+
+export { errorText };
 
 /** The file a person can start from: three columns and nothing that looks like a real payee. */
 export function sampleSheetCsv(): string {

@@ -175,9 +175,12 @@ test('landing is the v1 cinematic: hero district, five steps with manual entry, 
   assert.match(page, /landingFaq\(/, 'the FAQ JSON-LD is generated from the page copy, not duplicated');
   // Composer is now a payment-desk command bar (not a ChatGPT pill): no
   // "High" effort dropdown, a branded "Prepare" action, and a functional
-  // file-attach that prepares a batch for human approval.
-  assert.match(composer, /Prepare batch/);
-  assert.match(composer, /onFilePrepared/);
+  // file-attach that hands a payout sheet to the server reader, which Zeke
+  // shows as a table and prepares as a batch only when the person presses
+  // Prepare batch (components/oxwal/SheetCard.tsx).
+  assert.match(composer, /onSheet/);
+  assert.doesNotMatch(composer, /onFilePrepared/);
+  assert.match(await readFile(new URL('../components/oxwal/SheetCard.tsx', import.meta.url), 'utf8'), /Prepare batch|prepareButton/);
   assert.doesNotMatch(composer, /priorityLabel|bg-black/);
   assert.match(floating, /OxWalComposer/);
   assert.match(invoiceLoop, /Bring in an invoice/);

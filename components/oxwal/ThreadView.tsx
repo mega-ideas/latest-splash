@@ -5,6 +5,7 @@ import Link from 'next/link';
 import { AlertTriangle, ArrowUpRight, CheckCircle2, Clock3, RotateCcw } from 'lucide-react';
 
 import ActionCard from '@/components/oxwal/ActionCard';
+import SheetCard from '@/components/oxwal/SheetCard';
 import type { ActionCardProposal } from '@/lib/agent/action-card';
 import type { OxwalChatApproval, OxwalThreadItem } from '@/lib/oxwal/use-oxwal-thread';
 
@@ -92,6 +93,7 @@ export default function ThreadRow({
   chatApprovals,
   clockMs,
   onApprove,
+  sheetActions,
   compact = false,
 }: {
   item: OxwalThreadItem;
@@ -99,8 +101,15 @@ export default function ThreadRow({
   chatApprovals: Record<string, OxwalChatApproval>;
   clockMs: number;
   onApprove: (proposal: ActionCardProposal) => void;
+  /** What a payout sheet in the thread can do: prepare the batch, tick the box for rows to check, dismiss. */
+  sheetActions?: { prepare: (id: string) => void; confirm: (id: string, confirmed: boolean) => void; dismiss: (id: string) => void };
   compact?: boolean;
 }) {
+  if (item.kind === 'sheet') {
+    if (!sheetActions) return null;
+    return <SheetCard id={item.id} sheet={item.sheet} compact={compact} onPrepare={sheetActions.prepare} onConfirm={sheetActions.confirm} onDismiss={sheetActions.dismiss} />;
+  }
+
   if (item.kind === 'user') {
     return (
       <div className="ml-auto max-w-[86%] rounded-lg rounded-tr-sm bg-[#1F4452] px-3 py-2 text-sm font-medium leading-6 text-white">

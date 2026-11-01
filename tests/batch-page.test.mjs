@@ -51,8 +51,11 @@ test('the upload step takes a file, pasted rows or a blank row, and says who may
   assert.match(upload, /A recipient you saved and Splash has screened/);
   assert.match(upload, /one at a time from/);
   assert.doesNotMatch(upload, /name,address,country/, 'the old sheet with a country and a bank reference is gone');
-  assert.match(read('lib/batch/file.ts'), /rowsFromRecords\(records\)/);
-  assert.doesNotMatch(read('lib/batch/file.ts'), /replace\(\/\[\^0-9\.\\-\]/, 'a currency sign is never stripped from an amount');
+  // The sheet is read by the server (lib/batch/ingest.ts), not in the browser: the page only sends it.
+  assert.match(upload, /sendSheet</);
+  assert.match(read('lib/batch/file.ts'), /\/api\/wallet\/batches\/sheet/);
+  assert.doesNotMatch(read('lib/batch/file.ts'), /papaparse|read-excel-file|replace\(\/\[\^0-9\.\\-\]/, 'the browser neither parses the file nor strips a currency sign from an amount');
+  assert.doesNotMatch(upload, /papaparse|rowsFromRecords|recordsFromCsv/);
 });
 
 test('the review step shows each row on its own, with its screening, its recipient and its error, and goes on only when every row is cleared', () => {
@@ -218,7 +221,8 @@ test('a changed or late review cannot be taken for the rows on the screen, and t
   const review = read('components/batch/StepReview.tsx');
   assert.doesNotMatch(code(review), /font-semibold text-\[#1F4452\] md:sr-only/, 'the column labels are visible at desktop widths too');
   assert.match(review, /hidden [^"]*md:grid/, 'a header row of labels above the rows at desktop widths');
-  assert.match(code(flow), /takeBatchDraft[\s\S]{0,400}BATCH_MAX_PAYMENTS/, 'a draft from Zeke is capped like a file');
+  assert.doesNotMatch(code(flow), /takeBatchDraft|draft=1/, 'Zeke no longer hands rows over through browser storage: it shows them in its own thread and prepares the batch itself');
+  assert.match(code(flow), /readNotes/, 'what the server removed from a cell is shown above the review');
   const sign = read('components/transfer/SignPanel.tsx');
   assert.match(sign, /differsFromApprovedBatch/);
   const stepApprove = read('components/batch/StepApprove.tsx');

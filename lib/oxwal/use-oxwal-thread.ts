@@ -2,10 +2,15 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 
+import { call, errorText } from '@/components/transfer/api';
 import type { ActionCardProposal } from '@/lib/agent/action-card';
 import { DEFAULT_ASSISTANT_NAME } from '@/lib/agent/assistant-name-shared';
+import { SHEET_COPY } from '@/lib/agent/sheet-copy';
+import { sendSheet, type SheetPayload } from '@/lib/batch/file';
+import { newBatchKey } from '@/lib/batch/key';
 import { recordPendingProposals } from '@/lib/oxwal-notify';
 import { takeThreadHandoff } from '@/lib/oxwal/thread-handoff';
+import type { SheetCard } from '@/lib/server/zeke-batch-sheet';
 
 /**
  * One conversation with Zeke, for every surface that has one.
@@ -47,9 +52,21 @@ export type OxwalThreadItem =
   | { kind: 'session-expired'; id: string }
   | { kind: 'proposal'; id: string; proposal: ActionCardProposal }
   /** A USDC transfer Zeke prepared for the operator to review and send. */
-  | { kind: 'handoff'; id: string; handoff: OxwalHandoff };
+  | { kind: 'handoff'; id: string; handoff: OxwalHandoff }
+  /**
+   * A payout sheet a person attached or pasted: read by the server, shown as a
+   * table to check, and prepared in the wallet batch flow when the person says
+   * so. Never part of the history sent to the model.
+   */
+  | { kind: 'sheet'; id: string; sheet: OxwalSheetState };
 
 export type OxwalHandoff = { title: string; lines: string[]; href: string; cta: string };
+
+export type OxwalSheetState =
+  | { phase: 'reading'; name: string | null }
+  | { phase: 'failed'; text: string }
+  | { phase: 'review'; card: SheetCard; confirmed: boolean; preparing: boolean; error: string | null; intentKey: string }
+  | { phase: 'prepared'; card: SheetCard; batch: { id: string; status: string } };
 
 /**
  * In-chat approval window per proposal. `waiting` counts down; an unapproved
@@ -105,7 +122,6 @@ const ACTIVITY_LABELS: Record<string, string> = {
   proposeTreasuryAllocation: 'Preparing treasury allocation',
   proposeTreasuryRedeem: 'Preparing treasury redemption',
   proposeNettingSettlement: 'Preparing netting settlement',
-  proposeBatchPayout: 'Preparing batch payout',
   proposeRecipientFromInvoice: 'Reading recipient off the invoice',
   setAssistantName: 'Remembering what to be called',
   quoteX402Payment: 'Pricing the x402 request',
@@ -152,7 +168,13 @@ export function useOxwalThread(options: UseOxwalThreadOptions = {}) {
   const [clockMs, setClockMs] = useState(() => Date.now());
   const [assistantName, setAssistantName] = useState(DEFAULT_ASSISTANT_NAME);
 
-  const hasStarted = thread.some((item) => item.kind === 'user');
+  const hasStarted = thread.some((item) => item.kind === 'user' || item.kind === 'sheet');
+
+  // The thread as the latest render saw it, for actions that act on one of its rows.
+  const latest = useRef(thread);
+  useEffect(() => {
+    latest.current = thread;
+  }, [thread]);
 
   // A conversation handed over from the floating Zeke continues here. Read
   // after mount, in the browser only, and taken once.
@@ -366,6 +388,74 @@ export function useOxwalThread(options: UseOxwalThreadOptions = {}) {
     [thread, isSending, historyTurns, allowInlineApproval],
   );
 
+  const patchSheet = useCallback((id: string, next: OxwalSheetState) => {
+    setThread((current) => current.map((item) => (item.kind === 'sheet' && item.id === id ? { ...item, sheet: next } : item)));
+  }, []);
+
+  const sessionEnded = useCallback((id: string) => {
+    setThread((current) => [...current.filter((item) => item.id !== id), { kind: 'session-expired', id: newId('expired') }]);
+  }, []);
+
+  /**
+   * A payout sheet, attached or pasted. The server reads it and checks every
+   * row with the review Batch payouts uses; the table comes back to this
+   * thread. It is never sent to the model, and nothing is prepared yet.
+   */
+  const attachSheet = useCallback(
+    async (payload: SheetPayload) => {
+      const id = newId('sheet');
+      setThread((current) => [...current, { kind: 'sheet', id, sheet: { phase: 'reading', name: payload.name } }]);
+      const answer = await sendSheet<{ card?: SheetCard }>(payload, { review: true });
+      if (answer.status === 401) return sessionEnded(id);
+      if (answer.ok && answer.body?.card) {
+        patchSheet(id, { phase: 'review', card: answer.body.card, confirmed: false, preparing: false, error: null, intentKey: newBatchKey() });
+      } else {
+        patchSheet(id, { phase: 'failed', text: errorText(answer, SHEET_COPY.readFailed) });
+      }
+    },
+    [patchSheet, sessionEnded],
+  );
+
+  const confirmSheet = useCallback((id: string, confirmed: boolean) => {
+    setThread((current) =>
+      current.map((item) => (item.kind === 'sheet' && item.id === id && item.sheet.phase === 'review' ? { ...item, sheet: { ...item.sheet, confirmed } } : item)),
+    );
+  }, []);
+
+  const dismissSheet = useCallback((id: string) => {
+    setThread((current) => current.filter((item) => item.id !== id));
+  }, []);
+
+  /**
+   * Prepare the batch: the wallet batch flow's own route, with the rows the
+   * table showed and the fee it showed. An owner's batch becomes one signing
+   * request for the owners; a staff member's waits for an owner. The same
+   * intent id is used for a retry, so pressing twice makes one batch. Nothing
+   * is sent or approved here, and the person's yes to repeats and new payees
+   * is the checkbox they ticked.
+   */
+  const prepareSheet = useCallback(
+    async (id: string) => {
+      const item = latest.current.find((row) => row.kind === 'sheet' && row.id === id);
+      if (!item || item.kind !== 'sheet' || item.sheet.phase !== 'review') return;
+      const { card, confirmed, intentKey, preparing } = item.sheet;
+      if (preparing || !card.ready || (card.needsConfirmation && !confirmed)) return;
+      patchSheet(id, { ...item.sheet, preparing: true, error: null });
+      const label = `Zeke · ${card.fileName ?? 'pasted rows'}`.slice(0, 80);
+      const answer = await call<{ batch?: { id: string; status: string } }>('/api/wallet/batches', {
+        body: { rows: card.sheet, maxFeeMinor: card.maxFeeMinor, label, confirmDuplicates: confirmed, confirmNewPayees: confirmed },
+        key: intentKey,
+      });
+      if (answer.status === 401) return sessionEnded(id);
+      if (answer.ok && answer.body?.batch) {
+        patchSheet(id, { phase: 'prepared', card, batch: { id: answer.body.batch.id, status: answer.body.batch.status } });
+      } else {
+        patchSheet(id, { ...item.sheet, preparing: false, error: errorText(answer, 'The batch could not be prepared just now. Nothing was prepared.') });
+      }
+    },
+    [patchSheet, sessionEnded],
+  );
+
   const approveInChat = useCallback(async (proposal: ActionCardProposal) => {
     setChatApprovals((current) => ({
       ...current,
@@ -444,6 +534,10 @@ export function useOxwalThread(options: UseOxwalThreadOptions = {}) {
     assistantName,
     threadRef,
     submitPrompt,
+    attachSheet,
+    confirmSheet,
+    prepareSheet,
+    dismissSheet,
     approveInChat,
     resetThread,
   };

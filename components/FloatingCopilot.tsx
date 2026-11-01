@@ -2,12 +2,11 @@
 
 import Image from 'next/image';
 import Link from 'next/link';
-import { usePathname, useRouter } from 'next/navigation';
+import { usePathname } from 'next/navigation';
 import { useEffect, useRef, useState, type KeyboardEvent as ReactKeyboardEvent, type PointerEvent as ReactPointerEvent } from 'react';
 import { ChevronDown, Maximize2, Sparkles, X } from 'lucide-react';
 
 import { cn } from '../lib/utils';
-import { stashBatchDraft, type ParsedBatch } from '../lib/batch-parse';
 import { zekeGreeting } from '../lib/agent/zeke-desk';
 import {
   readPendingProposals,
@@ -84,7 +83,6 @@ const GREETING_CHIPS: ZekeGreetingChip[] = [
 const NUDGES = ['Hi!', 'Can I help?', 'Ready to splash it?'];
 
 export default function FloatingCopilot() {
-  const router = useRouter();
   const pathname = usePathname();
   const [open, setOpen] = useState(false);
   const [input, setInput] = useState('');
@@ -105,6 +103,10 @@ export default function FloatingCopilot() {
     assistantName,
     threadRef,
     submitPrompt,
+    attachSheet,
+    confirmSheet,
+    prepareSheet,
+    dismissSheet,
     approveInChat,
     resetThread,
   } = useOxwalThread({
@@ -171,15 +173,6 @@ export default function FloatingCopilot() {
   const dragRef = useRef<{ x: number; y: number; offsetX: number; offsetY: number } | null>(null);
   const inputRef = useRef<HTMLInputElement>(null);
   const triggerRef = useRef<HTMLButtonElement>(null);
-
-  // Uploaded batch → hand the parsed rows to the batch desk (which reviews and
-  // routes to the Action Queue for human approval). Rows travel via
-  // sessionStorage, never the URL — recipient PII stays in the tab.
-  function handleBatchPrepared(batch: ParsedBatch) {
-    stashBatchDraft(batch);
-    setOpen(false);
-    router.push('/dashboard/batch?draft=1');
-  }
 
   // A brief, low-pressure prompt appears while the chat is closed. When
   // payments are waiting and the operator is away from the desk, the reminder
@@ -340,6 +333,7 @@ export default function FloatingCopilot() {
               chatApprovals={chatApprovals}
               clockMs={clockMs}
               onApprove={(proposal) => void approveInChat(proposal)}
+              sheetActions={{ prepare: (id) => void prepareSheet(id), confirm: confirmSheet, dismiss: dismissSheet }}
             />
           ))}
 
@@ -354,7 +348,7 @@ export default function FloatingCopilot() {
             onChange={setInput}
             onSubmit={() => send(input)}
             onChipSubmit={(prompt) => send(prompt)}
-            onFilePrepared={handleBatchPrepared}
+            onSheet={(sheet) => void attachSheet(sheet)}
             chips={[]}
             disabled={isSending}
             assistantName={assistantName}

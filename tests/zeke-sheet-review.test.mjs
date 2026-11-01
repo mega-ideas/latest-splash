@@ -82,7 +82,7 @@ async function setup() {
     walletBalance: async () => USDC(1_000_000),
     ...over,
   });
-  return { w, wallet, deps, calls };
+  return { w, wallet, deps, calls, baseline: w.executed.length };
 }
 
 async function saved(t, address, name, opts = {}) {
@@ -240,19 +240,17 @@ test('a wallet that cannot cover the batch and its fees is a limit on the whole 
 test('a staff member’s rows are judged by the same rule Transfer uses: over the limit, off the recipient list, or past the cap goes to the owners and says so', async () => {
   const t = await setup();
   await twoRecipients(t);
-  const facts = {
-    rule: { status: 'active', perPaymentMaxMinor: USDC(500).toString(), spendableNowMinor: USDC(700).toString() },
+  const facts = (spendable) => ({
+    rule: { status: 'active', perPaymentMaxMinor: USDC(500).toString(), spendableNowMinor: USDC(spendable).toString() },
     policy: { secondApprovalThresholdMinor: USDC(10_000).toString(), recipients: [{ address: WALLET_A }] },
     runningTotals: {},
-  };
-  const card = await okCard(t, STAFF, csv('Dela Cruz Trading Corp,300,a', 'Dela Cruz Trading Corp,900,b', 'Santos Supplies Inc,100,c', 'Dela Cruz Trading Corp,450,d'), { ruleFacts: async () => facts });
-  assert.deepEqual(card.rows.map((r) => r.state), ['ready', 'ready', 'ready', 'ready'], 'a batch is still made and signed by the owners; the rule only says which rows fit it');
-  assert.deepEqual(card.rows.map((r) => flagCodes(r).filter((c) => c.startsWith('rule_') || c === 'inside_rule')), [
-    ['inside_rule'],
-    ['rule_over_payment_max'],
-    ['rule_recipient_not_on_rule'],
-    ['rule_over_cap'],
-  ]);
+  });
+  const ruleCodes = (card) => card.rows.map((r) => flagCodes(r).filter((c) => c.startsWith('rule_') || c === 'inside_rule'));
+  const card = await okCard(t, STAFF, csv('Dela Cruz Trading Corp,300,a', 'Dela Cruz Trading Corp,600,b', 'Santos Supplies Inc,100,c'), { ruleFacts: async () => facts(5_000) });
+  assert.deepEqual(card.rows.map((r) => r.state), ['ready', 'ready', 'ready'], 'a batch is still made and signed by the owners; the rule only says which rows fit it');
+  assert.deepEqual(ruleCodes(card), [['inside_rule'], ['rule_over_payment_max'], ['rule_recipient_not_on_rule']]);
+  const capped = await okCard(t, STAFF, csv('Dela Cruz Trading Corp,300,a', 'Dela Cruz Trading Corp,450,b'), { ruleFacts: async () => facts(700) });
+  assert.deepEqual(ruleCodes(capped), [['inside_rule'], ['rule_over_cap']], 'the second row is judged after the first has taken its share of the cap');
   const over = card.rows[1].flags.find((f) => f.code === 'rule_over_payment_max');
   assert.equal(over.severity, 'owners');
   assert.match(over.text, /500/);
@@ -286,11 +284,11 @@ test('an owner’s prepared batch is one signing request for the owners, and not
   assert.equal(made.ok, true, JSON.stringify(made));
   assert.equal(made.batch.status, 'awaiting_signatures');
   assert.equal(made.signingRequest.purpose, 'wallet_batch');
-  assert.equal(t.w.executed.length, 0, 'no transaction was submitted');
+  assert.equal(t.w.executed.length, t.baseline, 'no transaction was submitted');
   assert.equal(made.signingRequest.signedWeight, 0, 'nobody has signed');
   const first = await submitPartialSignature(t.w.signing, { orgId: 'acme', userId: 'u-founder', id: made.signingRequest.id, signature: await sign(t.w.keys.founder, made.signingRequest), digest: made.signingRequest.digest });
   assert.equal(first.ok, true);
-  assert.equal(t.w.executed.length, 0, 'one signature of the threshold draws nothing');
+  assert.equal(t.w.executed.length, t.baseline, 'one signature of the threshold draws nothing');
   assert.equal((await B.getBatch(t.deps(), made.batch.id)).status, 'awaiting_signatures');
 });
 
@@ -303,7 +301,7 @@ test('a staff member’s prepared batch waits for an owner: no signing request, 
   assert.equal(made.batch.status, 'prepared');
   assert.equal(made.signingRequest, null);
   assert.equal(t.calls.notified.length, 1);
-  assert.equal(t.w.executed.length, 0);
+  assert.equal(t.w.executed.length, t.baseline);
   assert.equal(t.calls.records.length, 0, 'no audit bundle is sealed until an owner starts it');
 });
 
@@ -343,7 +341,7 @@ test('another business’s sheet is checked against its own recipients only: thi
   assert.deepEqual(card.rows.slice(0, 2).map((r) => r.state), ['blocked', 'blocked']);
   assert.ok(flagCodes(card.rows[0]).includes('not_verified'), 'acme’s saved recipient is absent for northwind');
   assert.ok(flagCodes(card.rows[1]).includes('not_verified'), 'acme’s saved address is absent for northwind');
-  assert.doesNotMatch(JSON.stringify(card), /Dela Cruz|Santos/, 'nothing of acme is shown');
+  assert.deepEqual(card.rows.slice(0, 2).map((r) => [r.payee, r.feeMinor]), [[null, null], [null, null]], 'nothing of acme’s records is shown: no payee, no fee');
 });
 
 test('the model is only ever asked for column names: the live mapper sends headers and nothing else', () => {
@@ -406,13 +404,19 @@ test('a request body over its cap is refused while it is read, not after: a stre
 });
 
 test('Zeke’s sheet never lands on a retired path: no proposal kind, no proposal tool, no step-up, no approval queue', () => {
-  const files = ['lib/batch/ingest.ts', 'lib/server/zeke-batch-sheet.ts', 'lib/agent/sheet-copy.ts', 'components/oxwal/SheetCard.tsx', 'lib/oxwal/use-oxwal-thread.ts', 'components/oxwal/OxWalComposer.tsx', 'app/api/wallet/batches/sheet/route.ts'];
+  const files = ['lib/batch/ingest.ts', 'lib/batch/file.ts', 'lib/server/zeke-batch-sheet.ts', 'lib/agent/sheet-copy.ts', 'components/oxwal/SheetCard.tsx', 'components/oxwal/OxWalComposer.tsx', 'app/api/wallet/batches/sheet/route.ts'];
   for (const file of files) {
     const code = src(file);
     assert.doesNotMatch(code, /BATCH_PAYOUT|proposeBatchPayout|\/api\/batches|\/api\/proposals|stepUp|step-up|sessionStorage|stashBatchDraft|takeBatchDraft/, file);
   }
   const hook = src('lib/oxwal/use-oxwal-thread.ts');
-  assert.match(hook, /\/api\/wallet\/batches\/sheet/);
-  assert.match(hook, /\/api\/wallet\/batches['"`]/, 'preparing goes through the wallet batch flow');
-  assert.match(hook, /Idempotency|key:/);
+  const mine = hook.slice(hook.indexOf('const attachSheet'), hook.indexOf('const approveInChat'));
+  assert.ok(mine.length > 500, 'the sheet actions are found');
+  assert.doesNotMatch(mine, /BATCH_PAYOUT|proposeBatchPayout|\/api\/proposals|\/api\/oxwal|stepUp|sessionStorage|submitPrompt/, 'the sheet actions use only the sheet reader and the wallet batch flow');
+  assert.match(mine, /sendSheet</);
+  assert.match(mine, /'\/api\/wallet\/batches'/, 'preparing goes through the wallet batch flow');
+  assert.match(mine, /key: intentKey/, 'with the sheet’s own intent id, so pressing twice makes one batch');
+  assert.match(src('lib/batch/file.ts'), /\/api\/wallet\/batches\/sheet/);
+  const history = hook.slice(hook.indexOf('const history = thread'), hook.indexOf('.slice(-historyTurns)'));
+  assert.match(history, /item\.kind === 'user' \|\| item\.kind === 'assistant'/, 'only user and assistant turns go back to the model: a sheet never does');
 });

@@ -4,51 +4,56 @@ import { useRef, useState } from 'react';
 import Link from 'next/link';
 import { Download, FileSpreadsheet, Plus, Upload } from 'lucide-react';
 
-import { BATCH_MAX_PAYMENTS, SHEET_HEADER, recordsFromCsv, rowsFromRecords, type SheetRow } from '@/lib/batch/sheet';
-import { readSheetFile, sampleSheetCsv, SheetFileError } from '@/lib/batch/file';
+import { BATCH_MAX_PAYMENTS, type SheetRow } from '@/lib/batch/sheet';
+import { errorText, pastedSheet, readSheetFile, sampleSheetCsv, sendSheet, SheetFileError, type SheetPayload } from '@/lib/batch/file';
 import { QuietButton } from '../transfer/ui';
 
 /**
  * Step 1 of a batch (v2 brief 5.6): get the rows in. A file, rows pasted from a
- * spreadsheet, or one blank row to type into. Nothing leaves the browser here:
- * the rows go to the review step, where Splash matches each one to a recipient
- * the business saved. A sheet names people; it never adds one.
+ * spreadsheet, or one blank row to type into. The server reads a file or pasted
+ * rows by fixed rules (lib/batch/ingest.ts; the same reader Zeke uses), then the
+ * rows go to the review step, where Splash matches each one to a recipient the
+ * business saved. A sheet names people; it never adds one, and nothing in a cell
+ * is read as an instruction.
  */
-export default function StepUpload({ onRows }: { onRows: (rows: SheetRow[]) => void }) {
+export default function StepUpload({ onRows }: { onRows: (rows: SheetRow[], notes: string[]) => void }) {
   const [error, setError] = useState<string | null>(null);
   const [pasted, setPasted] = useState('');
   const [busy, setBusy] = useState(false);
   const input = useRef<HTMLInputElement>(null);
 
-  async function onFile(file: File) {
+  async function send(payload: SheetPayload) {
     setError(null);
     setBusy(true);
     try {
-      onRows(await readSheetFile(file));
+      const answer = await sendSheet<{ rows?: SheetRow[]; notes?: Array<{ text: string }> }>(payload, { review: false });
+      if (answer.ok && Array.isArray(answer.body?.rows) && answer.body.rows.length > 0) {
+        onRows(answer.body.rows, (answer.body.notes ?? []).map((n) => n.text));
+      } else {
+        setError(errorText(answer, 'That sheet could not be read just now. Nothing was sent.'));
+      }
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function onFile(file: File) {
+    try {
+      await send(await readSheetFile(file));
     } catch (e) {
       setError(e instanceof SheetFileError ? e.message : 'That file could not be read. Upload a .csv or .xlsx file with the columns recipient, amount and reference.');
     } finally {
-      setBusy(false);
       if (input.current) input.current.value = '';
     }
   }
 
-  function usePasted() {
-    setError(null);
+  async function readPasted() {
     const text = pasted.trim();
     if (!text) {
       setError('Paste the rows first, with a header line: recipient, amount, reference.');
       return;
     }
-    // Rows copied from a spreadsheet are tab-separated; a CSV is comma-separated.
-    const csv = text.includes('\t') && !text.split('\n')[0].includes(',') ? text.replace(/\t/g, ',') : text;
-    const withHeader = /^\s*(recipient|name|payee|supplier|vendor|beneficiary|address|wallet|to)\b/i.test(csv) ? csv : `${SHEET_HEADER}\n${csv}`;
-    const rows = rowsFromRecords(recordsFromCsv(withHeader));
-    if (rows.length === 0) {
-      setError('No rows were found in what you pasted.');
-      return;
-    }
-    onRows(rows);
+    await send(pastedSheet(text));
   }
 
   function downloadSample() {
@@ -89,8 +94,8 @@ export default function StepUpload({ onRows }: { onRows: (rows: SheetRow[]) => v
           className="mt-1.5 w-full rounded-xl border border-[#326273]/25 bg-white p-3 font-mono text-[13px] leading-5 text-[#0c3e48] outline-none placeholder:text-[#326273] focus:border-[#0d6370] focus:ring-2 focus:ring-[#0d6370]/20"
         />
         <div className="mt-2 flex flex-wrap gap-2">
-          <QuietButton type="button" onClick={usePasted}><FileSpreadsheet className="h-4 w-4" aria-hidden="true" />Use these rows</QuietButton>
-          <QuietButton type="button" onClick={() => onRows([{ line: 1, recipient: '', amount: '', reference: '' }])}><Plus className="h-4 w-4" aria-hidden="true" />Start with one blank row</QuietButton>
+          <QuietButton type="button" onClick={() => void readPasted()} disabled={busy}><FileSpreadsheet className="h-4 w-4" aria-hidden="true" />Use these rows</QuietButton>
+          <QuietButton type="button" onClick={() => onRows([{ line: 1, recipient: '', amount: '', reference: '' }], [])}><Plus className="h-4 w-4" aria-hidden="true" />Start with one blank row</QuietButton>
           <QuietButton type="button" onClick={downloadSample}><Download className="h-4 w-4" aria-hidden="true" />Download a sample sheet</QuietButton>
         </div>
       </div>

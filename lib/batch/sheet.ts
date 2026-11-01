@@ -32,13 +32,13 @@ export type SheetRow = {
 
 export type SheetProblem = { line: number; code: 'recipient_missing' | 'recipient_too_long' | 'bad_amount' | 'reference_too_long' | 'currency_marker' };
 
-const HEADER_ALIASES: Record<'recipient' | 'amount' | 'reference', string[]> = {
+export const HEADER_ALIASES: Record<'recipient' | 'amount' | 'reference', string[]> = {
   recipient: ['recipient', 'name', 'payee', 'supplier', 'vendor', 'beneficiary', 'address', 'wallet', 'to'],
   amount: ['amount', 'amountusdc', 'usdc', 'value', 'total', 'pay'],
   reference: ['reference', 'ref', 'purpose', 'memo', 'note', 'description', 'invoice'],
 };
 
-const norm = (key: string) => key.toLowerCase().replace(/[^a-z0-9]/g, '');
+export const norm = (key: string) => key.toLowerCase().replace(/[^a-z0-9]/g, '');
 
 /** Control and bidirectional-override characters have no place in a name a person approves. */
 const UNSAFE = /[\u0000-\u001f\u007f​-‏‪-‮⁦-⁩﻿]/g;
@@ -138,6 +138,24 @@ export function recordsFromCsv(text: string): Array<Record<string, string>> {
   if (row.some((c) => c.trim() !== '')) rows.push(row);
   const [header = [], ...body] = rows;
   return body.map((r) => Object.fromEntries(header.map((h, i) => [h.trim(), r[i] ?? ''])));
+}
+
+/**
+ * Whether pasted text is rows of a sheet and not a sentence: at least two
+ * lines, most of them split into columns by tabs, commas or semicolons, and a
+ * number somewhere. Pasted rows go to the sheet reader on the server, never
+ * into the model's message.
+ */
+export function looksLikeSheet(text: string): boolean {
+  const lines = String(text ?? '')
+    .split(/\r?\n/)
+    .map((l) => l.trim())
+    .filter(Boolean);
+  if (lines.length < 2 || lines.length > 1000) return false;
+  const split = (l: string) => (l.includes('\t') ? l.split('\t') : l.includes(';') && !l.includes(',') ? l.split(';') : l.split(','));
+  const columned = lines.filter((l) => split(l).length >= 2);
+  if (columned.length < Math.max(2, Math.ceil(lines.length * 0.7))) return false;
+  return lines.some((l) => split(l).some((cell) => /^\s*[^\s\d]{0,4}\s?\d[\d,.\s]*\s?[A-Za-z]{0,4}\s*$/.test(cell)));
 }
 
 /** The sheet a person can download to start from: three columns, no example of a payee Splash does not hold. */

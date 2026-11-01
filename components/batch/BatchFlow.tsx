@@ -7,7 +7,6 @@ import { Check, CircleHelp, Wallet } from 'lucide-react';
 import { useTeamAccess } from '@/components/team/useTeamAccess';
 import { BATCH_MAX_PAYMENTS, type SheetRow } from '@/lib/batch/sheet';
 import { walletActions } from '@/lib/team/view';
-import { takeBatchDraft } from '@/lib/batch-parse';
 import { formatUsdc } from '@/lib/fees/copy';
 import LocalTime from '../LocalTime';
 import { call, errorText, newBatchKey, type BatchReview, type BatchView, type Context, type SigningView, type StepNumber } from './api';
@@ -47,7 +46,7 @@ export default function BatchFlow() {
   const [stale, setStale] = useState(false);
   const [checking, setChecking] = useState(false);
   const [reviewError, setReviewError] = useState<string | null>(null);
-  const [draftNote, setDraftNote] = useState<string | null>(null);
+  const [readNotes, setReadNotes] = useState<string[]>([]);
   const [confirmed, setConfirmed] = useState({ duplicates: false, newPayees: false });
   // Each review carries a number; only the latest one is believed, and an edit retires every review still running.
   const reviewSeq = useRef(0);
@@ -101,8 +100,8 @@ export default function BatchFlow() {
   }, []);
 
   const takeRows = useCallback(
-    (next: SheetRow[]) => {
-      setDraftNote(null);
+    (next: SheetRow[], notes: string[] = []) => {
+      setReadNotes(notes);
       const numbered = renumber(next);
       setRows(numbered);
       setReview(null);
@@ -114,22 +113,6 @@ export default function BatchFlow() {
     },
     [go, runReview],
   );
-
-  // A sheet Zeke's composer prepared: the same rows, checked the same way (prepared, never sent).
-  useEffect(() => {
-    const params = new URLSearchParams(window.location.search);
-    if (params.get('draft') !== '1') return;
-    const draft = takeBatchDraft();
-    if (!draft || draft.rows.length === 0) return;
-    // A draft is capped like a file: a very long one would put thousands of inputs on the page.
-    if (draft.rows.length > BATCH_MAX_PAYMENTS + 5) {
-      const note = `That draft has ${draft.rows.length} rows. A batch is at most ${BATCH_MAX_PAYMENTS} payments: split it into smaller batches.`;
-      const timer = window.setTimeout(() => setDraftNote(note), 0);
-      return () => window.clearTimeout(timer);
-    }
-    const timer = window.setTimeout(() => takeRows(draft.rows.map((r) => ({ line: 0, recipient: r.address && /^0x/i.test(r.address) ? r.address : r.name || r.address, amount: r.amount, reference: r.purpose }))), 0);
-    return () => window.clearTimeout(timer);
-  }, [takeRows]);
 
   /** Any change to the rows retires the review still running and the confirmations given for the old rows. */
   const changed = () => {
@@ -177,6 +160,7 @@ export default function BatchFlow() {
     setChecking(false);
     setConfirmed({ duplicates: false, newPayees: false });
     setRows([]);
+    setReadNotes([]);
     setReview(null);
     setStale(false);
     setMade(null);
@@ -276,10 +260,17 @@ export default function BatchFlow() {
             <>
               {step === 1 ? (
                 <div className="space-y-8">
-                  {draftNote ? <p role="alert" className="text-sm font-medium text-[var(--error)]">{draftNote}</p> : null}
                   <StepUpload onRows={takeRows} />
                   <RecentBatches batches={batches} onOpen={(b) => void open(b)} />
                 </div>
+              ) : null}
+              {step === 2 && readNotes.length > 0 ? (
+                <ul role="status" className="mb-4 space-y-1 rounded-xl bg-[#F6F0ED] p-3 text-sm leading-6 text-[#1F4452]">
+                  {readNotes.slice(0, 8).map((note) => (
+                    <li key={note}>{note}</li>
+                  ))}
+                  {readNotes.length > 8 ? <li>And {readNotes.length - 8} more changes to cells.</li> : null}
+                </ul>
               ) : null}
               {step === 2 ? (
                 <StepReview rows={rows} review={review} stale={stale} checking={checking} error={reviewError} onEdit={edit} onRemove={remove} onAdd={add} onCheck={() => void runReview(rows)} onRemoveProblems={removeProblems} confirmed={confirmed} onConfirm={(change) => setConfirmed((c) => ({ ...c, ...change }))} back={restart} next={() => go(3)} />

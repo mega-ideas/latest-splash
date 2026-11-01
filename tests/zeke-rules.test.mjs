@@ -500,15 +500,15 @@ test('an invoice cannot overwrite a saved recipient\'s bank details, and nothing
   assert.ok(['READY_TO_CONFIRM', 'NEEDS_MORE'].includes(intake.status), 'a proposal, never a save');
 });
 
-test('an uploaded sheet goes to the batch desk as rows, never into the model\'s message', () => {
+test('an uploaded sheet goes to the sheet reader on the server, never into the model\'s message', () => {
   const composer = readFileSync(new URL('../components/oxwal/OxWalComposer.tsx', import.meta.url), 'utf8');
   const widget = readFileSync(new URL('../components/FloatingCopilot.tsx', import.meta.url), 'utf8');
-  // The composer hands a parsed sheet to onFilePrepared and returns before onSubmit.
-  assert.match(composer, /if \(hasBatch && onFilePrepared && attached\) \{\s*onFilePrepared\(attached\);\s*clearAttached\(\);\s*return;/);
-  // The widget stashes the rows for the batch desk (sessionStorage), it does not prompt Zeke with them.
-  assert.match(widget, /function handleBatchPrepared\(batch: ParsedBatch\) \{\s*stashBatchDraft\(batch\);/);
-  const handler = widget.slice(widget.indexOf('function handleBatchPrepared'), widget.indexOf('}', widget.indexOf('function handleBatchPrepared')));
-  assert.doesNotMatch(handler, /submitPrompt|fetch\(/);
+  // The composer hands a file, or pasted rows, to onSheet and returns before onSubmit.
+  assert.match(composer, /if \(onSheet && looksLikeSheet\(value\)\) \{\s*onSheet\(pastedSheet\(value\)\);\s*onChange\(''\);\s*return;/);
+  assert.match(composer, /if \(onSheet\) onSheet\(payload\)/);
+  // The widget shows the sheet in its own thread: it does not prompt Zeke with it and keeps no rows in browser storage.
+  assert.match(widget, /onSheet=\{\(sheet\) => void attachSheet\(sheet\)\}/);
+  assert.doesNotMatch(widget, /stashBatchDraft|sessionStorage|draft=1/);
 });
 
 // ── 8. Zeke's words render as text, not markup ─────────────────────────────

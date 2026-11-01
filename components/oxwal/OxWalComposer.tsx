@@ -5,17 +5,16 @@ import { useId, useRef, useState } from 'react';
 import {
   ArrowRight,
   ArrowUpRight,
-  FileSpreadsheet,
   FileText,
   ImageIcon,
   Mic,
   Paperclip,
   Pencil,
   Search,
-  X,
 } from 'lucide-react';
 
-import { parseBatchFile, type ParsedBatch } from '@/lib/batch-parse';
+import { looksLikeSheet } from '@/lib/batch/sheet';
+import { pastedSheet, readSheetFile, SheetFileError, type SheetPayload } from '@/lib/batch/file';
 import { networkChip } from '@/lib/network-label';
 import { cn } from '@/lib/utils';
 
@@ -30,9 +29,12 @@ type OxWalComposerProps = {
   onChange: (value: string) => void;
   onSubmit: () => void;
   onChipSubmit?: (prompt: string) => void;
-  /** Called when the operator prepares an uploaded batch. Zeke prepares;
-   *  the human approves downstream. No-op default keeps call sites safe. */
-  onFilePrepared?: (batch: ParsedBatch) => void;
+  /**
+   * Called with a payout sheet: a file the person attached, or rows they pasted.
+   * The server reads it and the thread shows it as a table to check (Zeke
+   * prepares; the owners approve). A sheet is never put into the message.
+   */
+  onSheet?: (sheet: SheetPayload) => void;
   chips?: OxWalComposerChip[];
   disabled?: boolean;
   title?: string;
@@ -68,7 +70,7 @@ export default function OxWalComposer({
   onChange,
   onSubmit,
   onChipSubmit,
-  onFilePrepared,
+  onSheet,
   chips = [],
   disabled = false,
   title,
@@ -86,48 +88,36 @@ export default function OxWalComposer({
   // nothing here takes a dropped file, so no default copy promises either.
   const fieldPlaceholder = placeholder ?? `Ask ${assistantName}, or attach a payout sheet`;
   const fileInputRef = useRef<HTMLInputElement>(null);
-  const [attached, setAttached] = useState<ParsedBatch | null>(null);
   const [parsing, setParsing] = useState(false);
   const [parseError, setParseError] = useState<string | null>(null);
 
   const hasValue = value.trim().length > 0;
-  const hasBatch = !!attached && attached.rows.length > 0;
 
   async function handleFile(file: File) {
     setParsing(true);
     setParseError(null);
     try {
-      const batch = await parseBatchFile(file);
-      if (batch.rows.length === 0) {
-        setParseError('No payable rows found. Check the file has recipient and amount columns.');
-        setAttached(null);
-      } else {
-        setAttached(batch);
-      }
+      const payload = await readSheetFile(file);
+      if (onSheet) onSheet(payload);
     } catch (error) {
-      setParseError(error instanceof Error ? error.message : 'Could not read that file.');
-      setAttached(null);
+      setParseError(error instanceof SheetFileError ? error.message : 'Could not read that file.');
     } finally {
       setParsing(false);
+      if (fileInputRef.current) fileInputRef.current.value = '';
     }
   }
 
-  function clearAttached() {
-    setAttached(null);
-    setParseError(null);
-    if (fileInputRef.current) fileInputRef.current.value = '';
-  }
-
   function submit() {
-    if (hasBatch && onFilePrepared && attached) {
-      onFilePrepared(attached);
-      clearAttached();
+    // Rows pasted from a spreadsheet are a sheet, not a question: they go to the sheet reader, never to the model.
+    if (onSheet && looksLikeSheet(value)) {
+      onSheet(pastedSheet(value));
+      onChange('');
       return;
     }
     onSubmit();
   }
 
-  const primaryLabel = hasBatch ? 'Prepare batch' : 'Prepare';
+  const primaryLabel = 'Prepare';
 
   const fileInput = (
     <input
@@ -142,35 +132,18 @@ export default function OxWalComposer({
     />
   );
 
-  /* Attached-batch pill: filename · N rows · corridor, or why it failed. */
-  const attachment = (hasBatch || parsing || parseError) && (
+  /* Reading the file, or why it could not be read. */
+  const attachment = (parsing || parseError) && (
     <div className={variant === 'bar' ? 'px-3 pt-2.5' : 'px-3 pt-3'}>
       {parsing && (
-        <div className="inline-flex items-center gap-2 rounded-[var(--r-md)] border border-[var(--line)] bg-[var(--surface-2)] px-3 py-1.5 text-[13px] font-medium text-[var(--slate)]">
-          <span className="h-3 w-3 animate-spin rounded-full border-2 border-[var(--teal)] border-t-transparent" aria-hidden="true" />
+        <div role="status" className="inline-flex items-center gap-2 rounded-[var(--r-md)] border border-[var(--line)] bg-[var(--surface-2)] px-3 py-1.5 text-[13px] font-medium text-[var(--slate)]">
+          <span className="h-3 w-3 animate-spin rounded-full border-2 border-[var(--teal)] border-t-transparent motion-reduce:animate-none" aria-hidden="true" />
           Reading file…
         </div>
       )}
       {parseError && !parsing && (
         <div role="alert" className="rounded-[var(--r-md)] border border-[var(--error)]/40 bg-[var(--error-bg)] px-3 py-1.5 text-[13px] font-medium text-[var(--error)]">
           {parseError}
-        </div>
-      )}
-      {hasBatch && !parsing && attached && (
-        <div className="inline-flex max-w-full items-center gap-2 rounded-[var(--r-md)] border border-[var(--teal)]/35 bg-[var(--ok-bg)] px-3 py-1.5">
-          <FileSpreadsheet className="h-4 w-4 shrink-0 text-[#326273]" aria-hidden="true" />
-          <span className="truncate text-[13px] font-medium text-[var(--ink)]">{attached.fileName}</span>
-          <span className="shrink-0 font-mono text-[13px] font-semibold text-[var(--slate)]">
-            {attached.rows.length} {attached.rows.length === 1 ? 'row' : 'rows'} · USD→{attached.corridor}
-          </span>
-          <button
-            type="button"
-            aria-label="Remove attached file"
-            onClick={clearAttached}
-            className="grid h-6 w-6 shrink-0 place-items-center rounded-full text-[var(--slate)] transition hover:bg-[var(--teal)]/15 hover:text-[var(--ink)]"
-          >
-            <X className="h-3 w-3" />
-          </button>
         </div>
       )}
     </div>
@@ -219,11 +192,11 @@ export default function OxWalComposer({
               // Enter asks; Shift+Enter is a new line, as in any chat.
               if (event.key === 'Enter' && !event.shiftKey && !event.nativeEvent.isComposing) {
                 event.preventDefault();
-                if (!disabled && (hasValue || hasBatch)) submit();
+                if (!disabled && (hasValue)) submit();
               }
             }}
             disabled={disabled}
-            placeholder={hasBatch ? 'Add a note for approval (optional)' : fieldPlaceholder}
+            placeholder={fieldPlaceholder}
             className="block w-full resize-none border-0 bg-transparent px-[18px] pb-1.5 pt-4 text-base font-medium text-[var(--ink)] outline-none placeholder:text-[var(--ink-muted)] disabled:cursor-not-allowed"
           />
           <div className="flex flex-wrap items-center justify-between gap-3 px-3 pb-3 pt-1">
@@ -249,10 +222,10 @@ export default function OxWalComposer({
             </div>
             <button
               type="submit"
-              disabled={disabled || (!hasValue && !hasBatch)}
+              disabled={disabled || (!hasValue)}
               className="inline-flex h-11 shrink-0 items-center gap-2 rounded-[var(--r-md)] bg-[#0c3e48] px-4 text-sm font-bold text-white transition hover:bg-[#0d6370] active:translate-y-px disabled:cursor-not-allowed disabled:opacity-40 focus-ring"
             >
-              {hasBatch ? 'Prepare batch' : `Ask ${assistantName}`}
+              {`Ask ${assistantName}`}
               <ArrowRight className="h-4 w-4" aria-hidden="true" />
             </button>
           </div>
@@ -286,7 +259,7 @@ export default function OxWalComposer({
               value={value}
               onChange={(event) => onChange(event.target.value)}
               disabled={disabled}
-              placeholder={hasBatch ? 'Add a note for approval (optional)' : fieldPlaceholder}
+              placeholder={fieldPlaceholder}
               className="min-w-0 flex-1 bg-transparent py-2 text-[15px] font-medium text-[var(--ink)] outline-none placeholder:text-[var(--ink-muted)] disabled:cursor-not-allowed"
             />
             <button
@@ -301,8 +274,8 @@ export default function OxWalComposer({
             </button>
             <button
               type="submit"
-              aria-label={hasBatch ? 'Prepare batch for approval' : `Send to ${assistantName}`}
-              disabled={disabled || (!hasValue && !hasBatch)}
+              aria-label={`Send to ${assistantName}`}
+              disabled={disabled || (!hasValue)}
               className="grid h-10 w-10 shrink-0 place-items-center rounded-[var(--r-md)] bg-[#0c3e48] text-white transition hover:bg-[#0d6370] disabled:cursor-not-allowed disabled:opacity-40 focus-ring"
             >
               <ArrowRight className="h-[18px] w-[18px]" aria-hidden="true" />
@@ -354,39 +327,7 @@ export default function OxWalComposer({
           </span>
         </div>
 
-        {/* Attached-batch pill: filename · N rows · corridor. */}
-        {(hasBatch || parsing || parseError) && (
-          <div className="px-3 pt-2.5">
-            {parsing && (
-              <div className="inline-flex items-center gap-2 rounded-[var(--r-md)] border border-[var(--line)] bg-[var(--surface-2)] px-3 py-1.5 text-[13px] font-medium text-[var(--slate)]">
-                <span className="h-3 w-3 animate-spin rounded-full border-2 border-[var(--teal)] border-t-transparent" aria-hidden="true" />
-                Reading file…
-              </div>
-            )}
-            {parseError && !parsing && (
-              <div className="rounded-[var(--r-md)] border border-[var(--error)]/40 bg-[var(--error-bg)] px-3 py-1.5 text-[13px] font-medium text-[var(--error)]">
-                {parseError}
-              </div>
-            )}
-            {hasBatch && !parsing && attached && (
-              <div className="inline-flex max-w-full items-center gap-2 rounded-[var(--r-md)] border border-[var(--teal)]/35 bg-[var(--ok-bg)] px-3 py-1.5">
-                <FileSpreadsheet className="h-4 w-4 shrink-0 text-[#326273]" aria-hidden="true" />
-                <span className="truncate text-[13px] font-medium text-[var(--ink)]">{attached.fileName}</span>
-                <span className="shrink-0 font-mono text-[13px] font-semibold text-[var(--slate)]">
-                  {attached.rows.length} {attached.rows.length === 1 ? 'row' : 'rows'} · USD→{attached.corridor}
-                </span>
-                <button
-                  type="button"
-                  aria-label="Remove attached file"
-                  onClick={clearAttached}
-                  className="grid h-4 w-4 shrink-0 place-items-center rounded-full text-[var(--slate)] transition hover:bg-[var(--teal)]/15 hover:text-[var(--ink)]"
-                >
-                  <X className="h-3 w-3" />
-                </button>
-              </div>
-            )}
-          </div>
-        )}
+        {attachment}
 
         {/* Input row. */}
         <div className={cn('flex items-center gap-2 px-2.5 py-2', compact && 'py-1.5')}>
@@ -409,7 +350,7 @@ export default function OxWalComposer({
             value={value}
             onChange={(event) => onChange(event.target.value)}
             disabled={disabled}
-            placeholder={hasBatch ? 'Add a note for approval (optional)' : fieldPlaceholder}
+            placeholder={fieldPlaceholder}
             className={cn(
               'min-w-0 flex-1 bg-transparent text-left font-medium text-[var(--ink)] outline-none placeholder:text-[#326273]/90 disabled:cursor-not-allowed',
               compact ? 'text-[13px]' : 'text-sm',
@@ -430,8 +371,8 @@ export default function OxWalComposer({
 
           <button
             type="submit"
-            aria-label={hasBatch ? 'Prepare batch for approval' : `Prepare request for ${assistantName}`}
-            disabled={disabled || (!hasValue && !hasBatch)}
+            aria-label={`Prepare request for ${assistantName}`}
+            disabled={disabled || (!hasValue)}
             className={cn(
               'inline-flex shrink-0 items-center gap-1.5 rounded-[var(--r-md)] bg-[var(--ink)] px-3.5 font-medium text-[var(--surface)] ring-1 ring-[var(--teal)]/40 shadow-[0_4px_0_var(--slate)] transition hover:bg-[var(--slate)] active:translate-y-0.5 active:shadow-[0_2px_0_var(--slate)] disabled:cursor-not-allowed disabled:opacity-40 disabled:shadow-none',
               compact ? 'h-9 text-[13px]' : 'h-10 text-sm',
@@ -443,7 +384,7 @@ export default function OxWalComposer({
         </div>
       </form>
 
-      {chips.length > 0 && !hasBatch && (
+      {chips.length > 0 && (
         <div className={cn('mt-4 flex flex-wrap gap-2.5', compact && 'mt-3 gap-2')}>
           {chips.map((chip) => {
             const Icon = chipIcons[chip.icon ?? 'file'];
