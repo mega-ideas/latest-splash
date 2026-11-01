@@ -294,7 +294,7 @@ test('every call is to the signed-in person’s own business, and none names a b
   // A load that waits for the wallet is `useLoad(manage ? '/api/...' : null, ...)`: those addresses are read too.
   urls.push(...[...joined.matchAll(/\?\s*['"`](\/api\/[^'"`]+)['"`]\s*:\s*null/g)].map((m) => m[1]));
   assert.ok(urls.length >= 10, `found ${urls.length}`);
-  for (const url of urls) assert.match(url, /^\/api\/(wallet|settings|approvals|billing|team)\b|^\/api\/recipients$/, url);
+  for (const url of urls) assert.match(url, /^\/api\/(wallet|settings|approvals|billing|team|limits)\b|^\/api\/recipients$/, url);
   assert.doesNotMatch(joined, /orgId|accountId|businessWallet|\?(org|orgId|account|wallet)=/);
 });
 
