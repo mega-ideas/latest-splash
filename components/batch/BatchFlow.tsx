@@ -292,7 +292,7 @@ export default function BatchFlow() {
         <aside className="space-y-3" aria-label="This batch">
           <div className="rounded-2xl bg-[#0c3e48] p-4 text-white">
             <div className="font-mono text-[12px] font-bold uppercase tracking-[0.14em] text-white/80">This batch</div>
-            <div className="mt-2 text-xl font-extrabold">{made ? STATUS_WORDS[made.batch.status] : rows.length > 0 ? `${rows.length} ${rows.length === 1 ? 'row' : 'rows'}` : 'Not started'}</div>
+            <div className="mt-2 text-xl font-extrabold">{made ? statusWords(made.batch) : rows.length > 0 ? `${rows.length} ${rows.length === 1 ? 'row' : 'rows'}` : 'Not started'}</div>
             <dl className="mt-3 grid grid-cols-2 gap-3 border-t border-white/15 pt-3 text-sm">
               <div>
                 <dt className="font-mono text-[12px] uppercase tracking-[0.12em] text-white/75">You pay in</dt>
