@@ -19,9 +19,12 @@
  */
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
+import { registerHooks } from 'node:module';
 import test from 'node:test';
+import { fileURLToPath } from 'node:url';
 
 import { eq } from 'drizzle-orm';
+import ts from 'typescript';
 
 import { migratedDb } from './helpers/store-db.mjs';
 import * as schema from '../lib/db/schema.ts';
@@ -38,8 +41,30 @@ import {
 } from '../lib/server/team-invitations.ts';
 import { deliverInvitationEmail, resendInvitationEmail } from '../lib/server/invitation-email.ts';
 import { invitationEmail } from '../lib/team/invitation-email.ts';
-import { createResendTransport } from '../lib/auth/email-transport.ts';
+import { EmailDeliveryError, createResendTransport } from '../lib/auth/email-transport.ts';
 import { invitationLink, invitationPath, safeApproveReturn } from '../lib/approve/link.ts';
+
+registerHooks({
+  // Next's link component is CommonJS; hand over the component itself, as the bundler does. TSX is transpiled on load.
+  resolve(specifier, context, nextResolve) {
+    if (specifier === 'next/image' || specifier === 'next/link') {
+      const resolved = nextResolve(`${specifier}.js`, context);
+      return { ...resolved, url: `${resolved.url}?esm-shim` };
+    }
+    return nextResolve(specifier, context);
+  },
+  load(url, context, nextLoad) {
+    if (url.endsWith('?esm-shim')) {
+      const target = url.slice(0, -'?esm-shim'.length);
+      return { format: 'module', source: `import m from ${JSON.stringify(target)}; export default (m && m.default) || m;`, shortCircuit: true };
+    }
+    if (!url.startsWith('file:') || !url.endsWith('.tsx')) return nextLoad(url, context);
+    const { outputText } = ts.transpileModule(readFileSync(fileURLToPath(url), 'utf8'), {
+      compilerOptions: { jsx: ts.JsxEmit.ReactJSX, module: ts.ModuleKind.ESNext, target: ts.ScriptTarget.ES2022 },
+    });
+    return { format: 'module', source: outputText, shortCircuit: true };
+  },
+});
 
 const root = new URL('../', import.meta.url);
 const read = (path) => readFileSync(new URL(path, root), 'utf8');
@@ -69,14 +94,16 @@ async function seeded() {
 }
 
 /** A sender that records every message and can be made to fail. */
-function sender({ fail = false, name = 'resend' } = {}) {
+function sender({ fail = false, error = null, name = 'resend' } = {}) {
   const calls = [];
   const transport = {
     name,
     async sendVerification() {},
     async sendMessage(message) {
       calls.push(message);
-      if (fail) throw new Error(`provider said no (key ${KEY})`);
+      // `fail` is a refusal the provider answered (HTTP 422): the message did not go. `error` is any other thing that can happen to a request.
+      if (error) throw error;
+      if (fail) throw new EmailDeliveryError(`resend returned HTTP 422 for a notice message (key ${KEY})`, 422);
       return { providerRef: `msg_${calls.length}` };
     },
   };
@@ -110,7 +137,7 @@ async function logged(fn) {
 /* ── The words and the markup ──────────────────────────────────────────── */
 
 const LINK = 'https://app.splash.test/dashboard/invitation/inv_11111111-2222-3333-4444-555555555555';
-const content = (over = {}) => invitationEmail({ inviterName: 'Aisha Rahman', businessName: 'Acme Trading', link: LINK, expiresAt: new Date('2026-11-09T09:00:00Z'), ...over });
+const content = (over = {}) => invitationEmail({ inviterName: 'Aisha Rahman', businessName: 'Acme Trading', link: LINK, expiresAt: new Date('2026-11-09T09:00:00Z'), now: new Date('2026-11-02T09:00:00Z'), ...over });
 
 test('the email says who invited them, to which business, that it ends, and carries one link', () => {
   const { subject, text, html } = content();
@@ -629,4 +656,299 @@ test('the invitation page keeps the dashboard sign-in, hides the banner for itse
   assert.doesNotMatch(page, /useEffect\([^]*?\/accept/, 'no accept inside the effect that runs on open');
   assert.match(read('components/team/InvitationBanner.tsx'), /startsWith\('\/dashboard\/invitation\/'\)/);
   assert.match(read('app/dashboard/layout.tsx'), /redirect\(loginRedirectFor/, 'a signed-out visit signs in and comes back');
+});
+
+/* ── Review round: Splash must not carry a stranger's links or hidden text ─ */
+
+const withoutOwnLink = (part) => part.split(LINK).join('');
+/** Anything a mail client would turn into a link: a scheme, a bare domain, an address, an IPv4 number. */
+const LINKISH = /:\/\/|\bmailto:|\bjavascript:|@|\b[\w-]+(?:\.[\w-]+)*\.[a-z]{2,}\b|\b\d{1,3}(?:\.\d{1,3}){3}\b/i;
+
+test('a name that holds a link, a domain or an address cannot put a stranger\'s link in the subject, the text or the page', () => {
+  const { subject, text, html } = content({ inviterName: 'Aisha ... see https://evil.example/pay', businessName: 'Pay now: http://x.test' });
+  assert.equal((text.match(/https?:\/\//g) ?? []).length, 1, 'one link in the text, and it is ours');
+  assert.equal((html.match(/https?:\/\//g) ?? []).length, 1, 'one link in the page, and it is ours');
+  assert.equal((html.match(/href="/g) ?? []).length, 1);
+  assert.doesNotMatch(`${subject}\n${withoutOwnLink(text)}`, LINKISH);
+  assert.doesNotMatch(withoutOwnLink(html).replace(/<[^>]+>/g, ' '), LINKISH);
+  assert.equal(subject, 'Aisha ... see invited you to join Pay now on Splash', 'the words around the link stay');
+});
+
+test('bare domains, www names, addresses, other schemes, numeric hosts and look-alike full-width characters are all taken out of a name', () => {
+  for (const hostile of [
+    'evil.example/pay',
+    'www.evil.example',
+    'Bob evil.example',
+    'ops@evil.example',
+    'mailto:ops@evil.example',
+    'javascript:alert(1)',
+    'tel:+601234567',
+    'ftp://evil.example/x',
+    '10.0.0.5',
+    'http://192.168.0.1:8080/a?b=c#d',
+    'ｅｖｉｌ．ｅｘａｍｐｌｅ',
+    'evil。example',
+    'evil․example',
+    'e​vil.exam­ple',
+  ]) {
+    const { subject, text, html } = content({ inviterName: `Aisha ${hostile}`, businessName: `Acme ${hostile} Ltd` });
+    assert.doesNotMatch(`${subject}\n${withoutOwnLink(text)}`, LINKISH, hostile);
+    assert.doesNotMatch(withoutOwnLink(html).replace(/<[^>]+>/g, ' '), LINKISH, hostile);
+    assert.equal((text.match(/https?:\/\//g) ?? []).length, 1, hostile);
+    assert.match(subject, /Aisha/, 'the real words stay');
+    assert.match(subject, /Acme/, hostile);
+  }
+  // A name that is nothing but a link has no name left: the plain fallback is used, never an empty gap.
+  const bare = content({ inviterName: 'https://evil.example', businessName: 'evil.example' });
+  assert.equal(bare.subject, 'Someone invited you to join a business on Splash');
+  // Ordinary names are untouched: abbreviations with a space after the full stop, versions, and a hyphen.
+  const fine = content({ inviterName: 'Dr. Aisha O\'Neil-Rahman', businessName: 'Acme Trading Sdn. Bhd. v2.5' });
+  assert.equal(fine.subject, 'Dr. Aisha O\'Neil-Rahman invited you to join Acme Trading Sdn. Bhd. v2.5 on Splash');
+});
+
+test('invisible and direction-changing characters are taken out of a name, including the ones the first list missed', () => {
+  const sneaky = 'Ai⁠sha­ ؜᠎͏\u{e0041}\u{e0042}️ᅟㅤ‎Rah⁤man⁦x⁩';
+  const { subject, text, html } = content({ inviterName: sneaky, businessName: 'Ac⁡me‮ Trading' });
+  const INVISIBLE = /[\p{Cf}͏ᅟᅠㅤﾠ︀-️\u{e0100}-\u{e01ef}]/u;
+  for (const part of [subject, text, html]) assert.doesNotMatch(part, INVISIBLE);
+  assert.equal(subject, 'Aisha Rahman x invited you to join Acme Trading on Splash');
+});
+
+test('the email ends on a date and says how long is left now, so a resend on day five does not claim seven days', () => {
+  const first = content();
+  for (const part of [first.text, first.html]) {
+    assert.match(part, /ends on 9 November 2026 at 09:00 UTC/);
+    assert.match(part, /about 7 days left/);
+    assert.doesNotMatch(part, /from when it was sent/);
+  }
+  const dayFive = content({ now: new Date('2026-11-07T09:00:00Z') });
+  assert.match(dayFive.text, /ends on 9 November 2026 at 09:00 UTC/);
+  assert.match(dayFive.text, /about 2 days left/);
+  assert.doesNotMatch(dayFive.text, /7 days/);
+  assert.match(content({ now: new Date('2026-11-08T09:00:00Z') }).text, /about 1 day left/);
+  assert.match(content({ now: new Date('2026-11-09T01:00:00Z') }).text, /less than a day left/);
+});
+
+test('the page has a fixed 600px width for Outlook, a fluid one for phones, and asks for a light scheme', () => {
+  const { html } = content();
+  assert.match(html, /<table[^>]*\bwidth="600"[^>]*style="[^"]*width:100%;max-width:600px/);
+  assert.match(html, /<meta name="color-scheme" content="light">/);
+  assert.match(html, /<meta name="supported-color-schemes" content="light">/);
+  assert.match(html, /color-scheme:light/);
+});
+
+/* ── A send whose outcome is not known must not become a second email ──── */
+
+const timeout = () => Object.assign(new Error('The operation was aborted due to timeout'), { name: 'TimeoutError' });
+
+test('a send that timed out is not shown as failed and is not given a new provider key when the owner tries again', async () => {
+  const { client, db } = await seeded();
+  const { invitation } = await invite(db);
+  const slow = sender({ error: timeout() });
+  const first = await deliver(db, invitation.id, slow.transport);
+  assert.equal(first.ok, true);
+  assert.equal(first.sent, false);
+  assert.equal(first.state, 'sending', 'the provider may have the message: we do not know');
+  const row = await rowOf(db, invitation.id);
+  assert.equal(row.emailState, 'sending');
+  assert.equal(row.emailAttempts, 1);
+  const view = await ownerView(db);
+  assert.equal(view.delivery.state, 'sending');
+  assert.match(view.delivery.message, /may already be on its way/);
+  // At once, there is nothing to click and nothing is sent.
+  const soon = sender();
+  assert.equal((await resend(db, invitation.id, soon.transport, { now: at(30 * 1000) })).sent, false);
+  assert.equal(soon.calls.length, 0);
+  // After the window the owner is told it failed and may send again, and the provider is given the SAME key, so it can drop a repeat.
+  const stale = at(10 * 60 * 1000);
+  assert.equal((await ownerView(db, { now: stale })).delivery.state, 'failed');
+  const later = sender();
+  const again = await resend(db, invitation.id, later.transport, { now: stale });
+  assert.equal(again.sent, true);
+  assert.equal(later.calls[0].idempotencyKey, slow.calls[0].idempotencyKey, 'a lost answer is not a new message');
+  assert.equal((await rowOf(db, invitation.id)).emailAttempts, 1);
+  await client.close();
+});
+
+test('a network error is also an unknown outcome, while an answered refusal is a failure that gets a fresh key', async () => {
+  const { client, db } = await seeded();
+  const { invitation } = await invite(db);
+  const net = sender({ error: new TypeError('fetch failed') });
+  assert.equal((await deliver(db, invitation.id, net.transport)).state, 'sending');
+  await db.update(schema.teamInvitations).set({ emailState: 'failed' }).where(eq(schema.teamInvitations.id, invitation.id));
+  // A server error from the provider is not known to have been refused either.
+  const five = sender({ error: new EmailDeliveryError('resend returned HTTP 503 for a notice message', 503) });
+  await db.update(schema.teamInvitations).set({ emailState: null }).where(eq(schema.teamInvitations.id, invitation.id));
+  assert.equal((await resend(db, invitation.id, five.transport)).state, 'sending');
+  await db.update(schema.teamInvitations).set({ emailState: null, emailAttempts: 5 }).where(eq(schema.teamInvitations.id, invitation.id));
+  const refused = sender({ fail: true });
+  assert.equal((await resend(db, invitation.id, refused.transport)).state, 'failed');
+  assert.equal((await rowOf(db, invitation.id)).emailState, 'failed');
+  const fresh = sender();
+  await resend(db, invitation.id, fresh.transport);
+  assert.notEqual(fresh.calls[0].idempotencyKey, refused.calls[0].idempotencyKey, 'a refusal the provider answered is a new attempt next time');
+  await client.close();
+});
+
+test('a send that reached the provider but could not be recorded stays "sending", so a second click cannot send a second email', async () => {
+  const { client, db } = await seeded();
+  const { invitation } = await invite(db);
+  const { transport, calls } = sender();
+  // The record of the outcome fails: the update that would say "sent" throws once.
+  let armed = false;
+  const flaky = new Proxy(db, {
+    get(target, prop) {
+      const value = target[prop];
+      if (prop === 'update') {
+        return (...args) => {
+          if (armed) {
+            armed = false;
+            throw new Error('the database went away');
+          }
+          return value.apply(target, args);
+        };
+      }
+      return typeof value === 'function' ? value.bind(target) : value;
+    },
+  });
+  const arming = { ...transport, async sendMessage(message) {
+    const result = await transport.sendMessage(message);
+    armed = true;
+    return result;
+  } };
+  const out = await logged(async () => {
+    const r = await deliver(flaky, invitation.id, arming);
+    assert.equal(r.ok, true);
+    assert.equal(r.sent, true, 'the email did go');
+  });
+  assert.doesNotMatch(out, /free@example\.test|SECRETKEY/);
+  assert.equal((await rowOf(db, invitation.id)).emailState, 'sending', 'not "failed": the email is out there');
+  const stale = at(10 * 60 * 1000);
+  const again = sender();
+  await resend(db, invitation.id, again.transport, { now: stale });
+  assert.equal(again.calls[0].idempotencyKey, calls[0].idempotencyKey, 'the repeat carries the same key');
+  await client.close();
+});
+
+test('a withdrawal that lands while the email is being prepared stops the email', async () => {
+  const { client, db } = await seeded();
+  const { invitation } = await invite(db);
+  const { transport, calls } = sender();
+  // Withdraw just before the business name is read: after the claim, before the send.
+  const racing = new Proxy(db, {
+    get(target, prop) {
+      const value = target[prop];
+      if (prop !== 'select') return typeof value === 'function' ? value.bind(target) : value;
+      return (...args) => {
+        const builder = value.apply(target, args);
+        return new Proxy(builder, {
+          get(b, p) {
+            if (p !== 'from') return typeof b[p] === 'function' ? b[p].bind(b) : b[p];
+            return (table) => {
+              const query = b.from(table);
+              if (table !== schema.organizations) return query;
+              return { where: (cond) => ({ limit: async (n) => {
+                await withdrawInvitation(db, { orgId: 'acme', actorUserId: 'u-owner', invitationId: invitation.id, now: () => T0 });
+                return query.where(cond).limit(n);
+              } }) };
+            };
+          },
+        });
+      };
+    },
+  });
+  const r = await deliver(racing, invitation.id, transport);
+  assert.notEqual(r.sent, true);
+  assert.equal(calls.length, 0, 'a withdrawn invitation is not emailed');
+  assert.equal((await rowOf(db, invitation.id)).status, 'withdrawn');
+  await client.close();
+});
+
+test('when no email can be sent, the server log says so, with the invitation and the reason and nothing about the person', async () => {
+  const { client, db } = await seeded();
+  const a = (await invite(db)).invitation;
+  const noSender = await logged(async () => {
+    await deliver(db, a.id, null);
+  });
+  assert.match(noSender, new RegExp(`\\[invitation-email\\] .*${a.id}.*not sent.*no email sender`));
+  const b = (await invite(db, { email: 'other@example.test' })).invitation;
+  const badLink = await logged(async () => {
+    await deliver(db, b.id, sender().transport, { env: { NODE_ENV: 'production', NEXT_PUBLIC_APP_URL: 'http://localhost:3000' } });
+  });
+  assert.match(badLink, new RegExp(`\\[invitation-email\\] .*${b.id}.*not sent.*address`));
+  for (const out of [noSender, badLink]) assert.doesNotMatch(out, /example\.test|dashboard\/invitation\/|localhost|SECRETKEY/);
+  await client.close();
+});
+
+test('a failed send logs the invitation and the kind of failure, not the provider\'s words', async () => {
+  const { client, db } = await seeded();
+  const { invitation } = await invite(db);
+  const out = await logged(async () => {
+    await deliver(db, invitation.id, sender({ fail: true }).transport);
+  });
+  assert.match(out, new RegExp(`\\[invitation-email\\] .*${invitation.id}.*HTTP 422`));
+  assert.doesNotMatch(out, /SECRETKEY|free@example\.test/);
+  await client.close();
+});
+
+/* ── The page behind the link, and the owner's screen ──────────────────── */
+
+test('a person who joined the business another way is told they are on the team, not that they accepted', async () => {
+  const { client, db } = await seeded();
+  const { invitation } = await invite(db);
+  await db.insert(schema.memberships).values({ id: 'm-free', userId: 'u-free', orgId: 'acme', role: 'viewer' });
+  const seen = await invitationStatusFor(db, { userId: 'u-free', invitationId: invitation.id, now: () => T0 });
+  assert.equal(seen.ok, true);
+  assert.equal(seen.state, 'already_member');
+  assert.equal(seen.message, 'You are already on this team.');
+  assert.doesNotMatch(seen.message, /accepted/);
+  await client.close();
+});
+
+test('the invitation page offers the way to verify an email, and the form and the list never raise two alerts for one problem', () => {
+  const page = read('components/team/InvitationPage.tsx');
+  assert.match(page, /href="\/verify-email"/, 'an unverified person gets a way to verify');
+  const form = read('components/team/AddPersonForm.tsx');
+  assert.doesNotMatch(form, /\{mailProblem \? <Note tone="error">/, 'the open-invitations list carries the alert');
+  assert.match(form, /mailProblem/);
+});
+
+test('the owner screen and the invitation page render: sent, failed, not set up, sending, a Finance lead\'s view, and the page that waits', async () => {
+  const { createElement } = await import('react');
+  const { renderToStaticMarkup } = await import('react-dom/server');
+  const { default: OpenInvitations } = await import('../components/team/OpenInvitations.tsx');
+  const { default: InvitationPage } = await import('../components/team/InvitationPage.tsx');
+  const base = { id: 'inv_1', email: 'free@example.test', role: 'maker', invitedByName: 'Aisha Rahman', createdAt: T0.toISOString(), expiresAt: '2026-11-09T09:00:00.000Z', canWithdraw: true };
+  const delivery = (state, canResend, message) => ({ state, sentAt: state === 'sent' ? T0.toISOString() : null, canResend, message });
+  const render = (d) => renderToStaticMarkup(createElement(OpenInvitations, { invitations: [{ ...base, delivery: d }], onChanged: () => {} }));
+
+  const sent = render(delivery('sent', false, 'Email sent'));
+  assert.match(sent, /Email sent/);
+  assert.doesNotMatch(sent, /role="alert"|Send the email again/);
+
+  const failed = render(delivery('failed', true, 'We could not send the email. The invitation is still waiting for them. Try sending the email again.'));
+  assert.match(failed, /role="alert"[^>]*>We could not send the email\./);
+  assert.match(failed, /Send the email again/);
+
+  const notSetUp = render(delivery('not_configured', true, 'No email was sent. Email is not set up for Splash, so this invitation is waiting in the app only. They will see it when they sign in with this email address.'));
+  assert.match(notSetUp, /role="alert"[^>]*>No email was sent\./);
+
+  const unsure = render(delivery('sending', false, 'The email may already be on its way. If it has not arrived in a few minutes, you will be able to send it again.'));
+  assert.doesNotMatch(unsure, /role="alert"|Send the email again/);
+  assert.match(unsure, /may already be on its way/);
+
+  const lead = render(delivery('failed', false, 'We could not send the email. The invitation is still waiting for them. Try sending the email again.'));
+  assert.match(lead, /An owner can send the email\./);
+  assert.doesNotMatch(lead, /Send the email again/);
+
+  const waiting = renderToStaticMarkup(createElement(InvitationPage, { invitationId: 'inv_1' }));
+  assert.match(waiting, /Opening your invitation/);
+  assert.doesNotMatch(waiting, /Accept the invitation/, 'nothing is offered, and nothing is accepted, before the invitation has been read');
+});
+
+test('the abuse limits that remain are written down: the open cap, the team-change limit, and that there is no per-sender limit', () => {
+  const docs = read('docs/v2/phase3-team-roles.md');
+  assert.match(docs, /25 open invitations/);
+  assert.match(docs, /60 team changes an hour for one person and 200 for one business/);
+  assert.match(docs, /withdraw the invitation and send a new one/);
 });
