@@ -154,7 +154,7 @@ test('the day-before notice says what will be paid, when, and how to skip or sto
   assert.match(text, /3 payments, 1,250\.00 USDC/);
   assert.match(text, /16:00 UTC on 3 Nov/);
   assert.match(text, /Skip this run/);
-  assert.match(text, /Stop the schedule/);
+  assert.match(text, /Stop schedule/, 'the notice names the button as the app labels it');
   assert.match(text, /Nothing is paid before 16:00 UTC on 3 Nov/);
 });
 
