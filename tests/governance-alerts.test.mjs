@@ -362,7 +362,7 @@ async function withDb(run) {
 
 /** acme: alice (owner, verified WhatsApp), bob (owner, UNVERIFIED number),
  *  carol (checker, not an owner, verified number). northwind: dave (owner, no
- *  channel). erin owns both orgs. */
+ *  channel). erin is a second owner at acme (a person belongs to ONE business, migration 0074). */
 async function seedOwners(client) {
   await client.exec(`
     INSERT INTO users (id, email, name, email_verified_at) VALUES
@@ -376,8 +376,7 @@ async function seedOwners(client) {
       ('m_bob', 'u_bob', 'acme', 'admin'),
       ('m_carol', 'u_carol', 'acme', 'checker'),
       ('m_dave', 'u_dave', 'northwind', 'admin'),
-      ('m_erin_a', 'u_erin', 'acme', 'admin'),
-      ('m_erin_n', 'u_erin', 'northwind', 'admin');
+      ('m_erin_a', 'u_erin', 'acme', 'admin');
     INSERT INTO approver_channels (id, org_id, user_id, whatsapp_e164, verified_at) VALUES
       ('ac_alice', 'acme', 'u_alice', '+60102651678', now()),
       ('ac_bob', 'acme', 'u_bob', '+60102651679', NULL),
@@ -439,7 +438,7 @@ test('a pending announcement is recorded once and reaches every owner of every o
     const rows = await deliveryRows(client);
     const by = (channel) => rows.filter((r) => r.channel === channel).map((r) => r.user_id);
     assert.deepEqual(by('in_app'), ['u_alice', 'u_bob', 'u_dave', 'u_erin']);
-    assert.deepEqual(by('email'), ['u_alice', 'u_bob', 'u_dave', 'u_erin'], 'erin owns two orgs and is told once');
+    assert.deepEqual(by('email'), ['u_alice', 'u_bob', 'u_dave', 'u_erin'], 'every owner is told once, erin included');
     assert.deepEqual(by('whatsapp'), ['u_alice'], 'never to an unverified number, never to a non-owner');
     assert.ok(rows.every((r) => r.status === 'sent'));
 
