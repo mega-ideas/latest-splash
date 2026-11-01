@@ -78,9 +78,21 @@ select count(*) from audit_anchors;
 select count(*) from login_attempts;
 ```
 
+On a database that never had one of these tables, its count answers with
+`relation "<table>" does not exist`. That is not a fault: the table is already
+absent, there is nothing to lose, and the migration still applies (its
+`DROP TABLE IF EXISTS` skips it). To check without an error, run
+`select to_regclass('public.<table>');` first; it returns null when the table
+is absent.
+
 A count above zero is a reason to stop and ask: export those rows first, or
 confirm they are test data. `login_attempts` may hold old failed-login rows from
 before the limiter moved to `rate_limit_hits`; they have no use now. A
 recipient's screening verdict is `suppliers.screening_verdict`, the daily audit
 batch is `daily_audit_batches` and the on-chain anchor is the `audit_anchor`
 object, none of which this touches.
+
+One more table, `payouts` (made by `0000`, with a foreign key to
+`payment_intents`), has no reader and no writer either, and it is kept: `0080`
+leaves it in place until Sky decides whether to drop it. Nothing in the code
+imports it, uses `schema.payouts`, or names it in SQL.
