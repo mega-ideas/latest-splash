@@ -14,11 +14,11 @@ No Move code changed. Nothing here signs or sends on any network in tests or in
 this branch's screenshots.
 
 Code: `lib/schedule/` (pure: due times, states and words, the checks, the
-notices), `lib/server/scheduled-store.ts`, `scheduled-payments.ts` (what an
+notices, the summary), `lib/server/scheduled-store.ts`, `scheduled-payments.ts` (what an
 owner does), `scheduled-runner.ts` (what happens at the due time),
 `scheduled-payer-signer.ts` (the key), `scheduled-payments-deps.ts` (live
 wiring), `app/api/wallet/schedules/*`, `app/api/cron/scheduled-payments`,
-`components/schedule/*`, migration `0069`.
+`components/schedule/*`, migrations `0069`, `0070` and `0076` (the grace window).
 
 ## States, in the owners' words
 
@@ -74,9 +74,12 @@ Day before an automatic run, again as it runs, "ready for approval" (with the
 reason when an automatic run was handed back), a receipt, and failed, lapsed,
 skipped and paused. E-mail (a link to the signed-in Scheduled tab) and WhatsApp
 where an owner has a verified number. **No link pays, skips or stops by itself**:
-Skip and Stop are one click in the signed-in tab. The second notice goes out as
-the run starts; Skip works until each payment is submitted, so the day-before
-notice is the one that gives time.
+Skip and Stop are buttons in the signed-in app, and the notice says so. The
+day-before notice and the "starting" notice both carry them (`actions` in
+`lib/schedule/notice.ts`: "Skip this run" and "Stop schedule", each pointing at
+the Scheduled tab on that run), in the e-mail and the WhatsApp message alike. A
+bare link in a message only opens the app; pressing the button needs an owner
+signed in.
 
 ## Mode A
 
@@ -101,6 +104,93 @@ The scheduled payer is **a separate KMS key from the gas sponsor** (separation o
 duties; `docs/KEY-POLICY.md`). It holds no funds and no SUI; the operator
 sponsors the gas (counted in the business's 1 SUI per 24 hours, shared with
 the owners' own payments).
+
+### The grace window (migration `0076`)
+
+Sky's decision: the "starting" notice of an automatic run goes out **GRACE
+minutes before the run's first payment**. GRACE is **10 by default, 0 to 60 per
+business** (whole minutes), set by an owner at once with no cooldown
+(`setGraceWindow`, `POST /api/wallet/schedules/automatic { action: 'grace', minutes }`,
+a database `CHECK` on the column, and `automatic_grace_changed` on the owners'
+trail).
+
+At the due time, once every check passes, the runner does **not** pay. It
+announces the window:
+
+1. `openGraceWindow` sets `payment_schedule_runs.starts_at` = now + GRACE, once
+   (`WHERE status = 'scheduled' AND starts_at IS NULL`), and `window_version` =
+   the schedule's version, and frees the lease.
+2. The "starting" notice goes out with that time: "Starts at 14:10 UTC, Skip or
+   Stop until then. Nothing has been paid yet." It carries the Skip and Stop
+   buttons. (If the runner stops between 1 and 2, the next pass sends it.)
+3. The run stays `scheduled`. Skip and Stop are exactly what they were for a run
+   that has not started: they end it as **skipped, nothing paid**. Passes inside
+   the window do nothing.
+4. At `starts_at` the runner claims the run again (the same lease) and **makes
+   every check again**: the kill switch, the mode, the allowance and every limit
+   (per payment, monthly window, daily, second-approval line), each payee, the
+   fee, the payer, the wallet's balance. Anything that no longer passes hands the
+   whole run to "ask me first" with the reason. So does a schedule **changed
+   since the window opened** (`window_version` differs from its version): what is
+   paid is what the notice named (`changed_in_window`). Otherwise it pays as
+   described under "Paying".
+
+Where it is enforced, not just where it is intended:
+
+- **No automatic payment is claimed before the window ends.** The claim
+  statement itself (`claimPayment`) only matches a payment whose run has
+  `starts_at IS NULL OR starts_at <= now`. The runner never calls it early, and
+  if it ever did the database refuses.
+- **Skip versus the first claim** is as before: one statement under the
+  per-business lock (`moveRunUnlessPaying`), so a Skip and the first payment's
+  claim cannot both succeed. At the window's end the runner's move from
+  `scheduled` to `approved` and a Skip are compare-and-sets on the same status:
+  one wins. A test runs the two at the same moment, three times.
+- **The announced start is fixed for that run.** Changing the setting later moves
+  no start that was announced (it applies to the next run that starts); moving
+  the schedule's time inside the same day closes the window and the new time gets
+  its own, with its own notice. Opening the window is once per run
+  (`starts_at IS NULL`), and a run is still made once per schedule and due
+  date.
+- **The clock edges are explicit**: at `starts_at - 1 ms` nothing is paid; at
+  `starts_at` it is. A run Splash could not start within 24 hours of its due
+  time lapses, window or not (a window opened late and ending after that is not
+  paid late).
+- **A window of 0 is the old behaviour**: the run pays at the due time, and the
+  notice names no start.
+- **Production**: a sandbox payer is not a payer there, so the checks hand the
+  run back **before** a window is announced. Nothing is promised that could not
+  happen.
+
+The Scheduled tab and History say it in one place, one component
+(`components/schedule/RunWindow.tsx`): "Starts at 14:10, Skip or Stop until
+then", in the viewer's own clock, and nothing once the window is over.
+
+### The summary before the owners sign (`lib/schedule/summary.ts`)
+
+An owner switching a schedule to automatic resends its payments (the
+`confirm_payments` rule is unchanged). If the allowance is not in force, the
+allowance screen then opens by itself, and it has two steps. The second is
+"Check this before your owners sign":
+
+> Splash will pay these 4 payments, up to 2,000 USDC each, from 12 Nov until
+> 10 Feb. Nothing is paid without your limits. You can stop this anytime.
+
+below it the exact payments (recipient, masked address, amount, reference), the
+most for one payment, the daily and monthly limits, the recipients, the end date,
+the warning window and how to stop (Skip this run, Stop schedule, Pause all
+automatic payments, taking the allowance back).
+
+The figures are not computed on the page. `parseAllowanceInput` reads what was
+typed one way for the page and the server; `allowanceTerms` / `allowanceRule`
+turn it into the rule the owners sign; `automaticSummary` reads the per-payment
+maximum, the monthly cap and the end date from those terms. `requestAllowance`
+builds the summary from the same form and the same clock as the rule, refuses
+(`summary_mismatch`) if they ever disagree, and answers with it. Tests pin that
+the screen's and the server's summaries are identical, and that after the owners
+sign, the network holds exactly the figures the summary showed
+(`tests/scheduled-summary.test.mjs`). The payments listed are those of the
+schedules that pay automatically and are running.
 
 ### The checks (`lib/schedule/auto-check.ts`), all of them, over the whole run
 
@@ -129,7 +219,7 @@ execution failure after payments began leaves a run part-paid, and that is said
 
 ### Paying
 
-Per payment, in order: the run, the schedule, the kill switch and the mode are
+(Under the grace window above, this starts when the window ends.) Per payment, in order: the run, the schedule, the kill switch and the mode are
 read again (a Skip, Stop, pause or switch to "ask me first" stops the rest at
 once); the fee is read again; the allowance is read again (it has counted the
 previous payment); the audit bundle is made (fails closed in production); the
@@ -226,6 +316,15 @@ payments to carry over, they revoke the allowance after.
   open is a second signing request the owners can decline.
 
 ## Tests
+
+The grace window and the summary: `tests/scheduled-grace-rules.test.mjs` (the
+window's length and words, the notices, the allowance rule, the caps at their
+boundaries, the summary), `tests/scheduled-grace.test.mjs` (the window end to
+end: to the millisecond, Skip and Stop inside it, Skip racing its end, the
+checks made again at its end, clock edges, once-only, tenants, production),
+`tests/scheduled-summary.test.mjs` (the summary equals the request and the
+chain). Older tests give their business a window of 0, so they stay about the
+payments.
 
 `tests/scheduled-rules.test.mjs`, `scheduled-auto-check.test.mjs` (every check
 and its order), `scheduled-payer.test.mjs` (key policy, no sandbox in production,

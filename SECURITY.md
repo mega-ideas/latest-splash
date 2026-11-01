@@ -2496,6 +2496,32 @@ authority: the batch is prepared and the owners' quorum signs it.
   kill switch (one owner pauses every automatic payment) take effect for the next
   run and are read before **every** payment of a run in progress. Revoking the
   allowance is a multisig request and takes effect when signed.
+- **The grace window (migration 0076), and what it does and does not protect.**
+  An automatic run says it is starting GRACE minutes before its first payment (10
+  by default; 0 to 60 per business, an owner's own change, instant, on the trail).
+  *Does:* nothing is claimed or paid inside the window (the payment claim's own
+  statement refuses an early claim, not just the runner); a Skip or Stop inside
+  it ends the run as skipped with nothing paid, and cannot race the first
+  payment (one statement under the per-business lock); every check is made again
+  at its end, so an allowance taken back, a pause, a lowered limit or a changed
+  schedule hands the run back instead of paying; stopping can only prevent a
+  payment, never cause one; a start that was announced is fixed for that run, so
+  the setting cannot be used to bring it forward. *Does not:* it gives the owners
+  time to notice and to press a button, not a guarantee that anyone will; a
+  stolen payer key does not wait for a window (the allowance's caps bound it, not
+  the window); a compromised server could skip the window (the claim's database
+  check and the allowance are what remain); it does not make the daily limit the
+  network's; and an owner can set it to 0. The notice carries Skip and Stop as
+  buttons in the app, which need an owner signed in: no link in an e-mail or a
+  WhatsApp message acts by itself, so a message that is read late or by someone
+  else can open the app but not stop or start anything.
+- **A summary the owners read before they sign** is built from the very values the
+  allowance request is built from (one parser, one rule, one summary function; the
+  server checks they agree and tests pin it, including that the network holds the
+  summary's figures after the owners sign). It shows the exact payments, the
+  maximum per payment, the daily and monthly limits, the recipients, the end date,
+  the window and how to stop. It is not a substitute for the signing request the
+  owners see on their own devices.
 - **Tenant isolation**: every route takes the business from the session; every
   store read takes the org; the runner works each business with its own context;
   the cross-tenant lists are `ForStaff` and return ids only.
