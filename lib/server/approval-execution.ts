@@ -28,11 +28,11 @@
  * An approval says "this payment is authorised", not "skip the checks". It
  * removes the requirement for a second approver, because that is precisely
  * what it supplied. (A payout-run approval is no longer replayed at all: the
- * v1 custody batch route is removed, see BATCH_PAYOUT_RETIRED_REASON.)
+ * v1 custody batch route is removed, see RETIRED_KIND_REASON.)
  */
 import 'server-only';
 
-import type { UnsignedProposal } from '@/lib/agent/types';
+import { PROPOSAL_KINDS, type UnsignedProposal } from '@/lib/agent/types';
 import { x402SettlementAvailability } from '@/lib/agent/x402';
 import { closeApprovalClaim } from '@/lib/server/approved-proposal';
 import { CUSTODIAL_TREASURY_RETIRED_REASON } from '@/lib/server/custodial-treasury';
@@ -61,10 +61,14 @@ export const APPROVAL_NOT_SAVED = {
 } as const satisfies ExecutionOutcome;
 
 /**
- * What an approval of an old payout-run proposal records. Said in the outcome
- * itself, so the queue and Zeke show it rather than a made-up success.
+ * What an approval of a proposal of a kind that no longer exists records. A
+ * payout run used to be one (Zeke drafted it, and the v1 custody route that
+ * carried it out is removed); a sheet now goes to the wallet batch flow, which
+ * the owners sign once. Said in the outcome itself, so the queue and Zeke show
+ * it rather than a made-up success, and never as "re-authorize" through a
+ * route that no longer exists.
  */
-export const BATCH_PAYOUT_RETIRED_REASON =
+export const RETIRED_KIND_REASON =
   'Approved and recorded, not executed. Payout runs are no longer carried out from an approval: ' +
   'use Batch payouts, which pays from your business wallet once its owners sign. Nothing was sent.';
 
@@ -107,13 +111,13 @@ async function carryOut(
   payload: Record<string, unknown> | null,
   context: ExecutionContext,
 ): Promise<ExecutionOutcome> {
-  // First, before the payload is looked at. Every real payout-run proposal has
+  // First, before the payload is looked at. Every proposal of a retired kind (a payout run) has
   // none (only the removed route ever wrote one; Zeke's drafts carry none), so
   // asking for the payload first sent each of them to "re-authorize the
   // payment", which there is no longer a route to do. In every launch scope the
   // answer is the same: recorded, not carried out, and where to pay it.
-  if (proposal.kind === 'BATCH_PAYOUT') {
-    return { state: 'SKIPPED', detail: BATCH_PAYOUT_RETIRED_REASON };
+  if (!(PROPOSAL_KINDS as readonly string[]).includes(proposal.kind)) {
+    return { state: 'SKIPPED', detail: RETIRED_KIND_REASON };
   }
 
   if (!payload) {

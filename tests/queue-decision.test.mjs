@@ -184,7 +184,6 @@ test('only an executed, not-sent, rejected or closed outcome takes a proposal of
 });
 
 test('kinds read the way an approver names them', () => {
-  assert.equal(kindLabel('BATCH_PAYOUT'), 'Payroll run');
   assert.equal(kindLabel('PAYMENT'), 'Payment');
   assert.equal(kindLabel('SOMETHING_NEW'), 'SOMETHING_NEW');
 });

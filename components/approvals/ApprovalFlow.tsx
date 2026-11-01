@@ -19,7 +19,7 @@ import { describeSignError, signApprovalWithPasskey } from '@/lib/wallet/sui-sig
  * the approval covers. This component only shows where it stands.
  */
 
-export type ApprovalPurpose = 'STABLECOIN_TRANSFER' | 'FIAT_TRANSFER' | 'BATCH_PAYOUT' | 'SETTINGS_CHANGE' | 'PROFILE_CHANGE';
+export type ApprovalPurpose = 'STABLECOIN_TRANSFER' | 'FIAT_TRANSFER' | 'SETTINGS_CHANGE' | 'PROFILE_CHANGE';
 
 type Status = {
   ok: boolean;

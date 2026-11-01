@@ -2461,3 +2461,42 @@ authority: the batch is prepared and the owners' quorum signs it.
 - **Not covered**: the outflow monitor watches the operator, not this key; there
   is no testnet run; a daily limit that is on chain needs a Move change (see the
   hand-off). Sebastian reviews the key policy and the default caps before mainnet.
+
+## v2 Phase 3 - Zeke reads payout sheets - 2026-11-01
+
+Design: `docs/v2/phase3-zeke-batches.md`. Tests: `tests/zeke-sheet-ingest.test.mjs`,
+`tests/zeke-sheet-review.test.mjs`, `tests/zeke-legacy-batch-removed.test.mjs`.
+
+- **A sheet is data, read by the server.** `POST /api/wallet/batches/sheet` reads a
+  CSV, pasted rows or an .xlsx by fixed rules (`lib/batch/ingest.ts`). Text in a cell
+  that talks to an assistant is ignored and cleared; formulas (also full-width
+  forms), commands, links and hidden or bidirectional characters are removed from
+  what is shown back and passed on; each change is recorded on the row. A cell can
+  only NAME a recipient: the review matches it to the business's own saved,
+  screened recipients, so a sheet cannot introduce a payee, an address or a fee.
+- **Caps.** 256 KB, 200 rows scanned, 40 columns, 400 characters a cell, at most 20
+  payments (more is refused whole, never cut). A spreadsheet is a zip: its directory
+  is read first and one that would expand past 8 MB or 200 parts is refused before
+  it is opened. The route reads the body with a cap while reading it, not after.
+- **A model never sees a cell.** Only when the headers are unknown, it is given the
+  header names (instruction-like headers are replaced by "(column n)") to say which
+  is the recipient, amount, reference and currency. The answer is checked against
+  the headers and the data. With no key, a wrong answer or an error, nothing is
+  guessed. Pasted rows never go into the chat message.
+- **Preparing is the wallet batch flow, nothing else.** An owner's batch is one
+  signing request for the owners; nothing is drawn until the threshold has signed on
+  their devices. A staff member's batch waits for an owner. The sheet's intent id is
+  the Idempotency-Key, so a retry or a second tab makes one batch. Zeke's words say
+  "Nothing has been sent" and are fixed text, checked against the completion guard.
+- **Same gates as every wallet route.** Business from the session; accepted terms;
+  owner or staff, never a viewer; rate limit; a body that names a business, role or
+  user is a provenance violation. In production a sandbox screening is no
+  verification, and a row without one cannot be prepared.
+- **The old path is gone.** The `BATCH_PAYOUT` proposal kind, `proposeBatchPayout`,
+  the step-up purpose and the helpers only they used are removed; proposals of that
+  kind still open are closed once by migration `0072`; one that still reaches the
+  executor is recorded as not executed. The `step_up_codes` check constraint still
+  lists the old purpose (a superset is harmless).
+- **Not covered**: a staff member's batch is not paid inside their rule (the owners
+  sign every batch); the column mapper has no live-model test; the floating Zeke does
+  not carry a sheet card to the Zeke page. No Move change is needed or made.

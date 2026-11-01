@@ -21,10 +21,10 @@ import test from 'node:test';
  *   - Its readers were a staff table on /admin/transactions and the staff
  *     transaction list, both of which read the same store.
  *
- * What stays, on purpose: the BATCH_PAYOUT proposal kind (Zeke's drafts and
- * old approvals still carry it). An approval of one is recorded and moves
- * nothing, and says so. The `batch_runs` table went later, by its own
- * migration (0071; tests/p3-cleanup.test.mjs).
+ * The proposal kind itself went with Zeke's batch tool (tests/zeke-legacy-batch-removed.test.mjs).
+ * A proposal of it already on file is data: an approval of one that still
+ * reaches the executor is recorded and moves nothing, and says so. The
+ * `batch_runs` table went later, by its own migration (0071; tests/p3-cleanup.test.mjs).
  */
 
 const root = new URL('..', import.meta.url);
@@ -127,13 +127,14 @@ delete process.env.DATABASE_URL;
 delete process.env.SPLASH_CUSTODY_PACKAGE_ID;
 
 const { InMemoryProposalStore } = await import('../lib/queue/proposal-state.ts');
-const { executeApprovedProposal, BATCH_PAYOUT_RETIRED_REASON } = await import('../lib/server/approval-execution.ts');
+const { executeApprovedProposal, RETIRED_KIND_REASON } = await import('../lib/server/approval-execution.ts');
 const { resolveApprovalClaim } = await import('../lib/server/approved-proposal.ts');
-const { batchPayoutSubstance } = await import('../lib/server/step-up-subjects.ts');
 const settlement = await import('../lib/server/sui-settlement.ts');
 const operations = await import('../lib/server/operations.ts');
 
 const context = { cookie: '', origin: 'http://splash.test' };
+/** What an approval of the old kind covered: the rows, as written. */
+const batchPayoutSubstance = (payload) => ({ rows: payload.rows ?? [], targetCurrency: payload.targetCurrency ?? null });
 const PAYLOAD = { rows: [{ name: 'Maria Santos', address: `0x${'a'.repeat(64)}`, amount: '12500.00' }], targetCurrency: 'PHP' };
 
 function approvedBatch(store, id, orgId = 'acme') {
@@ -244,7 +245,7 @@ test('an old payout-run proposal with no payload is recorded as retired, never t
       const outcome = await executeApprovedProposal(proposal, null, context);
       assert.equal(outcome.state, 'SKIPPED', JSON.stringify(env));
       assert.equal(outcome.ref, undefined);
-      assert.equal(outcome.detail, BATCH_PAYOUT_RETIRED_REASON);
+      assert.equal(outcome.detail, RETIRED_KIND_REASON);
       assert.match(outcome.detail, /Batch payouts/);
       assert.doesNotMatch(outcome.detail, /re-authorize/i);
       assert.equal(store.get(proposal.id).approvalConsumedBy, 'execution', 'spent once, like any other attempt');
@@ -261,26 +262,9 @@ test('a payment with no payload on record still fails closed, naming nothing pai
   assert.match(outcome.detail, /nothing was sent/i);
 });
 
-test("Zeke's batch-payout draft points at Batch payouts and promises nothing a draft cannot do", async () => {
-  process.env.FEATURE_KYB_GATE = 'false';
-  const { executeOxwalTool, resetOxwalFixtures, resetOxwalProposalStore, upsertOxwalCounterpartyFixture } = await import('../lib/agent/oxwal.ts');
-  resetOxwalFixtures();
-  resetOxwalProposalStore();
-  upsertOxwalCounterpartyFixture({ id: 'cp_verified_payee', name: 'Vendor Ltd', kybStatus: 'VERIFIED', bankRefHash: 'verified-payee-ref' });
-  const draft = await executeOxwalTool('proposeBatchPayout', {
-    orgId: 'demo-business',
-    corridor: 'MY_PH',
-    payouts: [{ counterpartyId: 'cp_verified_payee', amountUsd: 600, currency: 'USDC' }],
-  });
-  assert.equal(draft.kind, 'BATCH_PAYOUT');
-  assert.match(draft.explain.recommendation, /Batch payouts/);
-  assert.match(draft.explain.recommendation, /sends nothing|nothing is sent/i);
-  assert.doesNotMatch(draft.explain.recommendation, /Human approval is required in v1/);
-
-  // And approving that very draft ends on the retired answer, with no payload.
-  const outcome = await executeApprovedProposal(draft, draft.executionPayload ?? null, context);
-  assert.equal(outcome.state, 'SKIPPED');
-  assert.equal(outcome.detail, BATCH_PAYOUT_RETIRED_REASON);
+test('Zeke can no longer draft a payout-run proposal at all: the tool is gone, and a sheet goes to the wallet batch flow', async () => {
+  const { executeOxwalTool } = await import('../lib/agent/oxwal.ts');
+  await assert.rejects(() => executeOxwalTool('proposeBatchPayout', { orgId: 'demo-business', corridor: 'MY_PH', payouts: [] }), /unknown Zeke tool/);
 });
 
 test('no route asks approvers to approve a batch payout that cannot be carried out', async () => {

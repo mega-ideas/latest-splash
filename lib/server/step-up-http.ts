@@ -23,7 +23,7 @@ import { sendWhatsAppCode } from '@/lib/server/whatsapp';
  * server, from the record or the payload that will be saved.
  */
 
-const PURPOSES: ReadonlySet<string> = new Set(['STABLECOIN_TRANSFER', 'FIAT_TRANSFER', 'BATCH_PAYOUT', 'SETTINGS_CHANGE', 'PROFILE_CHANGE']);
+const PURPOSES: ReadonlySet<string> = new Set(['STABLECOIN_TRANSFER', 'FIAT_TRANSFER', 'SETTINGS_CHANGE', 'PROFILE_CHANGE']);
 
 /** DB membership role for a proposal-domain role (the mapping authority.ts inverts). */
 const DB_ROLE: Record<string, string> = { OWNER: 'admin', APPROVER: 'checker', MAKER: 'maker' };

@@ -272,7 +272,7 @@ test('a lane row says what happened, where to look, and whether this viewer may 
   );
   assert.equal(stuckPaymentItem(submitted, routeUsed, tom, now).blockedReason, 'Only an approver can record what happened.');
 
-  assert.deepEqual(whereToCheck('BATCH_PAYOUT'), { label: 'Check payroll runs', href: '/dashboard/batch' });
+  assert.equal(whereToCheck('BATCH_PAYOUT'), null, 'a payout run is no kind a proposal has any more');
   assert.deepEqual(whereToCheck('TREASURY_REDEEM'), { label: 'Check Smart Treasury', href: '/dashboard/treasury' });
   assert.equal(whereToCheck('X402_PAYMENT'), null);
 });

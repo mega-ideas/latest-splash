@@ -32,7 +32,7 @@ export interface AnomalyFinding {
 
 // x402 is machine-speed micropayment by design — exactly what the burst and
 // hourly-volume limits exist for.
-const OUTBOUND_KINDS = new Set(['PAYMENT', 'BATCH_PAYOUT', 'NETTING_SETTLE', 'X402_PAYMENT']);
+const OUTBOUND_KINDS = new Set(['PAYMENT', 'NETTING_SETTLE', 'X402_PAYMENT']);
 
 export const defaultAnomalyConfig: AnomalyConfig = {
   proposalsPerMinuteLimit: 12,

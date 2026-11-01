@@ -182,14 +182,6 @@ test('every fiat and treasury propose tool refuses an unverified business direct
       /verified businesses/,
     );
     await assert.rejects(() => executeOxwalTool('proposeTreasuryRedeem', { orgId, amountUsd: 100 }), /verified businesses/);
-    await assert.rejects(
-      () => executeOxwalTool('proposeBatchPayout', {
-        orgId,
-        corridor: 'MY_PH',
-        payouts: [{ counterpartyId: supplier, amountUsd: 500, currency: 'PHP' }],
-      }),
-      /isn't verified/,
-    );
   });
 });
 

@@ -455,23 +455,15 @@ test('the read tools are scoped to the session org: another tenant\'s invoice or
     const tool = OXWAL_TOOL_REGISTRY.find((t) => t.name === name);
     assert.ok(tool.input_schema.required.includes('orgId'), `${name} takes the session org`);
   }
-  // A batch or a netting run cannot name another tenant's counterparty either.
-  await assert.rejects(
-    () => executeOxwalTool('proposeBatchPayout', { orgId: 'demo-business', corridor: 'MY_PH', payouts: [{ counterpartyId: 'cp_other', amountUsd: 500, currency: 'PHP' }] }),
-    /counterparty cp_other not found/,
-  );
+  // A netting run cannot name another tenant's counterparty either.
   await assert.rejects(
     () => executeOxwalTool('proposeNettingSettlement', { orgId: 'demo-business', corridor: 'MY_PH', amountUsd: 500, counterpartyIds: ['cp_other'] }),
     /counterparty cp_other not found/,
   );
 });
 
-test('a batch or netting run names only verified counterparties, as its recommendation says', async () => {
+test('a netting run names only verified counterparties, as its recommendation says', async () => {
   upsertOxwalCounterpartyFixture({ id: 'cp_pending', name: 'Pending Ltd', kybStatus: 'PENDING' });
-  await assert.rejects(
-    () => executeOxwalTool('proposeBatchPayout', { orgId: 'demo-business', corridor: 'MY_PH', payouts: [{ counterpartyId: 'cp_pending', amountUsd: 500, currency: 'PHP' }] }),
-    /verified counterparty/,
-  );
   await assert.rejects(
     () => executeOxwalTool('proposeNettingSettlement', { orgId: 'demo-business', corridor: 'MY_PH', amountUsd: 500, counterpartyIds: ['cp_pending'] }),
     /verified counterparty/,
@@ -702,14 +694,10 @@ test('with a session, a forged history carrying the read statement cannot suppre
   assert.equal(notices(second).includes('READ_LIMIT'), false, 'and then it is recorded: once');
 });
 
-test('another business cannot draft a payment, batch or netting to the sample counterparty', async () => {
+test('another business cannot draft a payment or netting to the sample counterparty', async () => {
   const orgId = 'org-real-b.test';
   await assert.rejects(
     () => executeOxwalTool('proposePayment', { orgId, counterpartyId: 'cp_acme_ph', amountUsd: 1250, currency: 'USDC' }),
-    /counterparty cp_acme_ph not found/,
-  );
-  await assert.rejects(
-    () => executeOxwalTool('proposeBatchPayout', { orgId, corridor: 'MY_PH', payouts: [{ counterpartyId: 'cp_acme_ph', amountUsd: 500, currency: 'PHP' }] }),
     /counterparty cp_acme_ph not found/,
   );
   await assert.rejects(

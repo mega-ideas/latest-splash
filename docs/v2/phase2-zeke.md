@@ -17,7 +17,7 @@ READ or a PROPOSE:
 | findSavedRecipient, listSavedRecipients | READ | Read the org's saved recipients |
 | quoteX402Payment | READ | Price a pasted 402 challenge; carries a settlement refusal |
 | prepareUsdcTransfer | READ | Build a link to the Send screen; quotes, reserves and signs nothing |
-| proposePayment, proposeInternalTransfer, proposeFxConvert, proposeTreasuryAllocation, proposeTreasuryRedeem, proposeNettingSettlement, proposeBatchPayout, proposeX402Payment | PROPOSE | Draft an unsigned proposal with no approvals |
+| proposePayment, proposeInternalTransfer, proposeFxConvert, proposeTreasuryAllocation, proposeTreasuryRedeem, proposeNettingSettlement, proposeX402Payment | PROPOSE | Draft an unsigned proposal with no approvals |
 | proposeRecipientFromInvoice | PROPOSE | Draft a recipient a person confirms; saves nothing |
 | setAssistantName | PROPOSE | Store a display name |
 
@@ -219,8 +219,9 @@ Invoices and uploaded sheets are data:
   tool, and unknown tools (for example `signProposal`) are refused by the loop.
 - An invoice read into a recipient never overwrites a field already on the
   saved record, and nothing is saved without a person.
-- An uploaded sheet goes to the batch desk as rows (sessionStorage); it is
-  never put into the model's message.
+- An uploaded sheet is read by the server (`lib/batch/ingest.ts`) and shown in
+  the thread as a table to check; it is never put into the model's message,
+  and there is no batch proposal tool (`docs/v2/phase3-zeke-batches.md`).
 - Zeke's output renders as React text, escaped; a prepared-transfer card links
   only to `/dashboard/send-usdc?…`.
 

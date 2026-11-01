@@ -7,7 +7,7 @@ Transfer (`components/transfer/ui.tsx` `Modal`: blurred backdrop, close X,
 Escape).
 
 Code: `components/batch/` (the page), `lib/batch/sheet.ts` (the sheet, pure),
-`lib/batch/file.ts` (reading a file in the browser),
+`lib/batch/ingest.ts` (the server reader), `lib/batch/file.ts` (sending a file to it),
 `lib/server/wallet-batches.ts` (review, create, start the signatures),
 `lib/server/batch-receipts.ts`, `lib/server/wallet-batches-route.ts`,
 `app/api/wallet/batches/*`, `payBatchFromWalletTx` in
@@ -33,7 +33,7 @@ refused rather than read as a number.
 
 | Step | What it does | Where the rule lives |
 |---|---|---|
-| 1 Upload | A CSV or Excel file, rows pasted from a spreadsheet, or one blank row. Three columns: `recipient`, `amount`, `reference`. Up to 20 rows. Read in the browser; cells are kept exactly as written. Zeke's uploaded sheet arrives here as rows (`?draft=1`). | `lib/batch/sheet.ts`, `lib/batch/file.ts` |
+| 1 Upload | A CSV or Excel file, rows pasted from a spreadsheet, or one blank row. Three columns: `recipient`, `amount`, `reference`. Up to 20 rows. Read on the server by the same reader Zeke uses (`lib/batch/ingest.ts`); a cell that talks to an assistant, a formula, a link or a command is cleaned and the page says so. Zeke reads a sheet in its own thread (`docs/v2/phase3-zeke-batches.md`). | `lib/batch/sheet.ts`, `lib/batch/file.ts` |
 | 2 Review rows | Every row on its own: the cells, **the recipient** (a name or wallet address the business **saved**, or a business on Splash by its registered name), **the screening** (a fresh CLEAR, v2 §4.6), **the recipient's own rule** (a wallet proven, v2 §4.7), the fee from the schedule on chain for the kind the payee is paid as, duplicates, the business's own wallet and Splash's addresses. A row that cannot be paid says why, in words, and can be fixed or removed. The wallet's shortfall is shown. Continue is open only when every row is cleared. | `reviewBatch` |
 | 3 Approve | **Owners**: the batch becomes one signing request for the owners' multisig; each owner's device decodes the exact bytes itself (`reviewOnDevice`), is shown every payment and a transaction code, checks them against the batch that was approved (`differsFromApprovedBatch`), and signs with their own passkey. **Staff** prepare the batch; the owners are told, and an owner starts the signatures. **Run later** (scheduled through `splash_spend`, an owner naming the executor) is **not switched on** (`BATCH_SCHEDULE_WIRED = false`): the page says so and `{ schedule: true }` answers `409 schedule_not_wired`. | `createBatch`, `startBatchSigning`, `SignPanel` |
 | 4 Send | At the threshold Splash submits the transaction. The page asks every few seconds and goes on the moment the batch is paid. | `StepSend.tsx` |
@@ -163,16 +163,13 @@ called the route; the one internal caller was the approval queue's replay, which
 only replayed a payload the route itself wrote (Zeke's batch drafts carry none);
 and the path was already refused on mainnet in every mode (v2 D11).
 
-What stays: the `BATCH_PAYOUT` proposal kind with its approval-binding
-helpers, because Zeke's drafts and approvals already on file carry it.
-Approving one now records it as
-**not executed**, names Batch payouts as where payout runs are paid, claims no
-payment, and spends the approval once (`BATCH_PAYOUT_RETIRED_REASON`). That holds
-whether or not the proposal carries a payload (none of them does), in every launch
-scope: the executor checks the kind before it asks for a payload, so an approver is
-never told to "re-authorize" through a route that no longer exists. Zeke's draft
-says the same in its own recommendation ("approving this draft sends nothing").
-Whether Zeke should draft one at all is Sky's decision.
+What stays: nothing of the old proposal path. The `BATCH_PAYOUT` proposal kind,
+Zeke's `proposeBatchPayout` tool, the step-up purpose of the same name and the
+approval-binding helpers that only served them were removed once Zeke read payout
+sheets itself (`docs/v2/phase3-zeke-batches.md`). A proposal of that kind already on
+file is closed by migration `0072`, and one that still reaches the executor is
+recorded as **not executed**, names Batch payouts, claims no payment and spends the
+approval once (`RETIRED_KIND_REASON`), whether or not it carries a payload.
 
 What goes after it: the `batch_runs` table, which only the removed route wrote.
 Migration `0071_drop_batch_runs` drops it. `0011`, which made it, is not edited:

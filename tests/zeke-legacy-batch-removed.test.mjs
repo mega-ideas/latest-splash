@@ -132,7 +132,7 @@ test('migration 0072 closes the payout-run proposals still open, once, and leave
   await run();
   const rows = (await client.query('select id, status, execution_state from proposals order by id')).rows;
   const by = Object.fromEntries(rows.map((r) => [r.id, r]));
-  for (const id of ['p_open_1', 'p_open_2', 'p_open_3']) assert.equal(by[id].status, 'REJECTED', id);
+  for (const id of ['p_open_1', 'p_open_2', 'p_open_3']) assert.equal(by[id].status, 'EXPIRED', id);
   assert.equal(by.p_done.status, 'ANCHORED');
   assert.equal(by.p_pay.status, 'PENDING_APPROVAL');
   void db;

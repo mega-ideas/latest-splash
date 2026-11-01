@@ -86,13 +86,14 @@ test('docs/v2 says in one sentence that migrations are applied in journal order,
   assert.deepEqual(pages, ['migrations.md'], 'once, on the page an operator looks at for migrations');
 });
 
-test('the batch page keeps the approval text with the BATCH_PAYOUT sentence it is about', async () => {
+test('the batch page says what became of the BATCH_PAYOUT proposal kind, in its own paragraph', async () => {
   const doc = (await readFile(at('docs/v2/phase3-batch.md'), 'utf8')).replace(/\r\n/g, '\n');
   const paragraphs = doc.split(/\n\n+/);
   const stays = paragraphs.find((p) => p.startsWith('What stays:'));
   assert.ok(stays, 'the What stays paragraph exists');
   assert.match(stays, /BATCH_PAYOUT/);
-  assert.match(stays, /Approving one now records it as\s+\*\*not executed\*\*/, 'the approval text follows the proposal-kind sentence');
+  assert.match(stays, /recorded as \*\*not executed\*\*/, 'the approval text follows the proposal-kind sentence');
+  assert.match(stays, /RETIRED_KIND_REASON/);
   const goes = paragraphs.find((p) => p.startsWith('What goes after it:'));
   assert.ok(goes, 'the What goes after it paragraph exists');
   assert.doesNotMatch(goes, /Approving one|Migrations are applied/);
@@ -313,10 +314,10 @@ test('what the cleanup must not touch is still there', async () => {
   ]) {
     assert.equal(await exists(keep), true, `${keep} stays`);
   }
-  // Zeke's batch drafting is the next section's.
+  // Zeke's batch drafting went with the Zeke section (tests/zeke-legacy-batch-removed.test.mjs).
   const oxwal = await readFile(at('lib/agent/oxwal.ts'), 'utf8');
-  assert.match(oxwal, /proposeBatchPayout/);
+  assert.doesNotMatch(oxwal, /proposeBatchPayout/);
   const proposals = await readFile(at('lib/server/approval-execution.ts'), 'utf8');
-  assert.match(proposals, /BATCH_PAYOUT_RETIRED_REASON/);
+  assert.match(proposals, /RETIRED_KIND_REASON/);
 });
 

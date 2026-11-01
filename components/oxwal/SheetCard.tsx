@@ -34,7 +34,7 @@ const STATE = {
 
 const FLAG_TONE: Record<SheetFlag['severity'], string> = {
   blocked: 'text-[var(--error)]',
-  confirm: 'text-[var(--warn-ink)]',
+  confirm: 'text-[var(--ink)]',
   owners: 'text-[var(--ink)]',
   note: 'text-[var(--ink-muted)]',
 };

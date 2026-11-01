@@ -230,7 +230,7 @@ function namedPrompt(assistantName: string): string {
  */
 const STABLECOIN_SCOPE_PROMPT = [
   'This deployment is open for USDC on Sui only. USD in, local-currency payouts, USD-to-local conversion, payout runs, netting and Treasury are not open, and verifying a business does not open them: it only raises the USDC limits.',
-  'Do not offer to draft a payment, transfer, FX conversion, treasury move, netting settlement or batch payout. Offer a USDC transfer to a saved wallet recipient (prepareUsdcTransfer) or an x402 payment instead.',
+  'Do not offer to draft a payment, transfer, FX conversion, treasury move or netting settlement. Offer a USDC transfer to a saved wallet recipient (prepareUsdcTransfer) or an x402 payment instead.',
 ].join('\n');
 
 /** A scripted answer that has a USDC-only version for this launch. */
@@ -265,6 +265,7 @@ export const OXWAL_SYSTEM_PROMPT = [
   'A business that has not finished verification can send USDC on Sui to wallet recipients it has saved, up to 5,000 USDC in any 30 days shared with x402 payments. USD in, local-currency payouts, USD-to-local conversion and Treasury stay locked until it is verified.',
   'When a propose tool refuses with a lane message, relay that message as written. Do not soften it, suggest a workaround, or offer to prepare the payment in another currency or through another route.',
   'You cannot send a wallet transfer yourself: the business signs it in its own wallet on the Send screen. For a wallet recipient, say that and point there.',
+  'To pay several saved recipients at once, ask the person to attach a payout sheet (a CSV or spreadsheet with the columns recipient, amount and reference) with the paperclip, or to paste the rows. Splash reads the file itself and shows the rows for the person to check. You never see its contents and you cannot draft a batch.',
 
   // Your name.
   'If a user asks you to go by a different name, call setAssistantName. It is cosmetic and changes nothing about what you can do.',
@@ -311,7 +312,6 @@ export const PROPOSE_TOOL_NAMES = [
   'proposeTreasuryAllocation',
   'proposeTreasuryRedeem',
   'proposeNettingSettlement',
-  'proposeBatchPayout',
   // Reads an invoice into a beneficiary the USER then confirms. Zeke never
   // creates one: a beneficiary record decides where money goes, and a model
   // writing one silently has made that decision on an OCR pass.
@@ -520,33 +520,6 @@ export const OXWAL_TOOL_REGISTRY: ToolDefinition[] = [
       additionalProperties: false,
     },
   },
-  {
-    name: 'proposeBatchPayout',
-    category: 'PROPOSE',
-    description: 'Draft an unsigned batch payout proposal. Each payout requires a verified counterpartyId.',
-    input_schema: {
-      type: 'object',
-      properties: {
-        orgId: stringSchema('Organization id'),
-        payouts: {
-          type: 'array',
-          items: {
-            type: 'object',
-            properties: {
-              counterpartyId: stringSchema('Verified Counterparty.id'),
-              amountUsd: numberSchema('USD amount'),
-              currency: stringSchema('Payout currency'),
-            },
-            required: ['counterpartyId', 'amountUsd', 'currency'],
-            additionalProperties: false,
-          },
-        },
-        corridor: stringSchema('Corridor id'),
-      },
-      required: ['orgId', 'payouts', 'corridor'],
-      additionalProperties: false,
-    },
-  },
 ];
 
 /** The proposal kind each drafting tool creates: what the launch scope checks. */
@@ -557,7 +530,6 @@ const TOOL_PROPOSAL_KIND: Partial<Record<string, string>> = {
   proposeTreasuryAllocation: 'TREASURY_ALLOCATE',
   proposeTreasuryRedeem: 'TREASURY_REDEEM',
   proposeNettingSettlement: 'NETTING_SETTLE',
-  proposeBatchPayout: 'BATCH_PAYOUT',
 };
 
 /** Whether Zeke offers this tool in the launch scope (lib/launch-scope-rules.ts). */
@@ -1426,48 +1398,6 @@ export async function proposeNettingSettlement(input: unknown): Promise<Unsigned
   });
 }
 
-export async function proposeBatchPayout(input: unknown): Promise<UnsignedProposal> {
-  assertZekeKindInScope('BATCH_PAYOUT', 'FIAT_OUT_LOCAL');
-  const object = objectInput(input);
-  assertNoRawDestination(object);
-  const orgId = requireString(object, 'orgId');
-  const corridor = requireString(object, 'corridor').toUpperCase();
-  const payouts = object.payouts;
-  if (!Array.isArray(payouts) || payouts.length === 0) throw new Error('payouts are required');
-  let totalUsd = 0;
-  const counterpartyIds: string[] = [];
-  for (const payout of payouts) {
-    const item = objectInput(payout);
-    assertNoRawDestination(item);
-    const counterpartyId = requireString(item, 'counterpartyId');
-    payableCounterparty(orgId, counterpartyId);
-    counterpartyIds.push(counterpartyId);
-    totalUsd += requireAmount(item, 'amountUsd');
-    const currency = typeof item.currency === 'string' ? item.currency.toUpperCase() : '';
-    if (currency !== 'USDC') await assertZekeLane(orgId, 'FIAT_OUT_LOCAL', currency || null);
-  }
-  // The floor applies to the batch TOTAL, not per row.
-  const batchMinimum = checkMinimumSettlement(totalUsd, 'batch');
-  if (!batchMinimum.ok) throw new Error(batchMinimum.message);
-  return createDraftProposal({
-    keyParts: ['BATCH_PAYOUT', orgId, corridor, payouts],
-    kind: 'BATCH_PAYOUT',
-    orgId,
-    corridor,
-    // v2 Phase 3: a payout run is paid from Batch payouts, where the business
-    // owners sign. An approval of this draft is recorded and sends nothing
-    // (BATCH_PAYOUT_RETIRED_REASON), so the draft says so rather than promise
-    // a payment its approval cannot make.
-    recommendation:
-      `Prepare a batch payout for ${payouts.length} verified counterparties. ` +
-      'Pay it from Batch payouts, where your business owners sign; approving this draft sends nothing.',
-    amountOut: usdMicro(totalUsd),
-    currencyOut: 'USDC',
-    evidence: counterpartyIds.map((id) => evidence('COUNTERPARTY', id, true)),
-    risk: 'MEDIUM',
-  });
-}
-
 /**
  * Read an invoice into a PROPOSED beneficiary. Returns the draft and what is
  * still needed; creates nothing. The user confirms, and only then does the
@@ -1669,7 +1599,6 @@ export const oxwalTools = {
   proposeTreasuryAllocation,
   proposeTreasuryRedeem,
   proposeNettingSettlement,
-  proposeBatchPayout,
   findSavedRecipient,
   listSavedRecipients,
   quoteX402Payment,
@@ -2269,10 +2198,8 @@ const SPLASH_ANSWERS: Array<{ test: RegExp; reply: string | (() => string); skip
   {
     // Batch CSV format
     test: /\b(csv|file format|columns|template|how (do|to) (i|we) (upload|import)|batch format|payroll file)\b/,
-    reply: scoped(
-      'Batch payout reads a CSV with the columns name, address, country, purpose, amount. Every row is screened for AML lists, KYT thresholds, structuring patterns and corridor rules before anything settles, and the whole run is authorized once. Drop the file in the composer and I will screen it.',
-      'Payout runs are not open in this launch: Splash is open for USDC on Sui only for now. Each USDC transfer goes to a saved wallet recipient from Wallet, and I can prepare them one at a time.',
-    ),
+    reply:
+      'A payout sheet is a CSV or spreadsheet with the columns recipient, amount and reference. Attach it with the paperclip, or paste the rows. Splash reads it itself, checks every row against your saved recipients, and shows the rows here for you to check. Nothing is prepared until you press Prepare batch, and a batch is paid in USDC from your Splash Wallet after your owners sign it once.',
   },
   {
     // Who pays gas / sponsored
@@ -2307,7 +2234,7 @@ const SPLASH_ANSWERS: Array<{ test: RegExp; reply: string | (() => string); skip
     // Onboarding / getting started
     test: /\b(how (do|to) (i|we) (start|begin|use)|get started|onboard|new here|tutorial|guide)\b/,
     reply: scoped(
-      'Quick tour: Transfer sends one payout (beneficiary > delivery > locked quote > receipt). Batch Payout screens a CSV payroll and settles it under one authorization. Invoices collects money with Seal-protected pay links. Treasury puts idle USD to work. I sit on top — ask me to read state or prepare any of it, and you approve.',
+      'Quick tour: Transfer sends one payout (beneficiary > delivery > locked quote > receipt). Batch payouts pays up to 20 saved recipients from a sheet, and your owners sign it once. Invoices collects money with Seal-protected pay links. Treasury puts idle USD to work. I sit on top — ask me to read state or prepare any of it, and you approve.',
       'Quick tour: Wallet pays a saved Sui wallet recipient in USDC, approved in your workspace and signed in your own wallet, with no gas, and Splash’s fee, if any, shown before you sign. Invoices gives you pay links a payer can settle in USDC on Sui. Recipients holds the wallets you pay. I sit on top: ask me to read state or prepare a USDC transfer, and you approve and sign.',
     ),
   },
@@ -2315,15 +2242,15 @@ const SPLASH_ANSWERS: Array<{ test: RegExp; reply: string | (() => string); skip
     // Capabilities
     test: /\b(what can you (do|read|prepare)|help|capabilities|tools|commands)\b/,
     reply: scoped(
-      'I can read balances, treasury state, corridor liquidity, rates, counterparties, invoices, netting opportunities, and compliance status. I can also draft unsigned proposals — payments, transfers, FX conversions, treasury moves, netting, batch payouts — but I cannot sign or submit transactions. That authority stays with you.',
-      'I can read balances, rates, recipients, invoices and compliance status, and prepare a USDC transfer to a saved wallet recipient or an x402 payment for you to review. I cannot sign or send anything: you approve it and your own wallet signs. Splash is open for USDC on Sui only for now, so I do not draft fiat payouts, payout runs or treasury moves.',
+      'I can read balances, treasury state, corridor liquidity, rates, counterparties, invoices, netting opportunities, and compliance status. I can also draft unsigned proposals — payments, transfers, FX conversions, treasury moves and netting — and read a payout sheet you attach, so you can prepare a batch from it, but I cannot sign or submit transactions. That authority stays with you.',
+      'I can read balances, rates, recipients, invoices and compliance status, and prepare a USDC transfer to a saved wallet recipient or an x402 payment for you to review. I cannot sign or send anything: you approve it and your own wallet signs. Splash is open for USDC on Sui only for now, so I do not draft fiat payouts or treasury moves. Attach a payout sheet and I will check it for a batch of USDC payments.',
     ),
   },
   {
     // Greetings
     test: /^(hi|hey|hello|good (morning|afternoon|evening)|yo|sup)\b/,
     reply: scoped(
-      'Hey! Ready when you are — I can check a rate, draft a transfer or batch, inspect an invoice, or look at treasury. What is on the agenda?',
+      'Hey! Ready when you are — I can check a rate, draft a transfer, check a payout sheet, inspect an invoice, or look at treasury. What is on the agenda?',
       'Hey! Ready when you are. I can prepare a USDC transfer to a saved wallet recipient, inspect an invoice, or check a balance. What is on the agenda?',
     ),
   },
@@ -2450,11 +2377,9 @@ function matchDemoScript(message: string): string | null {
   const actionVerb = /\b(do|run|start|make|create|prepare|new|another|a)\b/.test(q) || /\?$/.test(q);
   if (batchIntent && actionVerb) {
     return [
-      "I don't see a batch drafted yet — want to create one now?",
+      'To pay several recipients at once, attach a payout sheet: a CSV or spreadsheet with the columns recipient, amount and reference. Use the paperclip, or paste the rows into the composer.',
       '',
-      'Drop a CSV of recipients into the composer (columns: name, address, country, purpose, amount) and I will screen every row for AML, KYT, structuring, and corridor rules, then hand you a batch to authorize.',
-      '',
-      'You can also open the Batch desk to start from a template. Nothing settles until you sign the authorization.',
+      'I check every row against your saved recipients and show them here. Nothing is prepared until you press Prepare batch, and your owners sign the batch once.',
     ].join('\n');
   }
 
@@ -3032,13 +2957,11 @@ const MONEY_TOOL_ACTION: Partial<Record<OxwalToolName, ZekeMoneyAction>> = {
   proposeX402Payment: 'PAYMENT',
   prepareUsdcTransfer: 'PAYMENT',
   proposeNettingSettlement: 'PAYMENT',
-  proposeBatchPayout: 'BATCH',
   proposeTreasuryAllocation: 'TREASURY',
   proposeTreasuryRedeem: 'TREASURY',
 };
 
 const PROPOSAL_KIND_ACTION: Partial<Record<string, ZekeMoneyAction>> = {
-  BATCH_PAYOUT: 'BATCH',
   TREASURY_ALLOCATE: 'TREASURY',
   TREASURY_REDEEM: 'TREASURY',
 };
@@ -3317,7 +3240,7 @@ async function* runOxwalTurn(request: OxwalAgentRequest): AsyncGenerator<OxwalTu
   yield { type: 'done', source: answeredBy };
 }
 
-const SCOPED_OUT_REQUEST = /\b(batch|payroll|bulk payout|mass payout|pay everyone|netting|net (?:off|out|settle)|internal transfer|convert\b.*\b(?:usd|php|myr|sgd|idr|vnd|thb|eur|gbp))\b/i;
+const SCOPED_OUT_REQUEST = /\b(netting|net (?:off|out|settle)|internal transfer|convert\b.*\b(?:usd|php|myr|sgd|idr|vnd|thb|eur|gbp))\b/i;
 
 /**
  * The refusal for a message that asks for a lane this org cannot use, or null.

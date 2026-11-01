@@ -259,11 +259,11 @@ export function suggestionsFromMemories(memories: RecalledMemory[]): CopilotSugg
         suggestionId: `cop_${Date.now()}_${out.length}`,
         type: 'batch',
         title: 'Pre-stage your recurring batch',
-        // Only what Zeke can do: proposeBatchPayout drafts a batch for approval.
+        // Only what Zeke can do: read a payout sheet the person attaches and prepare a batch from it.
         // It used to promise the cheapest corridor and a pre-open lock, which
         // nothing computes.
-        description: `Pattern recalled: “${m.text}”. Want me to draft this batch for your approval?`,
-        prompt: 'A recurring batch came up in my payment patterns. Walk me through my recent batches and draft the next one for approval if it holds up.',
+        description: `Pattern recalled: “${m.text}”. Attach the sheet and I will check every row for you.`,
+        prompt: 'A recurring batch came up in my payment patterns. What do you need from me to prepare the next one?',
         confidence: relevance,
         requiresAuth: true,
       });

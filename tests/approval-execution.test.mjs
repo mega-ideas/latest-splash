@@ -199,7 +199,8 @@ test('an approval is spent by its attempt, even one no route saw', async () => {
   const { executeApprovedProposal } = await import('../lib/server/approval-execution.ts');
   const { resolveApprovalClaim } = await import('../lib/server/approved-proposal.ts');
   const { custodyPhaseEnabled } = await import('../lib/server/custody-phase.ts');
-  const { batchPayoutSubstance, treasuryMoveSubstance } = await import('../lib/server/step-up-subjects.ts');
+  const { treasuryMoveSubstance } = await import('../lib/server/step-up-subjects.ts');
+  const batchPayoutSubstance = (payload) => ({ rows: payload.rows ?? [], targetCurrency: payload.targetCurrency ?? null });
   assert.equal(custodyPhaseEnabled(), false, 'this test runs in Phase 0');
 
   const store = new InMemoryProposalStore();

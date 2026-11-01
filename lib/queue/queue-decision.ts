@@ -230,8 +230,6 @@ export function kindLabel(kind: string): string {
   switch (kind) {
     case 'PAYMENT':
       return 'Payment';
-    case 'BATCH_PAYOUT':
-      return 'Payroll run';
     case 'X402_PAYMENT':
       return 'x402 payment';
     case 'TREASURY_ALLOCATE':

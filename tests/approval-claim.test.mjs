@@ -11,13 +11,35 @@ import { InMemoryProposalStore } from '../lib/queue/proposal-state.ts';
 import { replayThroughRoute } from '../lib/server/approval-replay.ts';
 import { closeApprovalClaim, resolveApprovalClaim } from '../lib/server/approved-proposal.ts';
 import { subjectDigest } from '../lib/server/step-up.ts';
-import {
-  batchPayoutSubstance,
-  batchTargetCurrency,
-  fiatPaymentSubstance,
-  payableBatchRows,
-  treasuryMoveSubstance,
-} from '../lib/server/step-up-subjects.ts';
+import { fiatPaymentSubstance, treasuryMoveSubstance } from '../lib/server/step-up-subjects.ts';
+import { MICRO_DECIMALS, parseMinor } from '../lib/money.ts';
+
+/*
+ * A payout run is no longer a kind of proposal, and the helpers that bound its
+ * approval were removed with it. The claim itself is general: it binds an
+ * approval to WHAT was approved, by a digest of a substance the route names.
+ * These three are that mechanism's worked example, kept here as test data.
+ */
+function payableBatchRows(rows) {
+  return rows.filter((row) => {
+    if (!row || typeof row !== 'object') return false;
+    const { name, address, amount } = row;
+    if (!name || !address) return false;
+    try {
+      return parseMinor(amount ?? '0', MICRO_DECIMALS, 'half-up') > 0n;
+    } catch {
+      return false;
+    }
+  });
+}
+const batchTargetCurrency = (payload) => (typeof payload.targetCurrency === 'string' ? payload.targetCurrency : 'PHP');
+function batchPayoutSubstance(payload) {
+  const rows = Array.isArray(payload.rows) ? payload.rows : [];
+  return {
+    rows: payableBatchRows(rows).map(({ name, address, amount }) => ({ name: name ?? null, address: address ?? null, amount: amount ?? null })),
+    targetCurrency: batchTargetCurrency(payload),
+  };
+}
 
 /**
  * The approved-proposal claim: `x-splash-approved-proposal: <id>`, which lifts

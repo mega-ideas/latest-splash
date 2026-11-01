@@ -44,7 +44,7 @@ import { approverChannels, memberships, stepUpCodes, users } from '@/lib/db/sche
  * is reversed in a second; an HMAC under the session secret is not.
  */
 
-export type StepUpPurpose = 'STABLECOIN_TRANSFER' | 'FIAT_TRANSFER' | 'BATCH_PAYOUT' | 'SETTINGS_CHANGE' | 'PROFILE_CHANGE';
+export type StepUpPurpose = 'STABLECOIN_TRANSFER' | 'FIAT_TRANSFER' | 'SETTINGS_CHANGE' | 'PROFILE_CHANGE';
 export type ApprovalStyle = 'WHATSAPP_PASSKEY' | 'CLICK';
 
 /** How long a sent code can be entered, and how long a given approval stays usable. */
@@ -53,7 +53,7 @@ export const STEP_UP_MAX_ATTEMPTS = 5;
 /** WhatsApp is not a free channel, and a button can be pressed ten times. */
 export const STEP_UP_RESEND_COOLDOWN_MS = 30 * 1000;
 
-const PAYMENT_PURPOSES: ReadonlySet<StepUpPurpose> = new Set(['STABLECOIN_TRANSFER', 'FIAT_TRANSFER', 'BATCH_PAYOUT']);
+const PAYMENT_PURPOSES: ReadonlySet<StepUpPurpose> = new Set(['STABLECOIN_TRANSFER', 'FIAT_TRANSFER']);
 const APPROVING_DB_ROLES: ReadonlySet<string> = new Set(['admin', 'checker']);
 
 /** The style a workspace's settings select. */

@@ -136,7 +136,7 @@ function readsLikeCommand(text: string): boolean {
 }
 
 /** A link: a scheme, www., an address with a path, or an email address. */
-const LINK_PATTERN = /\b(?:https?|ftp|sftp|file|wss?|mailto|tel|ssh)\s*:\s*\/*\S*|\bwww\.\S+|\b[a-z0-9][a-z0-9-]*(?:\.[a-z0-9-]+)+[/?#]\S*|[a-z0-9._%+-]+@[a-z0-9.-]+\.[a-z]{2,}/gi;
+const LINK_PATTERN = /\b(?:https?|ftp|sftp|file|wss?|mailto|tel|ssh)\s*:\s*(?:\/)*\S*|\bwww\.\S+|\b[a-z0-9][a-z0-9-]*(?:\.[a-z0-9-]+)+[/?#]\S*|[a-z0-9._%+-]+@[a-z0-9.-]+\.[a-z]{2,}/gi;
 
 /** A leading character a spreadsheet reads as the start of a formula or a command. */
 const FORMULA_LEAD = /^[=+\-@|\t\r\\]+\s*/;

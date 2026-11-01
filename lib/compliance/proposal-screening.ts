@@ -10,7 +10,7 @@ import { getComplianceStatus } from '../agent/oxwal.ts';
 
 // X402_PAYMENT is outbound: its payee is an EVM address Splash holds no
 // screening record for, so it lands in NO_SCREENING_RECORD below — correctly.
-const OUTBOUND_KINDS = new Set<ProposalKind>(['PAYMENT', 'BATCH_PAYOUT', 'NETTING_SETTLE', 'X402_PAYMENT']);
+const OUTBOUND_KINDS = new Set<ProposalKind>(['PAYMENT', 'NETTING_SETTLE', 'X402_PAYMENT']);
 
 const CLEAR: ComplianceResult = {
   kytPassed: true,

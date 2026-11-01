@@ -104,7 +104,7 @@ test('each memory card carries its own measured relevance, and filler makes no c
   assert.equal(suggestionsFromMemories([{ text: 'payroll batch', distance: 0.7 }]).length, 1, 'at the cutoff: kept, as the SDK keeps 1 - distance >= 0.3');
 
   // The cards offer only what Zeke can do: draft a batch, read a rate.
-  assert.match(batch.description, /draft this batch for your approval\?$/);
+  assert.match(batch.description, /Attach the sheet and I will check every row for you\.$/);
   assert.match(timing.description, /check the current USD→IDR rate\?$/);
   assert.equal(timing.title, 'Check USD→IDR');
   for (const card of [batch, timing, close]) {

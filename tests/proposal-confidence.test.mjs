@@ -106,7 +106,6 @@ test('no Zeke proposal carries an invented confidence', async () => {
     await executeOxwalTool('proposeInternalTransfer', { orgId: 'demo-business', toOrgId: 'org-2', amountUsd: 100 }),
     await executeOxwalTool('proposeFxConvert', { orgId: 'demo-business', amountUsd: 100, currencyOut: 'PHP' }),
     await executeOxwalTool('proposeNettingSettlement', { orgId: 'demo-business', amountUsd: 100, corridor: 'MY_PH', counterpartyIds: ['cp_verified_payee'] }),
-    await executeOxwalTool('proposeBatchPayout', { orgId: 'demo-business', corridor: 'MY_PH', payouts: [{ counterpartyId: 'cp_verified_payee', amountUsd: 600, currency: 'USDC' }] }),
     await executeOxwalTool('proposeX402Payment', { orgId: 'demo-business', challenge: X402_CHALLENGE('arbitrum-sepolia') }),
   ];
   for (const proposal of built) {
@@ -115,7 +114,7 @@ test('no Zeke proposal carries an invented confidence', async () => {
   }
   // A clean PHP payment and a known x402 network: nothing extra to check.
   assert.deepEqual(built[0].explain.reviewReasons, []);
-  assert.deepEqual(built[5].explain.reviewReasons, []);
+  assert.deepEqual(built[4].explain.reviewReasons, []);
 });
 
 test('an invoice with warnings says so, without repeating the flagged text', async () => {

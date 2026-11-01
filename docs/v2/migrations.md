@@ -31,3 +31,19 @@ select count(*) from batch_runs;
 
 and export the rows first if the count is not zero. A business's batch payout
 history is `wallet_batches`, which stays.
+
+## `0072_retire_batch_payout_proposals`
+
+`0072` closes the proposals of kind `BATCH_PAYOUT` that are still open (drafted,
+simulated, waiting for approval, approved, signed or submitted): each becomes
+`EXPIRED` with `execution_state` `SKIPPED` and the reason on the row. Settled,
+anchored, rejected, failed, expired and reversed ones, and every other kind, are
+left as they are. Nothing is dropped or deleted, and a second run changes nothing.
+Before applying it to a shared database, see what it will touch:
+
+```sql
+select status, count(*) from proposals where kind = 'BATCH_PAYOUT' group by status;
+```
+
+The code no longer has the kind (docs/v2/phase3-zeke-batches.md); a payout run is
+made from a sheet in the wallet batch flow.
