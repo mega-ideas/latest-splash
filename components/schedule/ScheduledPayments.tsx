@@ -345,7 +345,7 @@ function RunLine({ run, canSkip, canStop, busy, stopping, onSkip, onStop, highli
         </div>
       </div>
       <RunWindow startsAt={run.startsAt} className="mt-1.5 text-[13px] font-bold text-[#0c3e48]" />
-      <p className="mt-1.5 text-[13px] leading-5 text-[#326273]">{run.reason?.trim() ? run.reason : state.says}</p>
+      <p className="mt-1.5 text-[13px] leading-5 text-[#326273]">{run.reason?.trim() ? run.reason : windowOpen ? 'It has fallen due. Nothing has been paid yet, and nothing is until the time above.' : state.says}</p>
       {run.payments && run.payments.length > 0 && run.status !== 'paid' ? (
         <ul className="mt-2 space-y-1 text-[13px] text-[#1F4452]">
           {run.payments.map((p) => (

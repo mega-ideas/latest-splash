@@ -174,7 +174,7 @@ function WarningWindow({ status, onChanged }: { status: AutomaticStatus; onChang
         e.preventDefault();
         void save();
       }}
-      className="dash-block mt-3 grid gap-3 p-3 sm:grid-cols-[minmax(0,14rem)_auto_minmax(0,1fr)] sm:items-end"
+      className="dash-block mt-3 grid gap-3 p-3 sm:grid-cols-[minmax(0,21rem)_auto_minmax(0,1fr)] sm:items-end"
       noValidate
     >
       <Field label="Warning before the first payment" hint="minutes, 0 to 60" htmlFor="grace-minutes" error={problem && minutes !== String(status.graceMinutes) ? problem : null}>
