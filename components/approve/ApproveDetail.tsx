@@ -6,6 +6,7 @@ import { useCallback, useEffect, useState } from 'react';
 import { ArrowLeft, Loader2, RefreshCw, TriangleAlert } from 'lucide-react';
 
 import RequestSummary from '@/components/approve/RequestSummary';
+import { usePhone } from '@/components/dashboard/Device';
 import { call, errorText, type SigningView } from '@/components/transfer/api';
 import SignPanel, { type SignLabels } from '@/components/transfer/SignPanel';
 import { closeOutcomeText } from '@/lib/approve/facts';
@@ -77,9 +78,12 @@ export default function ApproveDetail({ id }: { id: string }) {
 
   const request = state.request;
   const requester = request?.you.requested === true;
+  // On a phone the sign bar is fixed to the foot of the window for a signer who has not signed; the page keeps room under the last card for it.
+  const phone = usePhone();
+  const barShown = phone && request !== null && request.you.mustSign && !request.you.signed && request.status === 'collecting';
 
   return (
-    <div className="mx-auto w-full max-w-3xl space-y-4">
+    <div className={`mx-auto w-full max-w-3xl space-y-4 ${barShown ? 'pb-36' : ''}`}>
       <Link href="/dashboard/approve" className="inline-flex min-h-11 items-center gap-1.5 text-sm font-semibold text-[#0d6370] focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[#0d6370]">
         <ArrowLeft className="h-4 w-4" aria-hidden="true" />
         Approve
