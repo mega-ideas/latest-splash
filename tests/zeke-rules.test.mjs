@@ -496,10 +496,12 @@ test('an uploaded sheet goes to the sheet reader on the server, never into the m
   const composer = readFileSync(new URL('../components/oxwal/OxWalComposer.tsx', import.meta.url), 'utf8');
   const widget = readFileSync(new URL('../components/FloatingCopilot.tsx', import.meta.url), 'utf8');
   // The composer hands a file, or pasted rows, to onSheet and returns before onSubmit.
-  assert.match(composer, /if \(onSheet && looksLikeSheet\(value\)\) \{\s*onSheet\(pastedSheet\(value\)\);\s*onChange\(''\);\s*return;/);
+  // The pasted text stays in the box until the sheet has been read, and the box is emptied only when it was.
+  assert.match(composer, /if \(onSheet && looksLikeSheet\(value\)\) \{[\s\S]*?onSheet\(pastedSheet\(pasted\)\)[\s\S]*?onChange\(''\)[\s\S]*?return;/);
+  assert.doesNotMatch(composer, /onSheet\(pastedSheet\(value\)\);\s*onChange\(''\)/);
   assert.match(composer, /if \(onSheet\) onSheet\(payload\)/);
   // The widget shows the sheet in its own thread: it does not prompt Zeke with it and keeps no rows in browser storage.
-  assert.match(widget, /onSheet=\{\(sheet\) => void attachSheet\(sheet\)\}/);
+  assert.match(widget, /onSheet=\{\(sheet\) => attachSheet\(sheet\)\}/);
   assert.doesNotMatch(widget, /stashBatchDraft|sessionStorage|draft=1/);
 });
 
