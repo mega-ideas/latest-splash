@@ -195,7 +195,7 @@ test('an owner editing the payments of any schedule takes it as theirs', async (
 test('a raised daily limit applies only once the owners have signed; until then the old one holds, and a refused request leaves it alone', async () => {
   const t = await scheduleWorld();
   // Splash has raised this business's daily limit (Settings, Limits; tests/business-limits.test.mjs), so the owners may ask for more than the standard 5,000 a day.
-  await t.w.db.insert(schema.businessLimits).values({ orgId: 'acme', kind: 'daily', value: U(12_000), source: 'raised', changedBy: 'system:limits' });
+  await t.w.db.insert(schema.businessLimits).values({ orgId: 'acme', kind: 'daily', value: U(12_000), heldMax: U(12_000), source: 'raised', changedBy: 'system:limits' });
   const form = (daily) => ({ perPaymentUsdc: '1000', dailyUsdc: daily, monthlyUsdc: '20000', expiresInDays: 60 });
   const before = await S.automaticStatus(t.sdeps());
   assert.equal(before.dailyCapMinor, U(5_000).toString());
