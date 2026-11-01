@@ -96,3 +96,19 @@ One more table, `payouts` (made by `0000`, with a foreign key to
 `payment_intents`), has no reader and no writer either, and it is kept: `0080`
 leaves it in place until Sky decides whether to drop it. Nothing in the code
 imports it, uses `schema.payouts`, or names it in SQL.
+
+## `0081_decliner_snapshot`
+
+`0081` adds four nullable text columns: `declined_name` and `declined_title` on
+`wallet_signing_signers`, and `decided_name` and `decided_title` on
+`wallet_approval_asks`. They hold the name and the title of the person who
+declined, as they were then, so "Declined by Aisha (CFO)" does not change when
+she leaves or is renamed. No existing row is rewritten: a decline made before
+`0081` has nulls and is read from the person's live name and title while they
+are still a member.
+
+It also drops one foreign key, by name and `IF EXISTS`:
+`wallet_signing_signers_user_id_fkey`, which deleted the signer row (the record
+that a person declined, with the snapshot) when the account was deleted. The
+column and its place in the primary key stay. Nothing else is dropped and no
+`CASCADE` is used. Safe to run again.

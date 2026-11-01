@@ -568,6 +568,13 @@
       "when": 1795478400000,
       "tag": "0080_drop_unused_tables",
       "breakpoints": true
+    },
+    {
+      "idx": 81,
+      "version": "7",
+      "when": 1795564800000,
+      "tag": "0081_decliner_snapshot",
+      "breakpoints": true
     }
   ]
 }

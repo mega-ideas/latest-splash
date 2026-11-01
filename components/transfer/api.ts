@@ -6,6 +6,7 @@
 import type { PaymentReceipt, ReceiptRow, EInvoiceOffer } from '@/lib/transfer/receipt';
 import type { PolicyFacts, StaffRuleFacts } from '@/lib/transfer/plan';
 import type { InFlightWire } from '@/lib/transfer/context';
+import type { Decliners } from '@/lib/team/declined-by';
 
 export type Answer<T> = { ok: boolean; status: number; body: T | null };
 
@@ -59,6 +60,8 @@ export type SigningView = {
   signedWeight: number;
   expiresAt: string;
   signers: Array<{ userId: string; address: string; weight: number; signed: boolean; declined: boolean }>;
+  /** Everyone who declined, by name and title as they were when they declined; present only when someone has. Said by declinedByAllLabel. */
+  declinedBy?: Decliners;
   you: { mustSign: boolean; signed: boolean; declined: boolean; requested: boolean };
   executedDigest: string | null;
   /** What the owner who asked said this is for, in plain words, shown to every owner who signs. Null when the request has none. */

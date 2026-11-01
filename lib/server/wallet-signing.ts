@@ -68,6 +68,7 @@ import { assertSponsorable, SponsorRefused, type WalletSponsor } from '@/lib/ser
 import {
   claimSubmission,
   closeSigningRequest,
+  declinersOfRequests,
   insertSigningRequest,
   listInboxForSigner,
   listInFlightForStaff,
@@ -82,6 +83,7 @@ import {
   type SigningPurpose,
   type StoredRequest,
 } from '@/lib/server/wallet-signing-store';
+import type { Decliners } from '@/lib/team/declined-by';
 
 export const MAX_REQUEST_TTL_MS = 24 * 60 * 60 * 1000;
 /** How long a claimed submission may stay `submitting` before the cron asks the chain. */
@@ -508,6 +510,12 @@ export type RequestView = {
   expiresAt: string;
   gasMode: 'sponsored' | 'gasless';
   signers: Array<{ userId: string; address: string; weight: number; signed: boolean; declined: boolean }>;
+  /**
+   * Everyone who declined, by name and title as they were when they declined, in the order they
+   * declined (v2 Phase 3). Present only when someone has; read through this business's own record,
+   * so it goes only to its members. The panel says all of it (`declinedByAllLabel`), History two.
+   */
+  declinedBy?: Decliners;
   you: { mustSign: boolean; signed: boolean; declined: boolean; requested: boolean };
   executedDigest: string | null;
   /** What the dry run of these exact bytes moved, when the request opened. */
@@ -526,7 +534,7 @@ function reachableWeight(request: StoredRequest): number {
   return request.signers.filter((s) => s.declinedAt === null).reduce((a, s) => a + s.weight, 0);
 }
 
-function viewOf(request: StoredRequest, expect: WalletTxExpectations, userId: string): RequestView {
+function viewOf(request: StoredRequest, expect: WalletTxExpectations, userId: string, declinedBy?: Decliners): RequestView {
   const me = request.signers.find((s) => s.userId === userId);
   const expectations = expectationsFor(request, expect);
   let description: WalletTxDescription | null = null;
@@ -556,6 +564,7 @@ function viewOf(request: StoredRequest, expect: WalletTxExpectations, userId: st
     expiresAt: request.expiresAt.toISOString(),
     gasMode: request.gasMode,
     signers: request.signers.map((s) => ({ userId: s.userId, address: s.address, weight: s.weight, signed: s.signedAt !== null, declined: s.declinedAt !== null })),
+    ...(declinedBy ? { declinedBy } : {}),
     you: {
       mustSign: Boolean(valid && me && me.signedAt === null && me.declinedAt === null && request.status === 'collecting'),
       signed: Boolean(me?.signedAt),
@@ -571,6 +580,12 @@ function viewOf(request: StoredRequest, expect: WalletTxExpectations, userId: st
     withdrawal: ((request.summary as { withdrawal?: WithdrawalSigningDetails } | null)?.withdrawal ?? null),
     summaryText: ((request.summary as { summaryText?: SigningSummaryText } | null)?.summaryText ?? null),
   };
+}
+
+/** The views of these requests of one business, each with who declined it (one read for all of them). */
+async function viewsOf(db: DrizzleDb, orgId: string, requests: StoredRequest[], expect: WalletTxExpectations, userId: string): Promise<RequestView[]> {
+  const declined = await declinersOfRequests(db, orgId, requests.filter((r) => r.signers.some((s) => s.declinedAt !== null)).map((r) => r.id));
+  return requests.map((r) => viewOf(r, expect, userId, declined.get(r.id)));
 }
 
 /**
@@ -766,7 +781,7 @@ export async function openSigningRequest(
 export async function signingInbox(deps: Pick<SigningDeps, 'db' | 'expect' | 'now'>, input: { orgId: string; userId: string }): Promise<RequestView[]> {
   const now = (deps.now ?? (() => new Date()))();
   const rows = await listInboxForSigner(deps.db, input.orgId, input.userId, now);
-  return rows.map((r) => viewOf(r, deps.expect, input.userId));
+  return viewsOf(deps.db, input.orgId, rows, deps.expect, input.userId);
 }
 
 /** One request, for a signer or the person who asked. Another org's reads as absent. */
@@ -780,7 +795,7 @@ export async function readRequestForSigner(
     return fail(404, 'not_found', 'no such request');
   }
   // Decoded again from the stored bytes, so the view can never drift from them.
-  return { ok: true, request: viewOf(request, deps.expect, input.userId) };
+  return { ok: true, request: (await viewsOf(deps.db, input.orgId, [request], deps.expect, input.userId))[0] };
 }
 
 /**
@@ -835,7 +850,7 @@ export async function submitPartialSignature(
     await submitWhenReady(deps, updated, now);
   }
   const final = (await readSigningRequest(deps.db, input.orgId, request.id)) as StoredRequest;
-  return { ok: true, request: viewOf(final, deps.expect, input.userId) };
+  return { ok: true, request: (await viewsOf(deps.db, input.orgId, [final], deps.expect, input.userId))[0] };
 }
 
 /** Close an in-flight request on the chain's answer, and run its follow-up once. */

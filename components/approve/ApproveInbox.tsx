@@ -7,6 +7,7 @@ import { ChevronRight, Clock3, Fingerprint, Loader2, RefreshCw, TriangleAlert } 
 import type { SigningView } from '@/components/transfer/api';
 import { call, errorText } from '@/components/transfer/api';
 import { cardSummary, reviewRequest } from '@/lib/approve/facts';
+import { declinedByAllLabel } from '@/lib/team/declined-by';
 import { requestTitle } from '@/lib/wallet-page/labels';
 
 type Waiting = SigningView & { purpose: string };
@@ -120,6 +121,7 @@ function RequestCard({ request, now, signed = false }: { request: Waiting; now: 
           <span className="mt-0.5 flex items-start gap-1.5 text-[13px] font-semibold text-[var(--error)]"><TriangleAlert className="mt-0.5 h-3.5 w-3.5 shrink-0" aria-hidden="true" />This request could not be checked on your device. Do not sign it.</span>
         )}
         <span className="mt-1 flex items-center gap-1.5 text-[13px] text-[#326273]"><Clock3 className="h-3.5 w-3.5" aria-hidden="true" />{request.signedWeight} of {request.threshold} signed, {hours(request.expiresAt, now)}</span>
+        {request.declinedBy ? <span className="mt-0.5 block break-words text-[13px] text-[#326273]">{declinedByAllLabel(request.declinedBy)}</span> : null}
       </span>
       <span className="flex shrink-0 items-center gap-1 text-sm font-bold text-[#0d6370]">
         {signed ? 'View' : 'Review'}

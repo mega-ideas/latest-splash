@@ -30,6 +30,7 @@ export default function ApproveScreen({
   signed,
   needed,
   withinRule = false,
+  declined = null,
 }: {
   review: DeviceReview;
   /** The payees' names as the page knew them, in the order of the payments. Shown beside the address from the bytes, never instead of it. */
@@ -45,6 +46,8 @@ export default function ApproveScreen({
   needed?: number;
   /** A staff member's own payment under their spending rule: one signer, and it is them. */
   withinRule?: boolean;
+  /** Who has declined this request, said in full ("Declined by Aisha (CFO) and Ben (Finance lead)"), when anyone has. */
+  declined?: string | null;
 }) {
   const facts = approveFacts(review, { names });
   const blocked = facts.blocked;
@@ -108,6 +111,7 @@ export default function ApproveScreen({
             ) : signed !== undefined && needed !== undefined ? (
               <p>{signed} of {needed} signatures so far. Each owner signs on their own device.{expiresIn ? ` Expires in ${expiresIn}.` : ''}</p>
             ) : null}
+            {declined ? <p className="break-words">{declined}</p> : null}
           </div>
         ) : null}
       </section>

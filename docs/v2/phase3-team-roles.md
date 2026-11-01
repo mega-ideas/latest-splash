@@ -551,3 +551,84 @@ and switches it on. Owners are not affected, and a viewer never has either.
   `wallet_member_access` for existing members (`tests/team-view.test.mjs` fails
   if a migration backfills it).
 - Nothing here touches `move/`.
+
+## Declined by: name, title, and who sees it
+
+Sky's decisions (2 Nov), on the status words of a payment or batch the owners
+declined:
+
+1. **The signing panel names everyone who declined**, all names, not a count:
+   "Declined by Aisha (CFO) and Ben (Finance lead)". The names go only to
+   members of the same business. History keeps its cap (two names, then "and N
+   more"); the panel and History read the same facts and only the panel says
+   all of them.
+2. **A person who has since left still shows.** The name and the title are
+   written on the signing request's own decline record, in the same statement
+   that records the decline, and read from there, never from the live team
+   list. Leaving the business, a rename, a role change or removing the account
+   does not change or blank an old label.
+3. **The label always carries the title in brackets**: "Aisha (CFO)".
+
+| What | Where |
+|---|---|
+| The words, and cleaning a name and a title | `lib/team/declined-by.ts` (`declinerLabel`, `declinedByLabel` for History, `declinedByAllLabel` for the panel) |
+| The title | `lib/team/member-title.ts` |
+| The snapshot, and reading it | `recordDecline`, `declineSnapshot`, `declinersOfRequests`, `askDeclinerOf` in `lib/server/wallet-signing-store.ts`; `declineApprovalAsk` in `lib/server/payment-approval-asks.ts` |
+| What the panel receives | `declinedBy` on the request view (`RequestView` in `lib/server/wallet-signing.ts`, `SigningView` in `components/transfer/api.ts`) |
+| Where it is said | `components/transfer/SignPanel.tsx`, `components/approve/ApproveScreen.tsx` (the phone), `components/approve/ApproveInbox.tsx`; History through `lib/history-page/entries.ts` |
+| Migration | `drizzle/0081_decliner_snapshot.sql` |
+| Tests | `tests/declined-by-titles.test.mjs` (the words), `tests/declined-by-history.test.mjs` (a real database: the panel, History, the snapshot, leavers, renames, old rows, other businesses) |
+
+**What a member's title is.** A membership is a user, a business and a role; a
+member has no title or job field of their own in this code. The title is
+therefore the member's own title when one is set (`memberTitle` reads it first,
+so adding the field later changes nothing else), else the role's word: Owner
+(`admin`), Staff (`maker`), Approver (`checker`), Viewer (`viewer`), and
+**Finance lead** for the approver the owners appointed to it
+(`wallet_finance_leads`, open and still an approver). A person with no
+membership reads "Member".
+
+**Cleaning.** The name and the title are each cleaned on their own as plain
+words, and only then put in the shape "Name (Title)", so a hostile name or title
+cannot add a bracket, a comma, a link or a second person.
+
+- Brackets (every kind) and commas (every keyboard) inside one field are
+  **removed in place**: the name "Aisha (CFO)" is "Aisha CFO" and "Tan, Aisha" is
+  "Tan Aisha". The earlier rule that turned "Aisha (CFO)" into "Aisha" and "Tan,
+  Aisha" into "an owner" is replaced.
+- A field stops at its first word that is not a plain word (a link, markup, a
+  number, a symbol, an emoji), and is at most 30 characters, cut once at a word
+  with the one ellipsis character. Control, hidden and direction characters are
+  removed and spaces are collapsed.
+- A name that is empty after cleaning is said by the title alone ("Finance
+  lead"); a title that is empty is left out; a person with neither is counted
+  as one of the people who declined ("and N more"), and when nobody is named the
+  sentence is "Declined by an owner".
+- The same cleaning runs where the snapshot is written, where it is read and
+  where it is said (the page cleans it again), and a second pass changes nothing.
+
+**The snapshot.** Migration 0081 adds `declined_name` and `declined_title` to
+`wallet_signing_signers`, and `decided_name` and `decided_title` to
+`wallet_approval_asks` (the staff member's ask an owner declines). Only the name
+and the title, both already plain words; nothing else about the person (no
+email, no id beyond the row's own). Empty text means a snapshot was taken and
+nothing usable was left; null means the decline predates 0081.
+
+- **Old declines** (null) read the person's live name and title while they are
+  still a member of that business; if they are not, they are counted ("an owner").
+  Nothing is rewritten.
+- **The account itself.** `wallet_signing_signers.user_id` used to delete the
+  signer row with the account, which would have removed the decline and its
+  snapshot. 0081 drops that one foreign key (by name, `IF EXISTS`), as the
+  approval asks (0037) and the audit trail already outlive their people. Nothing
+  else is dropped.
+- **Who sees it.** Every read takes the business id from the session (WS2) and
+  goes through that business's own signers, so another business's request, or its
+  people, read as absent: by the request's id the answer is 404, in the inbox it
+  is empty, from the store it has no entry. The panel is reached only by that
+  request's signers and the person who asked.
+- **Repeat.** A second decline by the same person writes nothing, snapshot
+  included.
+
+**Not changed.** No Move code. Adding a title field to a member (and a place in
+Settings > Team to set it) is a product decision for Sky; nothing here needs it.

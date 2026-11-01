@@ -23,8 +23,9 @@ import { createHash } from 'node:crypto';
 import { and, asc, eq, gt, gte, inArray, isNotNull, isNull, lte, or, sql } from 'drizzle-orm';
 import type { PgDatabase } from 'drizzle-orm/pg-core';
 
-import { paymentScheduleRunPayments, users, walletApprovalAsks, walletSigningRequests, walletSigningSigners, walletSingleSignerConsents } from '../db/schema.ts';
-import { cleanDecliners, plainName, type Decliners } from '../team/declined-by.ts';
+import { memberships, paymentScheduleRunPayments, users, walletApprovalAsks, walletFinanceLeads, walletSigningRequests, walletSigningSigners, walletSingleSignerConsents } from '../db/schema.ts';
+import { cleanDecliners, plainName, type Decliner, type Decliners } from '../team/declined-by.ts';
+import { memberTitle } from '../team/member-title.ts';
 import type * as schemaModule from '../db/schema.ts';
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -71,44 +72,95 @@ export const DECLINED_BY_SIGNERS = 'enough signers declined that it can no longe
 /** How a request that people closed ended: the owners declined it, or its sender took it back. */
 export const endedByPeople = (error: string | null | undefined): 'declined' | 'withdrawn' => (error === DECLINED_BY_SIGNERS ? 'declined' : 'withdrawn');
 
+/** A person's name and title as the business knows them now: members of this business only. */
+type LiveCard = { name: string; title: string };
+
+/**
+ * The name and title of each of these people in this business now. A person who is not a member of
+ * it has no card: another business's people, and people who left, read as absent. The title is the
+ * Finance lead appointment while the person is still an approver, else the role's word
+ * (lib/team/member-title.ts; a member has no title of their own yet).
+ */
+async function liveCards(db: Pick<DrizzleDb, 'select'>, orgId: string, userIds: string[]): Promise<Map<string, LiveCard>> {
+  const out = new Map<string, LiveCard>();
+  const ids = [...new Set(userIds)];
+  if (ids.length === 0) return out;
+  const rows = await db
+    .select({ userId: memberships.userId, role: memberships.role, name: users.name })
+    .from(memberships)
+    .innerJoin(users, eq(users.id, memberships.userId))
+    .where(and(eq(memberships.orgId, orgId), inArray(memberships.userId, ids)));
+  const leads = await db
+    .select({ userId: walletFinanceLeads.userId })
+    .from(walletFinanceLeads)
+    .where(and(eq(walletFinanceLeads.orgId, orgId), isNull(walletFinanceLeads.revokedAt), inArray(walletFinanceLeads.userId, ids)));
+  const lead = new Set(leads.map((l) => l.userId));
+  for (const r of rows) out.set(r.userId, { name: r.name, title: memberTitle({ role: r.role, financeLead: lead.has(r.userId) && r.role === 'checker' }) });
+  return out;
+}
+
+/**
+ * What is written beside a decline (a signer's, or an approval ask's): this person's name and title now, each cleaned to plain words
+ * and nothing else about them. Empty text, not null, when nothing usable is left, so a decline
+ * with a snapshot is told from one made before snapshots existed (null).
+ */
+export async function declineSnapshot(db: Pick<DrizzleDb, 'select'>, orgId: string, userId: string): Promise<{ name: string; title: string }> {
+  const live = (await liveCards(db, orgId, [userId])).get(userId);
+  if (live) return { name: plainName(live.name) ?? '', title: plainName(live.title) ?? '' };
+  // Not a member of this business (it cannot decline here, but a snapshot is still written): the name alone, and the plainest title.
+  const [user] = await db.select({ name: users.name }).from(users).where(eq(users.id, userId)).limit(1);
+  return { name: plainName(user?.name) ?? '', title: plainName(memberTitle({})) ?? '' };
+}
+
+/** A snapshot or the live card as the person it says; null for both empty. */
+const personFrom = (name: string | null | undefined, title: string | null | undefined): Decliner => ({ name: plainName(name), title: plainName(title) });
+
 /**
  * Who declined each of these requests of this business, by the request's own record (a signer's
- * `declined_at`), in the order they declined. Names are read through the business's own signers
- * only, so another business's request, or its people, read as absent. A request with no decline
- * on record has no entry. Names are cleaned to plain words here (lib/team/declined-by.ts); a
- * decliner whose name leaves nothing is counted, not named.
+ * `declined_at`), in the order they declined. Read through the business's own signers only, so
+ * another business's request, or its people, read as absent. A request with no decline on record
+ * has no entry.
+ *
+ * Each person is their name and title as they were when they declined (the snapshot written with
+ * the decline), so leaving, a rename or a removed account changes nothing. A decline from before
+ * the snapshot reads the person's live name and title while they are still a member, else counts
+ * as an owner who is not named. Everything is cleaned to plain words here and again where it is
+ * said (lib/team/declined-by.ts).
  */
 export async function declinersOfRequests(db: DrizzleDb, orgId: string, requestIds: string[]): Promise<Map<string, Decliners>> {
   const out = new Map<string, Decliners>();
   const ids = [...new Set(requestIds)];
   if (ids.length === 0) return out;
   const rows = await db
-    .select({ requestId: walletSigningSigners.requestId, name: users.name })
+    .select({ requestId: walletSigningSigners.requestId, userId: walletSigningSigners.userId, name: walletSigningSigners.declinedName, title: walletSigningSigners.declinedTitle })
     .from(walletSigningSigners)
     .innerJoin(walletSigningRequests, and(eq(walletSigningRequests.id, walletSigningSigners.requestId), eq(walletSigningRequests.orgId, orgId)))
-    .leftJoin(users, eq(users.id, walletSigningSigners.userId))
     .where(and(eq(walletSigningSigners.orgId, orgId), inArray(walletSigningSigners.requestId, ids), isNotNull(walletSigningSigners.declinedAt)))
     .orderBy(asc(walletSigningSigners.declinedAt), asc(walletSigningSigners.userId));
+  const live = await liveCards(db, orgId, rows.filter((r) => r.title === null && r.name === null).map((r) => r.userId));
   for (const r of rows) {
     const entry = out.get(r.requestId) ?? { names: [], unnamed: 0 };
-    const name = plainName(r.name);
-    if (name) entry.names.push(name);
+    const card = r.title === null && r.name === null ? live.get(r.userId) : undefined;
+    const person = r.title === null && r.name === null ? (card ? personFrom(card.name, card.title) : { name: null, title: null }) : personFrom(r.name, r.title);
+    if (person.name || person.title) entry.names.push(person);
     else entry.unnamed += 1;
     out.set(r.requestId, entry);
   }
   return out;
 }
 
-/** The owner who declined this approval ask of this business, or null when the ask is not declined here or names no one. */
+/** The owner who declined this approval ask of this business (as they were when they declined), or null when the ask is not declined here. */
 export async function askDeclinerOf(db: DrizzleDb, orgId: string, askId: string): Promise<Decliners | null> {
   const [row] = await db
-    .select({ name: users.name, decidedBy: walletApprovalAsks.decidedBy, status: walletApprovalAsks.status })
+    .select({ name: walletApprovalAsks.decidedName, title: walletApprovalAsks.decidedTitle, decidedBy: walletApprovalAsks.decidedBy, status: walletApprovalAsks.status })
     .from(walletApprovalAsks)
-    .leftJoin(users, eq(users.id, walletApprovalAsks.decidedBy))
     .where(and(eq(walletApprovalAsks.orgId, orgId), eq(walletApprovalAsks.id, askId)))
     .limit(1);
   if (!row || row.status !== 'declined') return null;
-  return cleanDecliners({ names: [row.name], unnamed: 0 });
+  if (row.title !== null || row.name !== null) return cleanDecliners({ names: [{ name: row.name, title: row.title }], unnamed: 0 });
+  // Declined before the snapshot existed: the live name and title while they are a member of this business.
+  const card = row.decidedBy ? (await liveCards(db, orgId, [row.decidedBy])).get(row.decidedBy) : undefined;
+  return cleanDecliners({ names: card ? [{ name: card.name, title: card.title }] : [], unnamed: card ? 0 : 1 });
 }
 
 /** Requests whose dedupe key is held: open, or sent with no final answer. */
@@ -298,23 +350,30 @@ export async function recordPartialSignature(
   return rows.length === 1;
 }
 
-/** One signer declines. True only if this call recorded it. */
+/**
+ * One signer declines. True only if this call recorded it. The decline and the signer's name and
+ * title as they are at this moment are written in one transaction, in one statement, so a label is
+ * never half there; a second decline writes nothing, snapshot included.
+ */
 export async function recordDecline(db: DrizzleDb, input: { orgId: string; requestId: string; userId: string; now: Date }): Promise<boolean> {
-  const rows = await db
-    .update(walletSigningSigners)
-    .set({ declinedAt: input.now, updatedAt: input.now })
-    .where(
-      and(
-        eq(walletSigningSigners.requestId, input.requestId),
-        eq(walletSigningSigners.orgId, input.orgId),
-        eq(walletSigningSigners.userId, input.userId),
-        isNull(walletSigningSigners.signedAt),
-        isNull(walletSigningSigners.declinedAt),
-        sql`exists (select 1 from ${walletSigningRequests} r where r.id = ${input.requestId} and r.org_id = ${input.orgId} and r.status = 'collecting')`,
-      ),
-    )
-    .returning({ userId: walletSigningSigners.userId });
-  return rows.length === 1;
+  return db.transaction(async (tx) => {
+    const snapshot = await declineSnapshot(tx, input.orgId, input.userId);
+    const rows = await tx
+      .update(walletSigningSigners)
+      .set({ declinedAt: input.now, declinedName: snapshot.name, declinedTitle: snapshot.title, updatedAt: input.now })
+      .where(
+        and(
+          eq(walletSigningSigners.requestId, input.requestId),
+          eq(walletSigningSigners.orgId, input.orgId),
+          eq(walletSigningSigners.userId, input.userId),
+          isNull(walletSigningSigners.signedAt),
+          isNull(walletSigningSigners.declinedAt),
+          sql`exists (select 1 from ${walletSigningRequests} r where r.id = ${input.requestId} and r.org_id = ${input.orgId} and r.status = 'collecting')`,
+        ),
+      )
+      .returning({ userId: walletSigningSigners.userId });
+    return rows.length === 1;
+  });
 }
 
 /** Move a collecting request to submitting, and say when. Only one caller wins. */

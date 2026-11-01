@@ -14,6 +14,7 @@ import { formatUsdc } from '@/lib/fees/copy';
 import { groupAddress } from '@/lib/transfer/addresses';
 import { signingItems } from '@/lib/wallet-page/actions';
 import { differsFromApproved, differsFromApprovedBatch, type ApprovedPayment } from '@/lib/transfer/approved';
+import { declinedByAllLabel } from '@/lib/team/declined-by';
 import { call, errorText, type SigningView } from './api';
 import ExchangeMessage from './ExchangeMessage';
 import type { Made } from './flow';
@@ -193,6 +194,7 @@ export default function SignPanel({ initial, expected = null, expectedBatch = nu
           signed={view.signedWeight}
           needed={view.threshold}
           withinRule={underRule}
+          declined={view.declinedBy ? declinedByAllLabel(view.declinedBy) : null}
         />
       </section>
     );
@@ -223,6 +225,9 @@ export default function SignPanel({ initial, expected = null, expectedBatch = nu
           </li>
         ))}
       </ul>
+
+      {/* Everyone who declined, by name and title, to the people of this business still signing: History says the first two, this says all. */}
+      {view.declinedBy ? <p className="break-words text-[13px] leading-5 text-[#326273]" data-testid="declined-by">{declinedByAllLabel(view.declinedBy)}</p> : null}
 
       {/* A staff member's exchange payment: whether its Travel Rule message has gone, read from the server each time the payment is shown, with the way to send it again. */}
       {underRule && !finished && !dead && view.you.requested ? <ExchangeMessage signingId={view.id} /> : null}

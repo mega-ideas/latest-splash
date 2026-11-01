@@ -1468,7 +1468,8 @@ export const walletSigningRequests = pgTable('wallet_signing_requests', {
 export const walletSigningSigners = pgTable('wallet_signing_signers', {
   requestId: text('request_id').notNull().references(() => walletSigningRequests.id, { onDelete: 'cascade' }),
   orgId: text('org_id').notNull().references(() => organizations.id),
-  userId: text('user_id').notNull().references(() => users.id, { onDelete: 'cascade' }),
+  /** No foreign key (migration 0081): the record that a person declined outlives their account, like the audit trail. */
+  userId: text('user_id').notNull(),
   address: text('address').notNull(),
   publicKey: text('public_key').notNull(),
   weight: integer('weight').notNull(),
@@ -1477,6 +1478,13 @@ export const walletSigningSigners = pgTable('wallet_signing_signers', {
   signedAt: timestamp('signed_at', { withTimezone: true }),
   /** This signer declined. The request stays open for the others. */
   declinedAt: timestamp('declined_at', { withTimezone: true }),
+  /**
+   * Who declined, as they were when they did (migration 0081), written in the same statement as
+   * `declined_at`: the name and the title, each cleaned to plain words, nothing else. Empty text
+   * means a snapshot was taken and nothing usable was left; null means the decline predates it.
+   */
+  declinedName: text('declined_name'),
+  declinedTitle: text('declined_title'),
   notifiedAt: timestamp('notified_at', { withTimezone: true }),
   notifiedBy: text('notified_by'),
   ...timestamps,
@@ -1743,6 +1751,9 @@ export const walletApprovalAsks = pgTable('wallet_approval_asks', {
   signingRequestId: text('signing_request_id').references(() => walletSigningRequests.id),
   decidedBy: text('decided_by'),
   decidedAt: timestamp('decided_at', { withTimezone: true }),
+  /** The deciding owner's name and title when they declined, as plain words (migration 0081); null before it, empty when nothing usable was left. */
+  decidedName: text('decided_name'),
+  decidedTitle: text('decided_title'),
   decisionNote: text('decision_note'),
   expiresAt: timestamp('expires_at', { withTimezone: true }).notNull(),
   ...timestamps,

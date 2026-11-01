@@ -337,7 +337,7 @@ test('only the name and the title are kept, cleaned as plain words: nothing else
   assert.deepEqual(await snapshotOf(t, made.signingRequest.id, 'u-three'), { name: '', title: 'Owner' }, 'a name that is nothing after cleaning is stored empty, not as the markup');
   const row = (await signers(t, made.signingRequest.id)).find((r) => r.userId === 'u-two');
   const [user] = await t.w.db.select().from(schema.users).where(eq(schema.users.id, 'u-two'));
-  const kept = JSON.stringify([row.declinedName, row.declinedTitle]);
+  const kept = `${row.declinedName}|${row.declinedTitle}`;
   assert.ok(!kept.includes(user.email), 'no email');
   assert.doesNotMatch(kept, /evil|<|>|\(|\)|,/);
   assert.deepEqual(labels(await historyOf(t)), ['Declined by Aisha CFO Ben Staff (Owner) and Owner']);

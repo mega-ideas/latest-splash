@@ -48,27 +48,31 @@ A row is in exactly one of four groups, each with its own filter and count:
 withdrawal that came back, an earlier transfer that failed or was refunded);
 **Not paid** (a person declined, cancelled or withdrew it, or the time to sign
 ran out). A payment or batch whose request its sender took back, or that the
-owners declined, is Withdrawn or "Declined by Aisha" under Not paid and
+owners declined, is Withdrawn or "Declined by Aisha (Owner)" under Not paid and
 never Failed: the history reads the request's close, not only its status.
 Who declined comes from the signing request's own record (`declined_at` on its
 signers, or the owner who declined a staff member's ask), in the order they
-declined: "Declined by Aisha", "Declined by Aisha and Ben", "Declined by Aisha,
-Ben and 1 more", and "Declined by an owner" when no usable name is on record.
-A name is cleaned to plain words (no link, markup, number or symbol; at most
-30 characters, cut once at a word and ending in the one ellipsis character)
-by `lib/team/declined-by.ts`. The name is the plain words up to the first word
-that is not plain: what follows a link or a symbol is never shown as the
-person, and a name that starts with one reads "an owner" (the person still
-counts). A dash from another keyboard is the hyphen of the name; "and",
-"declined", a word that mixes scripts and a stack of combining marks are not
-name words. It is read only through the business's own request (another
-business reads none of it), and said the same in History, the batch list, the
-batch's own page and the reason of a scheduled run an owner declined.
+declined: "Declined by Aisha (Owner) and Ben (Owner)", "Declined by Aisha
+(Owner), Ben (Owner) and 1 more", and "Declined by an owner" when no usable
+name or title is on record. Each person carries a title in brackets, and the
+name and title are kept as they were when the person declined; the rules are in
+`phase3-team-roles.md` ("Declined by: name, title, and who sees it"). A name is
+cleaned to plain words (no link, markup, number or symbol; at most 30 characters,
+cut once at a word and ending in the one ellipsis character) by
+`lib/team/declined-by.ts`. The name is the plain words up to the first word that
+is not plain: what follows a link or a symbol is never shown as the person.
+Brackets and commas inside a name are removed in place. A dash from another
+keyboard is the hyphen of the name; "and", "declined", a word that mixes scripts
+and a stack of combining marks are not name words. It is read only through the
+business's own request (another business reads none of it), and said the same
+in History, the batch list, the batch's own page and the reason of a scheduled
+run an owner declined.
 "Withdrawn" names nobody, even if an owner had declined before the sender took
 the request back. A label of two long names and "and 1 more" wraps inside its
 row on a phone (`tests/declined-by.test.mjs`, `tests/declined-by-names.test.mjs`,
-`tests/declined-by-history.test.mjs`). The signing panel for a payment still
-shows "Owner 1, Owner 2" with signed or declined beside each, without names. A failed row carries two sentences in plain words, what happened and
+`tests/declined-by-history.test.mjs`, `tests/declined-by-titles.test.mjs`). The
+signing panel names everyone who declined (History names two); see
+`phase3-team-roles.md`. A failed row carries two sentences in plain words, what happened and
 what to do next, from `EXPLAIN` in `lib/history-page/entries.ts`. Failed takes
 the alarm colour; Not paid never does. When a refresh fails the loaded counts
 and list stay, and one sentence above the list says they are the last ones

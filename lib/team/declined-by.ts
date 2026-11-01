@@ -1,23 +1,39 @@
 /**
- * "Declined by <who>" (v2 Phase 3, Sky's decision): a payment or batch the
+ * "Declined by <who>" (v2 Phase 3, Sky's decisions): a payment or batch the
  * owners declined says who declined it, in History and wherever the same status
- * shows. Pure and client-safe, so the server and the page say it the same way.
+ * shows, and the signing panel says it to the people still signing. Pure and
+ * client-safe, so the server and the page say it the same way.
  *
- *   one owner          Declined by Aisha
- *   two owners         Declined by Aisha and Ben           (in the order they declined)
- *   more than two      Declined by Aisha, Ben and 1 more   (two names, then the count)
- *   no usable name     Declined by an owner
+ * Each person is "Name (Title)": the name and the title as they were when the
+ * person declined (the signing request keeps them), the title being the
+ * member's own title when set, else their role ("Owner", "Finance lead").
  *
- * A name is a person's own text, so it is only ever said as plain words: it is
- * cleaned where it is read from the record and again here (the second pass
- * changes nothing), and it stops at the first word that is not a plain word (a
- * link, markup, a number, a symbol, an emoji). A decliner whose name leaves
- * nothing still counts as one of the people who declined. "Withdrawn" is not a
- * decline and names nobody; the caller only passes this a declined row.
+ *   History (capped)   Declined by Aisha (CFO) and Ben (Finance lead)
+ *                      Declined by Aisha (CFO), Ben (Staff) and 1 more       (two, then the count)
+ *   Signing panel      Declined by Aisha (CFO), Ben (Staff) and Chen (Owner) (all of them)
+ *   nobody usable      Declined by an owner
+ *
+ * A name and a title are a person's own text, so each is only ever said as plain
+ * words, cleaned SEPARATELY (where it is read from the record and again here; the
+ * second pass changes nothing) and only then put in the shape "Name (Title)". So
+ * neither can add a bracket, a comma, a link or a second person. Brackets and
+ * commas inside one field are removed in place; a field stops at the first word
+ * that is not a plain word (a link, markup, a number, a symbol, an emoji). A name
+ * left with nothing is said by the title alone, and a person with neither is
+ * counted as one of the people who declined ("and N more", or "an owner" when
+ * nobody is named). "Withdrawn" is not a decline and names nobody; the caller
+ * only passes this a declined row.
  */
 
-/** The people who declined, as the signing request's record has them: usable names in the order they declined, and how many had none. */
-export type Decliners = { names: string[]; unnamed: number };
+/** One person who declined: their name and title as they were when they declined. Each is plain words or null. */
+export type Decliner = { name: string | null; title: string | null };
+
+/**
+ * The people who declined, as the signing request's own record has them: those with a usable name or
+ * title in the order they declined, and how many had neither. (An entry that is a plain string is read
+ * as a name with no title.)
+ */
+export type Decliners = { names: Decliner[]; unnamed: number };
 
 const MAX_NAME = 30;
 const ELLIPSIS = '…';
@@ -26,6 +42,8 @@ const WORD = /^[\p{L}\p{M}][\p{L}\p{M}'’.-]*$/u;
 const ADDRESS_LIKE = /[\p{L}\p{N}]\.\p{L}{2,}/u;
 /** The hyphens and dashes a keyboard other than ours types: NFKC leaves most of them alone, so they are mapped to the hyphen of a name. */
 const DASHES = /[‐-―−﹘﹣－]/gu;
+/** Brackets of every kind and the commas of every keyboard: removed in place inside one field, so they can never frame or separate a second person. */
+const BRACKETS_AND_COMMAS = /[\p{Ps}\p{Pe},،、﹐﹑]/gu;
 /** A cut name ends in the ellipsis character, which NFKC turns into three dots; reading that ending back is what makes cutting a cut name a no-op. */
 const CUT_MARK = /\.{3}\s*$/u;
 /** More combining marks in a row than any real letter carries would stack through the lines around the name. */
@@ -55,12 +73,13 @@ function isPlainWord(word: string): boolean {
 }
 
 /**
- * A name as plain words, or null when nothing plain is left. Only a string is a name.
+ * A name (or a title) as plain words, or null when nothing plain is left. Only a string is one.
  *
- * The name is the plain words up to the first word that is not plain: what
- * follows a link, markup, a number or a symbol is never shown as the person, and
- * a name that starts with one is no name (the person still counts, as "an owner").
- * A name over 30 characters is cut once at a word, by whole characters, and ends
+ * Brackets and commas are removed where they stand, so "Aisha (CFO)" is "Aisha CFO" and
+ * "Tan, Aisha" is "Tan Aisha"; the name is then the plain words up to the first word that
+ * is not plain: what follows a link, markup, a number or a symbol is never shown as the
+ * person, and a name that starts with one is no name (the title or "an owner" is said
+ * instead). A name over 30 characters is cut once at a word, by whole characters, and ends
  * in the one ellipsis character; cutting a cut name changes nothing.
  */
 export function plainName(raw: unknown): string | null {
@@ -68,6 +87,7 @@ export function plainName(raw: unknown): string | null {
   const text = raw
     .normalize('NFKC')
     .replace(DASHES, '-')
+    .replace(BRACKETS_AND_COMMAS, '')
     // Control, format (zero-width, direction overrides) and unassigned characters are removed, not kept inside a word.
     .replace(/[\p{C}]/gu, (c) => (/\s/u.test(c) ? ' ' : ''))
     .trim();
@@ -87,25 +107,56 @@ export function plainName(raw: unknown): string | null {
   return `${(atWord > 0 ? head.slice(0, atWord) : head).join('').trim()}${ELLIPSIS}`;
 }
 
-/** Whatever arrived, as a Decliners with only plain names; an unusable name moves to the count. */
+/** A person as the record gives them (an entry that is a plain string is a name with no title). */
+function personOf(raw: unknown): { name: unknown; title: unknown } {
+  if (typeof raw === 'string') return { name: raw, title: null };
+  return raw && typeof raw === 'object' ? (raw as { name: unknown; title: unknown }) : { name: null, title: null };
+}
+
+/**
+ * "Name (Title)". Each is cleaned on its own first, then put in the shape, so neither can reach
+ * into the other's place. A name that is empty after cleaning is replaced by the title alone, a
+ * title that is empty is left out, and a person with neither is "an owner".
+ */
+export function declinerLabel(person: unknown): string {
+  const p = personOf(person);
+  const name = plainName(p.name);
+  const title = plainName(p.title);
+  if (name && title) return `${name} (${title})`;
+  return name ?? title ?? 'an owner';
+}
+
+/** Whatever arrived, as a Decliners with only plain names and titles; a person with neither moves to the count. */
 export function cleanDecliners(value: unknown): Decliners {
   const v = value && typeof value === 'object' ? (value as { names?: unknown; unnamed?: unknown }) : {};
-  const names: string[] = [];
+  const names: Decliner[] = [];
   let unnamed = Number.isSafeInteger(v.unnamed) && (v.unnamed as number) > 0 ? (v.unnamed as number) : 0;
   for (const raw of Array.isArray(v.names) ? v.names : []) {
-    const name = plainName(raw);
-    if (name) names.push(name);
+    const p = personOf(raw);
+    const name = plainName(p.name);
+    const title = plainName(p.title);
+    if (name || title) names.push({ name, title });
     else unnamed += 1;
   }
   return { names, unnamed };
 }
 
-/** The status words of a declined payment or batch. */
+/** The status words of a declined payment or batch in History: two people, then the count of the rest. */
 export function declinedByLabel(declined: Decliners | null | undefined): string {
   const { names, unnamed } = cleanDecliners(declined);
   if (names.length === 0) return FALLBACK;
-  const shown = names.slice(0, 2);
+  const shown = names.slice(0, 2).map(declinerLabel);
   const more = names.length + unnamed - shown.length;
   if (more === 0) return `Declined by ${shown.join(' and ')}`;
   return `Declined by ${shown.join(', ')} and ${more} more`;
+}
+
+/** The same facts for the signing panel, which names every person who declined; people with nothing to say are counted. */
+export function declinedByAllLabel(declined: Decliners | null | undefined): string {
+  const { names, unnamed } = cleanDecliners(declined);
+  if (names.length === 0) return FALLBACK;
+  const parts = names.map(declinerLabel);
+  if (unnamed > 0) parts.push(`${unnamed} more`);
+  if (parts.length === 1) return `Declined by ${parts[0]}`;
+  return `Declined by ${parts.slice(0, -1).join(', ')} and ${parts[parts.length - 1]}`;
 }

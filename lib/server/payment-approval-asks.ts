@@ -59,7 +59,7 @@ import { financeLeadOf } from './team-admin.ts';
 import { memberRole, recordAuthorityEvent } from './wallet-authority.ts';
 import type { IntentState, WalletContext, WalletMembers } from './business-wallet.ts';
 import type { RequestView } from './wallet-signing.ts';
-import type { DrizzleDb, StoredRequest } from './wallet-signing-store.ts';
+import { declineSnapshot, type DrizzleDb, type StoredRequest } from './wallet-signing-store.ts';
 
 export type AskFailure = { ok: false; status: number; code: string; error: string };
 const fail = (status: number, code: string, error: string): AskFailure => ({ ok: false, status, code, error });
@@ -618,9 +618,11 @@ export async function declineApprovalAsk(
   const current = await viewOne(db, row, now);
   if (current.status !== 'open') return fail(409, 'not_open', `this ask is ${current.status}`);
   const reason = input.reason == null ? null : String(input.reason).slice(0, 500);
+  // The owner's name and title as they are now, kept with the decline: leaving or a rename later does not change who declined it.
+  const snapshot = await declineSnapshot(db, input.orgId, input.userId);
   await db
     .update(walletApprovalAsks)
-    .set({ status: 'declined', decidedBy: input.userId, decidedAt: now, decisionNote: reason, updatedAt: now })
+    .set({ status: 'declined', decidedBy: input.userId, decidedAt: now, decidedName: snapshot.name, decidedTitle: snapshot.title, decisionNote: reason, updatedAt: now })
     .where(and(eq(walletApprovalAsks.orgId, input.orgId), eq(walletApprovalAsks.id, row.id)));
   await recordAuthorityEvent(db, { orgId: input.orgId, actorUserId: input.userId, action: 'approval_declined', subjectUserId: row.requestedBy, ref: row.id, detail: reason ? { reason } : {}, now: () => now });
   return { ok: true };
