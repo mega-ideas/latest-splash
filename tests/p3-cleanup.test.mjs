@@ -76,14 +76,28 @@ test('the journal-order guard and its test are kept', async () => {
   assert.doesNotMatch(order, /migration-renumber/, 'the guard test does not cite the removed page');
 });
 
-test('docs/v2 says in one sentence that migrations are applied in journal order', async () => {
+test('docs/v2 says in one sentence that migrations are applied in journal order, on the migrations page', async () => {
   const sentence = /Migrations are applied in journal order on an empty or current database\./;
-  let count = 0;
+  const pages = [];
   for (const file of await readdir(at('docs/v2'))) {
     if (!file.endsWith('.md')) continue;
-    if (sentence.test(await readFile(at(`docs/v2/${file}`), 'utf8'))) count += 1;
+    if (sentence.test(await readFile(at(`docs/v2/${file}`), 'utf8'))) pages.push(file);
   }
-  assert.equal(count, 1, 'once, not repeated across pages');
+  assert.deepEqual(pages, ['migrations.md'], 'once, on the page an operator looks at for migrations');
+});
+
+test('the batch page keeps the approval text with the BATCH_PAYOUT sentence it is about', async () => {
+  const doc = (await readFile(at('docs/v2/phase3-batch.md'), 'utf8')).replace(/\r\n/g, '\n');
+  const paragraphs = doc.split(/\n\n+/);
+  const stays = paragraphs.find((p) => p.startsWith('What stays:'));
+  assert.ok(stays, 'the What stays paragraph exists');
+  assert.match(stays, /BATCH_PAYOUT/);
+  assert.match(stays, /Approving one now records it as\s+\*\*not executed\*\*/, 'the approval text follows the proposal-kind sentence');
+  const goes = paragraphs.find((p) => p.startsWith('What goes after it:'));
+  assert.ok(goes, 'the What goes after it paragraph exists');
+  assert.doesNotMatch(goes, /Approving one|Migrations are applied/);
+  assert.match(goes, /wallet_batches\.$/);
+  for (const p of paragraphs) assert.ok(p.length < 1200, 'no run-on paragraph');
 });
 
 // ── batch_runs is dropped by a new migration ───────────────────────────────
@@ -92,17 +106,18 @@ test('batch_runs has a migration that drops it, at the next number, listed in th
   const files = await sorted();
   const drop = files.find((f) => /batch_runs/.test(f) && f !== '0011_batch_runs.sql');
   assert.equal(drop, '0071_drop_batch_runs.sql');
-  assert.equal(files.at(-1), drop, 'it is the newest migration');
   const sql = await readFile(at(`drizzle/${drop}`), 'utf8');
   assert.match(sql, /DROP TABLE IF EXISTS "batch_runs"/);
   assert.doesNotMatch(sql, /CASCADE/i, 'nothing else is dropped with it');
 
   const journal = JSON.parse(await readFile(at('drizzle/meta/_journal.json'), 'utf8'));
-  const last = journal.entries.at(-1);
-  const before = journal.entries.at(-2);
-  assert.equal(last.tag, '0071_drop_batch_runs');
-  assert.equal(last.idx, 71);
-  assert.ok(last.when > before.when, 'when rises, or a database that applied 0070 would skip it');
+  // By tag, not by position: a later migration must not break this test.
+  const entry = journal.entries.find((e) => e.tag === '0071_drop_batch_runs');
+  assert.ok(entry, '0071 is in the journal');
+  assert.equal(entry.idx, 71);
+  const before = journal.entries.find((e) => e.idx === 70);
+  assert.ok(before, '0070 is in the journal');
+  assert.ok(entry.when > before.when, 'when rises, or a database that applied 0070 would skip it');
 
   // The applied migration is not edited: 0011 still creates the table.
   const eleven = await readFile(at('drizzle/0011_batch_runs.sql'), 'utf8');
@@ -199,6 +214,22 @@ const GONE = [
   // The two logos only the settlement-flow diagram drew.
   'public/stripe-logo.svg',
   'public/airwallex-logo.png',
+  // Images only the image allow-list and one dead style rule named.
+  'public/sumsub-logo.png',
+  'public/deepbook-mark.png',
+  'public/sui-logo-blue.svg',
+  // shadcn files that nothing imports (alert, button, input and select stay as the base kit).
+  'components/ui/avatar.tsx',
+  'components/ui/badge.tsx',
+  'components/ui/card.tsx',
+  'components/ui/dialog.tsx',
+  'components/ui/label.tsx',
+  'components/ui/progress.tsx',
+  'components/ui/separator.tsx',
+  'components/ui/sheet.tsx',
+  'components/ui/table.tsx',
+  'components/ui/tabs.tsx',
+  'components/ui/toggle.tsx',
 ];
 
 test('files with no caller are removed', async () => {
@@ -220,6 +251,9 @@ test('nothing imports, links or names what was removed', async () => {
     /usdt-ttl-guard/,
     /server\/ptb/,
     /fund-settlement-pool/,
+    /sumsub-logo|deepbook-mark|sui-logo-blue/,
+    /iso-deepbook-logo|iso-airwallex-logo/,
+    /ui\/(avatar|badge|card|dialog|label|progress|separator|sheet|table|tabs|toggle)['"]/,
   ];
   const found = [];
   for (const file of await allText('.')) {
@@ -236,17 +270,25 @@ test('nothing imports, links or names what was removed', async () => {
   assert.match(row, /removed/, 'the dated record says the script has since been removed');
 });
 
-test('the image allow-list no longer admits the removed logo', async () => {
+test('the image allow-list no longer admits the removed logos', async () => {
   const config = await readFile(at('next.config.ts'), 'utf8');
-  assert.doesNotMatch(config, /airwallex-logo/);
+  assert.doesNotMatch(config, /airwallex-logo|sumsub-logo|deepbook-mark/);
   assert.match(config, /splash-main-icon\.png/, 'the icon every page uses is still admitted');
 });
 
 test('the settlement-flow styles went with the component, and nothing else in the stylesheet changed meaning', async () => {
   const css = await readFile(at('app/globals.css'), 'utf8');
   assert.doesNotMatch(css, /dash-flow/);
+  assert.doesNotMatch(css, /iso-deepbook-logo|iso-airwallex-logo/, 'the rules for the removed logos went too');
   // The neighbours of the removed blocks are still there.
   assert.match(css, /\.dash-reveal-stagger/);
+});
+
+test('comments no longer point at files that were deleted', async () => {
+  const env = await readFile(at('lib/env.ts'), 'utf8');
+  assert.doesNotMatch(env, /airwallex\.ts|stripe\.ts/);
+  const css = await readFile(at('app/globals.css'), 'utf8');
+  assert.doesNotMatch(css, /signature engine|shared dashboard engine/);
 });
 
 test('the pages that never used the removed components still do not', async () => {
@@ -265,6 +307,9 @@ test('what the cleanup must not touch is still there', async () => {
     'app/api/wallet/batches/route.ts',
     'scripts/set-compliance-config.mjs',
     'components/ui/button.tsx',
+    'components/ui/alert.tsx',
+    'components/ui/input.tsx',
+    'components/ui/select.tsx',
   ]) {
     assert.equal(await exists(keep), true, `${keep} stays`);
   }
