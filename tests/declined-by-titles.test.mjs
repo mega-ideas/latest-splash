@@ -47,9 +47,17 @@ test('brackets and commas inside one field are removed in place; the name is not
   assert.equal(plainName('Tan, Aisha'), 'Tan Aisha');
   assert.equal(plainName('(((Aisha)))'), 'Aisha');
   assert.equal(plainName('[Aisha], {Ben}'), 'Aisha Ben');
-  assert.equal(plainName('Aisha（CFO）'), 'AishaCFO', 'full-width brackets too');
+  assert.equal(plainName('Aisha（CFO）'), 'Aisha CFO', 'full-width brackets too');
   assert.equal(plainName('「Aisha」'), 'Aisha', 'corner brackets too');
-  assert.equal(plainName('Aisha，Ben'), 'AishaBen', 'a full-width comma too');
+  assert.equal(plainName('Aisha，Ben'), 'Aisha Ben', 'a full-width comma too');
+  // Punctuation that visibly separates two words must not fuse them into a made-up word ("TanAisha").
+  assert.equal(plainName('Tan,Aisha'), 'Tan Aisha');
+  assert.equal(plainName('Smith,John'), 'Smith John');
+  assert.equal(plainName('Aisha(CFO)'), 'Aisha CFO');
+  assert.equal(plainName('Aisha{Owner}'), 'Aisha Owner');
+  assert.equal(plainName('Aisha[CFO]'), 'Aisha CFO');
+  assert.equal(plainName('Aisha،Ben'), 'Aisha Ben', 'an Arabic comma too');
+  assert.equal(declinerLabel(person('Tan,Aisha', 'Owner')), 'Tan Aisha (Owner)');
   assert.equal(plainName('(),'), null, 'nothing left is no name');
   assert.equal(declinerLabel(person('Aisha (CFO)', 'Owner')), 'Aisha CFO (Owner)');
   assert.equal(declinerLabel(person('Tan, Aisha', 'Owner')), 'Tan Aisha (Owner)');
@@ -69,6 +77,8 @@ test('a name and a title are cleaned separately, so neither can add a bracket, a
     ['Aisha‮', 'Owner​'],
     ['Aisha', ')))((('],
     ['))((', 'Owner'],
+    ['Aisha,Ben', 'Owner'],
+    ['Aisha(CFO)Ben{Staff}', 'Owner,Ben(Owner)'],
   ];
   for (const [name, title] of hostile) {
     const label = declinerLabel(person(name, title));
@@ -79,7 +89,8 @@ test('a name and a title are cleaned separately, so neither can add a bracket, a
   }
   assert.equal(declinerLabel(person('Aisha (CFO), Ben (Staff)', 'Owner')), 'Aisha CFO Ben Staff (Owner)', 'one account is one label, however it is written');
   assert.equal(declinerLabel(person('Aisha', 'Owner), Ben (Owner')), 'Aisha (Owner Ben Owner)');
-  assert.equal(declinerLabel(person('Aisha', '[Finance](https://evil.example)')), 'Aisha');
+  assert.equal(declinerLabel(person('Aisha', '[Finance](https://evil.example)')), 'Aisha (Finance)', 'the link is never shown, the plain word before it is');
+  assert.equal(declinerLabel(person('Aisha', '(https://evil.example)')), 'Aisha');
   assert.equal(declinerLabel(person('Aisha', ')))(((')), 'Aisha', 'a title with nothing left is left out, not shown as empty brackets');
 });
 
@@ -101,10 +112,18 @@ test('the capped sentence (History) names two and counts the rest; the full sent
   assert.equal(declinedByLabel(four), 'Declined by Aisha (CFO), Ben (Finance lead) and 2 more');
   assert.equal(declinedByAllLabel(four), 'Declined by Aisha (CFO), Ben (Finance lead), Chen (Owner) and Dara (Owner)');
   assert.equal(declinedByAllLabel({ names: [person('Aisha', 'CFO')], unnamed: 0 }), 'Declined by Aisha (CFO)');
-  assert.equal(declinedByAllLabel({ names: [person('Aisha', 'CFO')], unnamed: 1 }), 'Declined by Aisha (CFO) and 1 more', 'a decliner with nothing to say is counted');
-  assert.equal(declinedByAllLabel({ names: [person('Aisha', 'CFO'), person('Ben', 'Owner')], unnamed: 2 }), 'Declined by Aisha (CFO), Ben (Owner) and 2 more');
+  // The panel names everyone: a decliner with no usable name or title is "an owner", never a count (the count is History's).
+  assert.equal(declinedByAllLabel({ names: [person('Aisha', 'Owner')], unnamed: 1 }), 'Declined by Aisha (Owner) and an owner');
+  assert.equal(declinedByAllLabel({ names: [person('Aisha', 'CFO')], unnamed: 1 }), 'Declined by Aisha (CFO) and an owner');
+  assert.equal(declinedByAllLabel({ names: [person('Aisha', 'CFO'), person('Ben', 'Owner')], unnamed: 2 }), 'Declined by Aisha (CFO), Ben (Owner), an owner and an owner');
+  assert.equal(declinedByAllLabel({ names: [], unnamed: 1 }), 'Declined by an owner');
+  assert.equal(declinedByAllLabel({ names: [], unnamed: 2 }), 'Declined by an owner and an owner');
+  // History keeps its cap and its count.
+  assert.equal(declinedByLabel({ names: [person('Aisha', 'Owner')], unnamed: 1 }), 'Declined by Aisha (Owner) and 1 more');
+  assert.equal(declinedByLabel({ names: [person('Aisha', 'Owner')], unnamed: 2 }), 'Declined by Aisha (Owner) and 2 more');
   assert.equal(declinedByAllLabel(null), 'Declined by an owner');
-  assert.equal(declinedByAllLabel({ names: [], unnamed: 3 }), 'Declined by an owner');
+  assert.equal(declinedByAllLabel({ names: [], unnamed: 3 }), 'Declined by an owner, an owner and an owner');
+  assert.equal(declinedByAllLabel({ names: [], unnamed: 0 }), 'Declined by an owner', 'nobody usable and nobody counted still says an owner');
   assert.equal(declinedByAllLabel({ names: [person(null, null)], unnamed: 0 }), 'Declined by an owner', 'a person with neither is an owner, not blank');
 });
 

@@ -375,10 +375,11 @@ test('a decline from before the snapshot reads the live name and title while the
   await t.w.client.exec(`UPDATE memberships SET role = 'maker' WHERE user_id = 'u-three'`);
   assert.deepEqual(labels(await historyOf(t)), ['Declined by Aisha Renamed (Owner) and Ben (Staff)'], 'no snapshot: the live card');
   await t.w.client.exec(`DELETE FROM memberships WHERE user_id = 'u-two'`);
-  assert.deepEqual(labels(await historyOf(t)), ['Declined by Ben (Staff) and 1 more'], 'a leaver with no snapshot is counted, not named');
+  assert.deepEqual(labels(await historyOf(t)), ['Declined by Ben (Staff) and 1 more'], 'a leaver with no snapshot is counted, not named, in History');
+  assert.equal(declinedByAllLabel((await panelOf(t, made.signingRequest.id)).request.declinedBy), 'Declined by Ben (Staff) and an owner', 'the panel names everyone: the leaver with no snapshot is "an owner", not a count');
   await t.w.client.exec(`DELETE FROM memberships WHERE user_id = 'u-three'`);
   assert.deepEqual(labels(await historyOf(t)), ['Declined by an owner']);
-  assert.equal(declinedByAllLabel((await panelOf(t, made.signingRequest.id)).request.declinedBy), 'Declined by an owner');
+  assert.equal(declinedByAllLabel((await panelOf(t, made.signingRequest.id)).request.declinedBy), 'Declined by an owner and an owner', 'two leavers with no snapshot: two owners, not "2 more"');
   await t.w.client.close();
 });
 
@@ -388,7 +389,8 @@ test('a hostile name or title in the record is said as plain words: one bracket 
   await t.w.client.exec(`UPDATE wallet_signing_signers SET declined_name = 'Aisha (CFO), Ben', declined_title = 'Owner), Ben (Owner' WHERE request_id = '${made.signingRequest.id}' AND user_id = 'u-two'`);
   await t.w.client.exec(`UPDATE wallet_signing_signers SET declined_name = 'https://evil.example Chen', declined_title = '[Finance](https://evil.example)' WHERE request_id = '${made.signingRequest.id}' AND user_id = 'u-three'`);
   const [entry] = await historyOf(t);
-  assert.equal(entry.status.label, 'Declined by Aisha CFO Ben (Owner Ben Owner) and 1 more');
+  // The link is never shown; the plain word before it is (a bracket is a space, so "[Finance](https://…)" is "Finance").
+  assert.equal(entry.status.label, 'Declined by Aisha CFO Ben (Owner Ben Owner) and Finance');
   const full = declinedByAllLabel((await panelOf(t, made.signingRequest.id)).request.declinedBy);
   assert.doesNotMatch(full, /evil|https?|<|>|\[|\]|,/);
   assert.equal(full.split('(').length - 1, 1, 'one title, in one pair of brackets');
