@@ -55,11 +55,20 @@ signers, or the owner who declined a staff member's ask), in the order they
 declined: "Declined by Aisha", "Declined by Aisha and Ben", "Declined by Aisha,
 Ben and 1 more", and "Declined by an owner" when no usable name is on record.
 A name is cleaned to plain words (no link, markup, number or symbol; at most
-30 characters) by `lib/team/declined-by.ts`, read only through the business's
-own request (another business reads none of it), and said the same in History,
-the batch list and the batch's own page. "Withdrawn" names nobody, even if an
-owner had declined before the sender took the request back
-(`tests/declined-by.test.mjs`, `tests/declined-by-history.test.mjs`). A failed row carries two sentences in plain words, what happened and
+30 characters, cut once at a word and ending in the one ellipsis character)
+by `lib/team/declined-by.ts`. The name is the plain words up to the first word
+that is not plain: what follows a link or a symbol is never shown as the
+person, and a name that starts with one reads "an owner" (the person still
+counts). A dash from another keyboard is the hyphen of the name; "and",
+"declined", a word that mixes scripts and a stack of combining marks are not
+name words. It is read only through the business's own request (another
+business reads none of it), and said the same in History, the batch list, the
+batch's own page and the reason of a scheduled run an owner declined.
+"Withdrawn" names nobody, even if an owner had declined before the sender took
+the request back. A label of two long names and "and 1 more" wraps inside its
+row on a phone (`tests/declined-by.test.mjs`, `tests/declined-by-names.test.mjs`,
+`tests/declined-by-history.test.mjs`). The signing panel for a payment still
+shows "Owner 1, Owner 2" with signed or declined beside each, without names. A failed row carries two sentences in plain words, what happened and
 what to do next, from `EXPLAIN` in `lib/history-page/entries.ts`. Failed takes
 the alarm colour; Not paid never does. When a refresh fails the loaded counts
 and list stay, and one sentence above the list says they are the last ones
