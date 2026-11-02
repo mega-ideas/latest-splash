@@ -274,6 +274,22 @@ test('a request nobody approves lapses unpaid at its existing end, once, to the 
   await client.close();
 });
 
+test('a request only its own maker signs (a staff payment under their own rule, a move of their own USDC) is not waiting for anyone else', async () => {
+  const { client, db } = await seeded();
+  const own = await signing(db, { requestedBy: 'u-maker', signers: ['u-maker'], purpose: 'staff_rule_payment' });
+  const move = await signing(db, { requestedBy: 'u-owner', signers: ['u-owner'], purpose: 'migration_transfer', ttlMs: HOUR });
+  const mail = mailbox();
+  for (const t of [0, 10 * MIN, HOUR, 4 * HOUR, 25 * HOUR]) await sweep(db, at(t), mail);
+  for (const id of [own, move]) {
+    assert.deepEqual(await stepsOf(db, id), [], 'no reminder and no lapse notice for a request nobody else was asked about');
+    assert.equal((await noticesOf(db, id)).length, 0);
+  }
+  assert.equal(mail.sent.length, 0);
+  assert.equal((await listAuthorityEvents(db, 'acme')).filter((e) => e.action === 'approval_lapsed').length, 0);
+  assert.deepEqual((await waitingFor(db, { now: () => at(30 * MIN) }, { orgId: 'acme', userId: 'u-maker' })).waiting, [], 'and it is not listed as waiting for others');
+  await client.close();
+});
+
 test('a request that was approved, withdrawn or declined does not lapse; one that ended long ago is history', async () => {
   const { client, db } = await seeded();
   const done = await signing(db, { status: 'executed' });
