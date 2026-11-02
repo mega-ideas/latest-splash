@@ -851,3 +851,21 @@ test('a batch its sender took back, or the owners declined, is Not paid in Histo
   const after = buildHistory({ transfers: [], batches: await B.listBatches(t.deps()), withdrawals: [], earlier: [] });
   assert.deepEqual(after.map((e) => e.group).sort(), ['failed', 'not_paid']);
 });
+
+// ─── The audit proof (v2 Phase 3, p3-disclosure) ────────────────────────────
+
+test('a batch\'s sealed record says who started it, when, by which route and who could approve it', async () => {
+  const t = await setup();
+  await twoRecipients(t);
+  const r = await B.createBatch(t.deps(), OWNER, input(sheet(row('Dela Cruz Trading Corp', '100'), row('Santos Supplies Inc', '100'))));
+  assert.equal(r.ok, true, JSON.stringify(r));
+  assert.equal(t.calls.records.length, 1);
+  const trail = t.calls.records[0].trail;
+  assert.ok(trail, 'the record carries a trail');
+  assert.equal(trail.startedBy.userId, 'u-founder');
+  assert.equal(trail.startedBy.role, 'owner');
+  assert.equal(trail.route, 'batch_owners');
+  assert.equal(trail.rule, null);
+  assert.ok(trail.mayApprove.includes('u-founder') && trail.mayApprove.includes('u-two') && trail.mayApprove.includes('u-three'));
+  assert.ok(Date.parse(trail.startedAt) > 0);
+});
