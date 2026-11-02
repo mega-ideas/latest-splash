@@ -169,11 +169,13 @@ export async function sendTravelRule(
   if (row.providerRef) return { ok: true, created: false, transfer: travelRuleView(row) };
   if (row.status === 'unconfirmed') return unconfirmed();
 
-  // Claim the send: only the caller that moves it from preparing asks Sumsub.
+  // Claim the send: only the caller that moves it from preparing asks Sumsub, and only for the message it holds. The claim names the hash
+  // it read: if another caller turned the row into a more private form meanwhile, this claim finds nothing, sends nothing, and the caller
+  // asks again (the switches are read again then). What is recorded as sent is therefore always the message that was sent.
   const [claimed] = await deps.db
     .update(travelRuleTransfers)
     .set({ status: 'sending', updatedAt: deps.now() })
-    .where(and(eq(travelRuleTransfers.orgId, deps.orgId), eq(travelRuleTransfers.id, row.id), eq(travelRuleTransfers.status, 'preparing')))
+    .where(and(eq(travelRuleTransfers.orgId, deps.orgId), eq(travelRuleTransfers.id, row.id), eq(travelRuleTransfers.status, 'preparing'), eq(travelRuleTransfers.requestHash, requestHash)))
     .returning();
   if (!claimed) {
     const now2 = await readTravelRuleTransfer(deps.db, deps.orgId, input.intentId);
