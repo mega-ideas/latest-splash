@@ -4,6 +4,7 @@ import { useRef, useState } from 'react';
 import { CircleAlert, Clock3, Loader2, RefreshCw, Undo2 } from 'lucide-react';
 
 import StartQuestions from '@/components/limits/StartQuestions';
+import FewApprovers from '@/components/team/FewApprovers';
 import { call, errorText } from '@/components/transfer/api';
 import { CONTROL, Field, Modal, PrimaryButton, QuietButton, TextInput } from '@/components/transfer/ui';
 import { Card, Loading, Note, Pill, newKey, useLoad } from '@/components/wallet/parts';
@@ -104,6 +105,7 @@ export default function LimitsCard({ controls }: { controls?: ControlsFigures | 
           These are the most Splash will pay for you automatically. They are where your business started, and they can go up or down. {data.canAsk ? 'You can lower any of them at once, and put one back at once. To go higher than your business has had, ask Splash.' : 'Only an owner can lower a limit or ask Splash for a higher one.'}
         </p>
         {problem ? <Note tone="error">{problem}</Note> : null}
+        {data.canAsk ? <FewApprovers /> : null}
 
         {start.headline ? (
           <div role="group" className="space-y-2 rounded-xl bg-[#F6F0ED] p-3" aria-labelledby="limits-start-title">

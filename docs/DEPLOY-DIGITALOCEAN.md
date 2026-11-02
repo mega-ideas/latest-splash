@@ -201,10 +201,17 @@ new build refuses to install or start on the old runtime and environment.
    (v2 §4.1): it closes Business Splash Wallet signature requests past their
    expiry and clears the partial signatures they held, and reads on chain
    every submission whose outcome is unknown or that is stuck past its lease,
-   closing it as executed (and opening the next step) or failed. It answers
+   closing it as executed (and opening the next step) or failed. It also
+   carries the ladder for requests nobody has answered (v2 Phase 3): it tells
+   the people who can approve a waiting request again after 10 minutes, 1 hour
+   and 4 hours, in the app and by e-mail through the one Splash sender, and
+   tells the person who asked and the owners "Nobody approved in time. Nothing
+   was paid. Ask again." for each request that ran out. Each step is one
+   database row, so it is safe to call twice and a restart loses nothing; a
+   reminder can be up to one interval (five minutes) late. It answers
    502 without a database, when any partial signature is still held for a
-   closed request, when a submission is still stuck, or when a chain read
-   failed.
+   closed request, when a submission is still stuck, when a chain read
+   failed, or when a waiting request could not be read or told.
    Schedule `https://<domain>/api/cron/withdrawals` every five minutes, after
    the wallet-signing sweep (v2 §4.4): it marks withdrawals sent whose
    owners' request executed, posts their digest to the payout partner once

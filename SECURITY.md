@@ -2813,3 +2813,42 @@ Design: `docs/v2/phase3-team-roles.md` ("Names sent to exchanges, the network on
 - **Other confirmation screens.** Withdrawals and bank payouts still name their partners through `partnerLabel` (the role until
   an agreement is signed, the name after). That is a separate screen and was not changed here; Sky to say whether it should
   follow the same network-name rule.
+
+
+## v2 Phase 3 - When nobody who can approve answers - 2026-11-02
+
+Design: `docs/v2/phase3-team-roles.md` ("When nobody who can approve answers"). Tests: `tests/approval-wait-ladder.test.mjs`,
+`tests/approval-wait-scheduled.test.mjs`, `tests/approval-wait-wiring.test.mjs`. Migration 0087. No Move change.
+
+- **Money is never approved by default, by Splash, or by a timer.** A request that waits for people who can approve (a payment the
+  rules send to the owners, a second approval above the line, a batch, a withdrawal, a spending-rule change, a staff ask, and
+  an automatic run handed back to "ask me first") ends **unpaid** at its existing end. Nothing in `lib/server/approval-wait.ts`
+  signs, combines, submits, extends, re-opens or updates a signing request, a signer or an ask (a test reads the source for
+  it). Splash holds no key to a business wallet; the wallet is a multisig of the owners' own passkeys.
+- **Reminders are state, not timers.** The ladder (0, 10 minutes, 1 hour, 4 hours) is the constant `LADDER` in
+  `lib/approve/wait.ts`, read by the existing `/api/cron/wallet-signing` (every five minutes). No timer lives in any process.
+  Each step is one row (`approval_wait_steps`, primary key kind + request id + step) written in the same transaction as its
+  notices, so a second cron, two instances and a retry send nothing twice. A step arrives within one cron interval of its time:
+  that is the accuracy. The cron answers 502 if it could not read the waiting requests, so a ladder that stopped is seen.
+- **A notice carries words and one link, never an amount, a payee, an address or a secret.** The link is the signed-in Approve
+  page (`/dashboard/approve/<id>`, or `/dashboard/approve` for an ask): no token, no query, sign-in required, and opening it
+  approves nothing. Made only on https and a public name in production. E-mail is claimed before it is sent, tried three times at
+  most, through the one Splash sender; with none in production nothing is sent and the notice stays in the app. Logs name an
+  id and the kind of failure only.
+- **Who is told is decided at send time, per business.** The signers who have not signed or declined (or the owners, for an ask),
+  who are still members of **that** business. Every read takes the business from the session; the cron's cross-tenant reads are
+  `*ForStaff`. A signer row naming a person of another business is never told (tested).
+- **The lapse is one fact.** "Nobody approved in time. Nothing was paid. Ask again." goes once to the person who asked and the
+  owners, with one `approval_lapsed` trail line written in the same transaction as the step. A late signature (410) and a late
+  accept of an ask are refused with the same words, and keep nothing. An automatic run handed back and not approved lapses the
+  same way and the scheduled payer signs nothing.
+- **"Remind them now" is rate-limited in the database, not the browser.** Once per 10 minutes per request; two presses at once make
+  one (the step is a primary key); only the person who asked or an owner may press it (a signer who is neither: 403; any other
+  person or business: 404). It writes an `approval_reminded` trail line. A per-person route limit sits beside it.
+- **The "fewer than three approvers" warning counts people who can sign.** Owners with a working passkey on this site (a revoked
+  passkey, one for another site, and every non-owner role are not counted). It is shown to owners only and blocks nothing.
+- **Known limits.** A reminder can be up to one cron interval late. A business whose owners are all away until a request ends
+  gets a lapse, not an approval by someone else: a backup approver who counts only after a delay would need a Move change
+  (`docs/v2/phase3-team-roles.md`, for Sebastian). An owner can get both the schedule's own lapse e-mail and this one for a
+  lapsed run. A staff ask whose accepted signing request lapsed returns to open but the ladder does not resume for it. Reminders
+  are in the app and by e-mail, not on WhatsApp.

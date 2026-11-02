@@ -13,6 +13,11 @@
  *
  * 3. the decision records (who signed, who declined, v2 Phase 3) that could not be sealed when they were made are sealed now.
  *
+ * 4. every request still waiting for people who can approve it is told the step it is due (at 0, 10 minutes, 1 hour and 4
+ *    hours), and every request that ran out with nobody approving it is told as lapsed: "Nobody approved in time. Nothing was
+ *    paid. Ask again." (lib/server/approval-wait.ts). Each step is one row, so running this twice sends nothing twice. It
+ *    approves nothing and moves no money. An error there answers 502, so the scheduler's own alerting sees it.
+ *
  * Health: it answers 502 if any partial signature is still held for a
  * request that is no longer open, or any request is still submitting past
  * the lease after reconciling. Run it every few minutes; an expired request
@@ -64,15 +69,20 @@ async function handle(request: Request) {
   // A failure to seal never fails the sweep: the decisions are on record, and the next run tries again.
   const { sweepDecisionRecords } = await import('@/lib/server/payment-trail-deps');
   const decisions = await sweepDecisionRecords(db).catch(() => ({ sealed: 0, failed: 0 }));
+  // 4. the ladder for requests nobody has answered (v2 Phase 3): the reminders at 10 minutes, 1 hour and 4 hours, and the
+  //    plain "Nobody approved in time. Nothing was paid. Ask again." for each request that ran out. Each step is one row, so
+  //    this running twice sends nothing twice. It approves nothing and moves no money.
+  const { sweepApprovalWaitsForStaff } = await import('@/lib/server/approval-wait');
+  const waits = await sweepApprovalWaitsForStaff(db, { now: () => now }).catch(() => ({ steps: [], lapsed: 0, emails: { sent: 0, failed: 0, skipped: 0 }, errors: 1 }));
   const lingering = await countLingeringSignaturesForStaff(db);
   const stuck = await countStuckSubmissionsForStaff(db, new Date(now.getTime() - SUBMISSION_LEASE_MS));
-  if (lingering > 0 || stuck > 0 || reconciled.errors > 0) {
+  if (lingering > 0 || stuck > 0 || reconciled.errors > 0 || waits.errors > 0) {
     return NextResponse.json(
-      { success: false, expired, reconciled, error: `${lingering} partial signatures held for closed requests, ${stuck} submissions stuck past the lease, ${reconciled.errors} chain reads failed` },
+      { success: false, expired, reconciled, waits, error: `${lingering} partial signatures held for closed requests, ${stuck} submissions stuck past the lease, ${reconciled.errors} chain reads failed, ${waits.errors} waiting requests could not be told` },
       { status: 502 },
     );
   }
-  return NextResponse.json({ success: true, expired, reconciled, decisions });
+  return NextResponse.json({ success: true, expired, reconciled, decisions, waits });
 }
 
 export async function GET(request: Request) {

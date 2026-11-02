@@ -171,6 +171,20 @@ export function parsePaymentIntent(id: string, json: Json, owner: unknown): Inte
   };
 }
 
+/**
+ * The ladder (lib/server/approval-wait.ts) runs beside the signing layer's own WhatsApp message: step 0 goes out
+ * at once, in the app and by e-mail, and the cron sends the reminders. It never throws and never delays the message.
+ */
+function withApprovalLadder(base: NonNullable<SigningDeps['notifier']>, db: DrizzleDb): NonNullable<SigningDeps['notifier']> {
+  return {
+    async notify(input) {
+      const { approvalWaitNotifier } = await import('@/lib/server/approval-wait');
+      await approvalWaitNotifier(db).notify(input);
+      return base.notify(input);
+    },
+  };
+}
+
 /** Everything the wallet flows need for one org, or why it cannot run. */
 export async function liveWalletContext(orgId: string): Promise<{ ok: true; ctx: WalletContext; db: DrizzleDb } | WalletDepsRefusal> {
   if (!process.env.DATABASE_URL) return { ok: false, status: 503, error: 'the business wallet needs the database, and DATABASE_URL is not set' };
@@ -224,7 +238,7 @@ export async function liveWalletContext(orgId: string): Promise<{ ok: true; ctx:
       // Spending rules (§4.2): without both ids, no splash_spend command is understood.
       ...(spendIds.ok ? { spendPackageId: spendIds.spendPackageId, policyRegistryId: spendIds.policyRegistryId } : {}),
     },
-    notifier: walletSigningNotifier({ orgName: async () => org?.name ?? 'Your business', channels: listApprovers }),
+    notifier: withApprovalLadder(walletSigningNotifier({ orgName: async () => org?.name ?? 'Your business', channels: listApprovers }), db),
   };
   const ctx: WalletContext = {
     signing,

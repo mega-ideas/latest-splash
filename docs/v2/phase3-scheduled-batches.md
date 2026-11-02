@@ -27,9 +27,13 @@ wiring), `app/api/wallet/schedules/*`, `app/api/cron/scheduled-payments`,
 in time` (a lapse: nobody's failure, in the "Not paid" group). `lib/schedule/rules.ts`
 `RUN_STATE` is the one table the Scheduled tab, History and the notices share.
 
-A lapse says: *"Nobody approved it before the request ran out, so it did not go
-out. Nothing was paid. There is no late fee or penalty."* No late fee or penalty
-exists anywhere in the product.
+A lapse says: *"Nobody approved in time. Nothing was paid. Ask again. There is no
+late fee or penalty."* (the first three sentences are the lapse sentence every
+unanswered request says, `LAPSE_WORDS`; see `phase3-team-roles.md`, "When nobody
+who can approve answers"). No late fee or penalty exists anywhere in the product.
+A run waiting for approval, an "ask me first" run or an automatic run handed back
+to it, is told to the owners who can sign at 0, 10 minutes, 1 hour and 4 hours, and
+lapses at its existing end (24 hours) unpaid.
 
 ## Who may do what
 

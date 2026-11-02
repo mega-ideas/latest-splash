@@ -39,10 +39,11 @@ import { and, asc, desc, eq, gt, gte, inArray, isNull, lt, lte, or } from 'drizz
 
 import { resolveEmailTransport, type EmailTransport } from '../auth/email-transport.ts';
 import { approvalNotices, approvalWaitSteps, memberships, passkeyCredentials, users, walletApprovalAsks, walletSigningRequests, walletSigningSigners } from '../db/schema.ts';
-import { APPROVE_PATH, LAPSE_NOTICE_WINDOW_MS, MINUTE_MS, NOTICE_SHOWN_MS, REMIND_NOW_COOLDOWN_MS, askedNotice, lapseNotice, manualNotice, reminderNotice, requesterNotice, stepToSend, utcWhen, whatIsWaiting, type LadderStep, type WaitKind, type WaitStep } from '../approve/wait.ts';
+import { APPROVE_PATH, LAPSE_NOTICE_WINDOW_MS, TELLS_REQUESTER, askerIsReminded, MINUTE_MS, NOTICE_SHOWN_MS, REMIND_NOW_COOLDOWN_MS, askedNotice, lapseNotice, manualNotice, reminderNotice, requesterNotice, stepToSend, utcWhen, whatIsWaiting, type LadderStep, type WaitKind, type WaitStep } from '../approve/wait.ts';
 import { approveLink, approveInboxLink, approvePath } from '../approve/link.ts';
 import { memberLabel } from '../team/member-title.ts';
 import { memberRole, recordAuthorityEvent } from './wallet-authority.ts';
+import type { SigningNotifier } from './wallet-signing.ts';
 import { liveCards, type DrizzleDb } from './wallet-signing-store.ts';
 
 export type WaitFailure = { ok: false; status: number; code: string; error: string };
@@ -54,7 +55,7 @@ export const MAX_EMAIL_ATTEMPTS = 3;
 /** An e-mail claimed this long ago by a run that died may be claimed again. */
 export const EMAIL_LEASE_MS = 10 * MINUTE_MS;
 /** A notice older than this is not e-mailed any more: it is stale news. The app still shows it. */
-export const EMAIL_MAX_AGE_MS = 2 * 24 * 60 * MINUTE_MS;
+export const EMAIL_MAX_AGE_MS = 48 * 60 * MINUTE_MS;
 /** The most e-mails one pass sends. */
 const EMAIL_BATCH = 200;
 
@@ -71,6 +72,11 @@ export type WaitSubject = {
   state: 'open' | 'lapsed' | 'closed';
   /** The people who can still approve it and are still members of this business, in a stable order. */
   approvers: string[];
+  /**
+   * Whether anyone but the person who made it is asked to sign. A staff payment under their own rule, or a move of
+   * their own USDC, is signed by its maker alone: nobody else is waited on, so the ladder and the lapse stay out of it.
+   */
+  waitsOnOthers: boolean;
 };
 
 // ─── Reading what waits ─────────────────────────────────────────────────────
@@ -87,14 +93,14 @@ async function signingSubject(db: DrizzleDb, row: typeof walletSigningRequests.$
   const approvers = pending.filter((u) => cards.has(u)).sort();
   const past = row.expiresAt.getTime() <= now.getTime();
   const state = row.status === 'expired' || (row.status === 'collecting' && past) ? 'lapsed' : row.status === 'collecting' ? 'open' : 'closed';
-  return { kind: 'signing', id: row.id, orgId: row.orgId, purpose: row.purpose, requestedBy: row.requestedBy, createdAt: row.createdAt, expiresAt: row.expiresAt, state, approvers };
+  return { kind: 'signing', id: row.id, orgId: row.orgId, purpose: row.purpose, requestedBy: row.requestedBy, createdAt: row.createdAt, expiresAt: row.expiresAt, state, approvers, waitsOnOthers: signers.some((s) => s.userId !== row.requestedBy) };
 }
 
 async function askSubject(db: DrizzleDb, row: typeof walletApprovalAsks.$inferSelect, now: Date): Promise<WaitSubject> {
   const owners = (await ownersOf(db, row.orgId)).filter((u) => u !== row.requestedBy);
   const past = row.expiresAt.getTime() <= now.getTime();
   const state = row.status === 'open' ? (past ? 'lapsed' : 'open') : row.status === 'expired' ? 'lapsed' : 'closed';
-  return { kind: 'ask', id: row.id, orgId: row.orgId, purpose: null, requestedBy: row.requestedBy, createdAt: row.createdAt, expiresAt: row.expiresAt, state, approvers: owners };
+  return { kind: 'ask', id: row.id, orgId: row.orgId, purpose: null, requestedBy: row.requestedBy, createdAt: row.createdAt, expiresAt: row.expiresAt, state, approvers: owners, waitsOnOthers: true };
 }
 
 /** One request of this business, or null. Another business's id reads as absent. */
@@ -208,17 +214,17 @@ const labelOf = (cards: Map<string, { name: string; title: string }>, userId: st
 
 /** Send the step a waiting request is due, if any. Returns the step sent, or null. */
 export async function sendDueStep(db: DrizzleDb, s: WaitSubject, now: Date): Promise<LadderStep | null> {
-  if (s.state !== 'open') return null;
+  if (s.state !== 'open' || !s.waitsOnOthers) return null;
   const step = stepToSend(now.getTime() - s.createdAt.getTime(), await stepsDone(db, s));
   if (step === null) return null;
   const { cards, facts } = await factsOf(db, s);
   // The person who asked is in the app already: they are not told "needs your approval" about their own request,
   // and at 10 minutes they get their own notice instead.
   const others = s.approvers.filter((u) => u !== s.requestedBy);
-  const approverIds = step === 'asked' || step === 'reminder_10m' ? others : s.approvers;
+  const approverIds = askerIsReminded(step) ? s.approvers : others;
   const words = step === 'asked' ? askedNotice(facts) : reminderNotice(facts, step);
   const recipients: Recipient[] = approverIds.map((userId) => ({ userId, audience: 'approver', ...words }));
-  if (step === 'reminder_10m' && cards.has(s.requestedBy)) {
+  if (step === TELLS_REQUESTER && cards.has(s.requestedBy)) {
     recipients.push({ userId: s.requestedBy, audience: 'requester', ...requesterNotice(facts, others.map((u) => labelOf(cards, u))) });
   }
   const written = await recordStep(db, s, step, recipients, now);
@@ -227,7 +233,7 @@ export async function sendDueStep(db: DrizzleDb, s: WaitSubject, now: Date): Pro
 
 /** Send the lapse of an ended request, once: to the person who asked and to the owners. */
 export async function sendLapse(db: DrizzleDb, s: WaitSubject, now: Date): Promise<boolean> {
-  if (s.state !== 'lapsed') return false;
+  if (s.state !== 'lapsed' || !s.waitsOnOthers) return false;
   if (Date.parse(s.expiresAt.toISOString()) < now.getTime() - LAPSE_NOTICE_WINDOW_MS) return false;
   const owners = await ownersOf(db, s.orgId);
   const cards = await liveCards(db, s.orgId, [s.requestedBy, ...owners]);
@@ -383,6 +389,20 @@ export async function tellApproversNow(db: DrizzleDb, input: { orgId: string; ki
   }
 }
 
+/**
+ * The signing layer's hook for the ladder: step 0 right after a request is made, so its approvers are told at once
+ * and not at the next pass of the cron. It tells in the app and by e-mail; the WhatsApp message the signing layer
+ * already sends is separate and unchanged. Never throws, and reports no delivery of its own.
+ */
+export function approvalWaitNotifier(db: DrizzleDb, deps: WaitDeps = {}): SigningNotifier {
+  return {
+    async notify({ orgId, request, now }) {
+      await tellApproversNow(db, { orgId, kind: 'signing', id: request.id }, { ...deps, now: () => now });
+      return { delivered: [], unreachable: [] };
+    },
+  };
+}
+
 // ─── Remind them now ────────────────────────────────────────────────────────
 
 /**
@@ -406,7 +426,7 @@ export async function remindNow(
     return s.approvers.includes(input.userId) ? fail(403, 'not_allowed', 'Only the person who asked, or an owner, can remind the approvers.') : fail(404, 'not_found', 'There is no such request.');
   }
   if (s.state === 'lapsed') return fail(409, 'lapsed', 'Nobody approved in time. Nothing was paid. Ask again.');
-  if (s.state !== 'open') return fail(409, 'not_open', 'This request is no longer waiting for approval.');
+  if (s.state !== 'open' || !s.waitsOnOthers) return fail(409, 'not_open', 'This request is not waiting for anyone else to approve it.');
 
   const done = await stepsDone(db, s);
   const manual = [...done].filter((x) => x.startsWith('manual_')).map((x) => Number(x.slice(7)));
@@ -484,6 +504,7 @@ export async function waitingFor(db: DrizzleDb, deps: WaitDeps, input: { orgId: 
 
   const waiting: WaitingView[] = [];
   for (const s of subjects) {
+    if (!s.waitsOnOthers) continue;
     const asker = s.requestedBy === input.userId;
     // A request that waits for this person's own signature is in their Approve list, not here.
     if (!asker && s.approvers.includes(input.userId)) continue;

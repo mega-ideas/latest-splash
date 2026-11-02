@@ -37,6 +37,16 @@ export type LadderStep = (typeof LADDER)[number]['step'];
 export type WaitStep = LadderStep | 'lapsed' | `manual_${number}`;
 export type WaitKind = 'signing' | 'ask';
 
+/** The step at which the person who asked is told who was asked and that nobody has answered yet. */
+export const TELLS_REQUESTER: LadderStep = 'reminder_10m';
+
+/**
+ * Whether the person who asked, when they must also sign, is told "needs your approval" at this step. Not at the first
+ * (they know: they asked) and not at the step that tells them who was asked (they get that notice instead); at the later
+ * reminders, yes, if they have still not signed.
+ */
+export const askerIsReminded = (step: LadderStep): boolean => step !== 'asked' && step !== TELLS_REQUESTER;
+
 /** "Remind them now" may be used once in this long, per request. */
 export const REMIND_NOW_COOLDOWN_MS = 10 * MINUTE_MS;
 

@@ -1059,3 +1059,145 @@ nothing usable was left; null means the decline predates 0081.
 **Not changed.** No Move code. The title field and the place in Settings > Team
 to set it were added afterwards (p3-member-title, "Job title" above): the
 snapshot now carries a member's own title when they have one.
+
+
+## When nobody who can approve answers
+
+Sky's question (2 Nov): what happens when an approval is needed and nobody who can approve answers in time,
+for example when both the owner and the CFO are away? It covers a payment the rules send to the owners, a staff
+payment above the second-approval line, and an automatic run handed back to "ask me first". The rule behind every
+answer: **money is never approved by default, by Splash, or by a timer.** A request that nobody approves ends unpaid.
+
+| What | Where |
+|---|---|
+| The ladder, the lapse sentence, every word of every notice, the "fewer than three" warning (pure) | `lib/approve/wait.ts` |
+| The sweep, the steps, the notices, Remind them now, the approver count | `lib/server/approval-wait.ts` |
+| Who runs it | the existing `GET/POST /api/cron/wallet-signing` (every five minutes); step 0 also runs right after a request is made (`withApprovalLadder` in `lib/server/wallet-deps.ts`, `notifyAsk` in `lib/server/wallet-transfers-deps.ts` and `app/api/wallet/approval-asks/route.ts`) |
+| Routes | `GET /api/approvals/waiting`, `POST /api/approvals/waiting/:kind/:id/remind`, `GET /api/team/approvers` (all through `teamRoute`, the session's business and person) |
+| Screens | the Approve page (`components/approve/WaitingForOthers.tsx`: Waiting for others, Updates); Settings, Limits and Team (`components/team/FewApprovers.tsx`) |
+| Tables | `approval_wait_steps`, `approval_notices` (migration 0087); the trail lines `approval_lapsed` and `approval_reminded` in `wallet_authority_events` |
+| Tests | `tests/approval-wait-ladder.test.mjs` (behaviour, a real database and an injected clock), `tests/approval-wait-scheduled.test.mjs` (an automatic run handed back), `tests/approval-wait-wiring.test.mjs` |
+
+### What is "waiting"
+
+A **signing request** collecting signatures: a payment the rules send to the owners, a second approval above the
+line (`spend_approval`), a batch, a withdrawal, a supplier payout, a spending-rule change, and the batch of a
+scheduled run that was handed back to "ask me first" (its batch is a signing request). Or an **ask**: a payment a
+staff member asked the owners to approve, still open. Each already has its own end, and this work does not move it:
+a signing request ends at its `expires_at` (24 hours at most, sooner when its quote or its intent ends first), an
+ask at the payment's own expiry. Nothing here extends, shortens or renews either.
+
+A request that only its own maker signs (a staff payment under their own rule, a move of their own USDC) is **not** waiting for
+anyone else, so the ladder and the lapse stay out of it and it is not listed as waiting for others.
+
+### The ladder
+
+| When | Who is told | What it says |
+|---|---|---|
+| 0 (right after the request is made; the cron catches a miss) | every person who can still approve it | "Needs your approval", who asked, and that nothing is paid unless it is approved |
+| 10 minutes | the same people again; **and the person who asked** | to the approvers, "Still waiting for your approval"; to the person who asked, **who was asked** ("We asked Ben Okafor (CFO) and Chen Wei (Owner)") and that **nobody has answered yet**, with the two choices below |
+| 1 hour | everyone who can still approve it | a reminder |
+| 4 hours | everyone who can still approve it | a reminder, and when it will end |
+
+- **The timing is one constant**, `LADDER` in `lib/approve/wait.ts`. No timer is held anywhere: the existing cron reads
+  it every five minutes, so a step arrives within one cron interval of its time. A restart, a second instance or a
+  retry loses and doubles nothing.
+- **Each notice is sent once per step.** A step is one row in `approval_wait_steps` whose primary key is
+  (kind, request id, step), written in the **same transaction** as the notices of that step. The cron running twice, two
+  crons at once and the request-time call racing the cron all produce one step (tested). The choice of step is pure
+  (`stepToSend`): "asked" always goes first; after that, only the latest step that is due and not yet sent, never one
+  twice, and never an earlier one after a later one. A cron that was down for an hour sends one reminder, not three.
+- **In the app and by e-mail.** Each person told gets an `approval_notices` row (shown under Updates on the Approve page for
+  7 days) and an e-mail through the same sender as every other Splash e-mail (`lib/auth/email-transport.ts`). The e-mail is
+  **claimed** (`sending`) before it is sent, tried at most three times, never sent twice, and never blocks the notice in
+  the app. With no sender set up (production without e-mail) nothing is sent and nothing is made up: the notice waits in
+  the app and the e-mail goes when a sender exists. The WhatsApp message the signing layer already sends is separate and unchanged.
+- **Every notice carries the one-tap link and nothing acts from it.** For a signing request it is
+  `/dashboard/approve/<request id>`; for an ask, `/dashboard/approve`. It is the signed-in Approve page: sign-in is
+  required, the link carries no token, no query and no amount, and opening it approves nothing (a person signs on their
+  own device with their own passkey). In production the link is made only on https and a public name, as for every Approve link.
+- **No amount, payee, address or secret is ever in a notice.** The words say what kind of thing is waiting ("a payment from
+  the business wallet", "a batch of payments") and who asked. The details are one tap away, behind sign-in.
+- **Only the right people.** The approvers are the signers who have not yet signed or declined (or, for an ask, the owners),
+  and only if they are **still members of that business**. A person who left, a signer row naming someone of another
+  business, and anyone who already answered are never told. The person who asked is not told "needs your approval" about
+  their own request.
+
+### The lapse
+
+When a request reaches its existing end and nobody approved it, it **lapses unpaid**:
+
+- **"Nobody approved in time. Nothing was paid. Ask again."** goes to the person who asked and to every owner, in the app and
+  by e-mail, **once** (the `lapsed` step), with one trail line, `approval_lapsed`, under `system:approval_lapse`.
+- It is told for any request that ran out in the last 7 days (an older one is history, not news), and it does not matter
+  whether the signing cron has closed the request yet: past its end is lapsed.
+- **A late approval is refused with the same words**: a signature on a lapsed request answers 410 with the sentence
+  (`submitPartialSignature`), and so does accepting a lapsed ask (`acceptApprovalAsk`); the status "expired" says the same
+  thing wherever it is refused (`closedWords`). Nothing is kept: no partial signature, no payment.
+- **An automatic run handed back to "ask me first" lapses the same way.** Its batch's signing request follows the ladder,
+  and when it runs out the run itself says the same words first ("Nobody approved in time. Nothing was paid. Ask again.
+  There is no late fee or penalty."), the scheduled payer signs nothing, and the next run is unaffected. (The schedule's own
+  e-mail to the owners and this one are separate, so an owner can get both for a lapsed run.)
+- No penalty, late fee or interest exists anywhere in the product.
+
+### What the person who asked can do while it waits
+
+On the Approve page, under **Waiting for others** (the person who asked sees their own; an owner sees every open one):
+who is being waited on, "Nobody has answered yet", when it ends, and two choices:
+
+- **Remind them now.** The person who asked, or an owner, tells everyone who can still approve it. **Once per 10 minutes per
+  request** (`REMIND_NOW_COOLDOWN_MS`); the page says when it can be pressed again, and the server answers 429 `too_soon`
+  with `retryAfterSec`. Of two presses at once one wins (the step is a primary key). It writes an `approval_reminded` trail
+  line, and the person pressing is not reminded of their own reminder.
+- **Cancel this request.** The person who asked only, after one confirmation. This is the existing withdraw
+  (`DELETE /api/wallet/signing-requests/:id`; `POST /api/wallet/approval-asks/:id { action: 'withdraw' }`), unchanged. Nothing is paid.
+
+A signer who is neither the person who asked nor an owner cannot remind (403); a person of another business, or of no
+business, reads the request as absent (404).
+
+### Too few approvers
+
+Settings, **Limits** and **Team** show the owners, and only the owners, a plain warning when fewer than three people can
+currently approve payments: "Only 2 people can approve payments. If they are all away, payments wait. Add another approver."
+(and "Nobody can approve payments right now..." for none), with a one-tap button to the add-a-person form. It blocks
+nothing.
+
+**It counts people who can really sign, not members.** A business wallet is signed by its owners' passkeys, so the count is
+the **owners who hold a working passkey on this site** (`approverCountOf`: role owner, an unrevoked passkey whose relying-party
+id is this site's). An owner with no passkey yet, a revoked passkey or a passkey for another site cannot sign here and is not
+counted; staff, approvers and viewers do not sign for the business wallet and are not counted. So the new person has to be
+added as an **owner** to raise the count, and the warning says so. `GET /api/team/approvers` answers only owners.
+
+### What Splash cannot do (and does not)
+
+- **Splash cannot approve, sign or pay for a business.** It holds no key to a business wallet, and the business wallet is a
+  multisig of the owners' own passkeys. There is no code path in the ladder that signs, combines, submits, extends or
+  re-opens a request (a test fails if one appears), and no setting that makes a request approve itself after a delay.
+- **A timer cannot approve.** The only things time does are to send a reminder and to end an unanswered request unpaid.
+- **Splash support cannot stand in for the owners.** Support has no approval role on a business's payments.
+- **Splash cannot add a backup approver for a business, or lower the number of people needed.** The threshold and the signers are the owners'.
+- **A reminder cannot move the end.** Asking again makes a new request with a new end.
+
+### Not built, and why
+
+- **A backup signer who counts only after a delay needs a Move change, so it is not built** (see "What needs Sebastian" below).
+  Today, if every owner is away until a request ends, the answer is a lapse and "Ask again", never an approval by someone else.
+- A staff **ask** that an owner accepted, whose signing request then lapsed, goes back to open (`signingIsDead`) and
+  can be accepted again, but the ladder does not resume for it: it is told as lapsed when the signing request lapses, and the ask's
+  own end lapses it again.
+- The owners' list of open asks to accept or decline is not on the Approve page (only the reminders and the link are); it is where it
+  was.
+- Reminders are in the app and by e-mail. A reminder on WhatsApp (the signing layer's existing channel) is not added.
+- The WhatsApp code approvals for a settings, profile or transfer change (step-up, `components/approvals/ApprovalsInbox.tsx`) and
+  the older approval queue are other mechanisms with their own short expiry (30 minutes). This work does not change them.
+
+### What needs Sebastian (Move)
+
+Nothing here touches `move/`. The one idea that would need it: a **backup approver whose approval counts only after a delay**,
+so a request does not simply lapse when the owners are away. Exact shape, for Sebastian to decide and approve:
+`splash_spend::approve_payout_as_backup(policy, intent, backup: &BackupApproverCap, clock, ctx)` that aborts unless
+`clock.timestamp_ms() >= intent.created_at + backup_delay_ms` (the delay is held by the policy, set by the owners' quorum and
+never less than 24 hours), is allowed only for a payment that already has no owner approval, counts as the second approval
+(`approve_payout`) and nothing more, and can be revoked by one owner at once. `splash_core::business_account` would need
+`add_backup_approver` / `remove_backup_approver`, each an owner-quorum action, with a `BackupApproverAdded` event the owner
+alerts already watch. Until then Splash's answer is the lapse.

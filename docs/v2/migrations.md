@@ -186,3 +186,19 @@ How a business's limits start, and two people for a large grant (docs/v2/phase3-
 - The trail's allowed actions: `wallet_authority_events_action_check` is dropped and added again
   **with every value `0084` listed plus the two new ones** (`limit_answers_saved`,
   `limit_request_first_approved`). Nothing else is dropped, by name and `IF EXISTS`.
+
+
+## `0087_approval_wait_ladder`
+
+When nobody who can approve answers (docs/v2/phase3-team-roles.md, "When nobody who can approve answers").
+
+- **Nothing existing is changed and nothing is inserted.** Two new tables, safe to run again (`IF NOT EXISTS`).
+  `approval_wait_steps` has one row per (kind of request, request id, step): the primary key is the "once", and the steps are
+  `asked`, `reminder_10m`, `reminder_1h`, `reminder_4h`, `lapsed` and `manual_N` (a "Remind them now"). `approval_notices`
+  has one row per person told at a step (unique on kind, request id, step and person; a foreign key to the step), holding
+  words, the signed-in page it links to and the state of its e-mail. No amount, payee, address or secret is stored in either.
+- **The trail's allowed actions:** `wallet_authority_events_action_check` is dropped and added again **with every value `0086`
+  listed plus the two new ones** (`approval_lapsed`, `approval_reminded`). Nothing else is dropped, by name and `IF EXISTS`.
+- Nothing in it needs the cron to run first: with no rows the ladder simply starts from the next pass. The first pass after it
+  is applied tells the approvers of every request that is still collecting (step "asked", then only the latest due step on
+  later passes), so a deploy during a busy hour sends one notice per waiting request and not a backlog.

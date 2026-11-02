@@ -4,6 +4,7 @@ import Link from 'next/link';
 import { useCallback, useEffect, useState } from 'react';
 import { ChevronRight, Clock3, Fingerprint, Loader2, RefreshCw, TriangleAlert } from 'lucide-react';
 
+import WaitingForOthers from '@/components/approve/WaitingForOthers';
 import type { SigningView } from '@/components/transfer/api';
 import { call, errorText } from '@/components/transfer/api';
 import { cardSummary, reviewRequest } from '@/lib/approve/facts';
@@ -74,7 +75,7 @@ export default function ApproveInbox() {
               <div className="dash-surface p-5 text-center">
                 <Fingerprint className="mx-auto h-8 w-8 text-[#145d6a]" aria-hidden="true" />
                 <p className="mt-2 text-base font-bold text-[#0c3e48]">Nothing is waiting for your signature</p>
-                <p className="mt-1 text-sm text-[#326273]">When your owners ask for a payment or a change, it shows here and you are told on WhatsApp.</p>
+                <p className="mt-1 text-sm text-[#326273]">When your owners ask for a payment or a change, it shows here and you are told by e-mail, and on WhatsApp where you use it. If nobody answers, you are reminded after 10 minutes, 1 hour and 4 hours.</p>
               </div>
             ) : (
               <ul className="space-y-3">
@@ -84,6 +85,8 @@ export default function ApproveInbox() {
               </ul>
             )}
           </section>
+
+          <WaitingForOthers />
 
           {signed.length > 0 ? (
             <section aria-labelledby="approve-signed" className="space-y-3">

@@ -94,6 +94,9 @@ export function transferDepsFor(route: WalletRouteLike, env: NodeJS.ProcessEnv =
       return live.ok ? readCurrentPolicy(live.sc) : null;
     },
     notifyAsk: async ({ ask, ownerUserIds, financeLeadUserId }) => {
+      // The ladder: every owner is told in the app and by e-mail at once, and again if nobody answers (lib/server/approval-wait.ts). Never throws.
+      const { tellApproversNow } = await import('@/lib/server/approval-wait');
+      await tellApproversNow(db, { orgId, kind: 'ask', id: ask.id });
       const { notifyOwnersOfAsk } = await import('@/lib/server/approval-requests');
       const [org] = await db.select({ name: organizations.name }).from(organizations).where(eq(organizations.id, orgId)).limit(1);
       await notifyOwnersOfAsk({ orgId, orgName: org?.name ?? 'Your business', ownerUserIds, financeLeadUserId: financeLeadUserId ?? null, amountMinor: ask.intent.amountMinor, recipient: ask.intent.recipient });

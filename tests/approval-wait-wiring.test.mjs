@@ -139,7 +139,7 @@ test('what the screens and notices say follows the copy rules', () => {
 });
 
 test('the deploy notes say the one cron carries the ladder', () => {
-  const deploy = read('docs/DEPLOY-DIGITALOCEAN.md');
+  const deploy = read('docs/DEPLOY-DIGITALOCEAN.md').replace(/\s+/g, ' ');
   assert.match(deploy, /wallet-signing/);
   assert.match(deploy, /10 minutes, 1 hour and 4 hours/);
 });

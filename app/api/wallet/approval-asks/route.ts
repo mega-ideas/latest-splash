@@ -71,6 +71,9 @@ export async function POST(request: Request) {
   }
   // The owners hear of it on their approver channels; the ask stands either way.
   const notify: AskNotifier = async ({ ask, ownerUserIds }) => {
+    // The ladder: every owner is told in the app and by e-mail at once, and again if nobody answers (lib/server/approval-wait.ts). Never throws.
+    const { tellApproversNow } = await import('@/lib/server/approval-wait');
+    await tellApproversNow(db, { orgId, kind: 'ask', id: ask.id });
     const { notifyOwnersOfAsk } = await import('@/lib/server/approval-requests');
     const [org] = await db.select({ name: organizations.name }).from(organizations).where(eq(organizations.id, orgId)).limit(1);
     await notifyOwnersOfAsk({ orgId, orgName: org?.name ?? 'Your business', ownerUserIds, amountMinor: ask.intent.amountMinor, recipient: ask.intent.recipient });

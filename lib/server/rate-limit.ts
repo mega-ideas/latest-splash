@@ -97,6 +97,8 @@ export const RATE_LIMITS = {
   // Adding, changing and removing people, the Finance lead, and Add funds / Withdraw access: authority changes, so few per hour.
   teamChangeUser: { bucket: 'team-change:user', limit: 60, windowMs: HOUR },
   teamChangeOrg: { bucket: 'team-change:org', limit: 200, windowMs: HOUR },
+  // "Remind them now" on a waiting request: the real limit is once per 10 minutes per request (lib/server/approval-wait.ts); this only stops a person pressing it across many requests.
+  approvalRemindUser: { bucket: 'approval-remind:user', limit: 30, windowMs: HOUR },
   // A person changing their own job title: every member may, and each change is a line on the trail, so a handful an hour is plenty.
   memberTitleSelf: { bucket: 'member-title:self', limit: 6, windowMs: HOUR },
   // Asking for, cancelling and lowering a limit: a handful a day is plenty; per person.

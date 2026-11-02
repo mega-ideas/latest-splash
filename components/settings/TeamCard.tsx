@@ -5,6 +5,7 @@ import { Fingerprint, Landmark, UserRound } from 'lucide-react';
 
 import AddPersonForm from '@/components/team/AddPersonForm';
 import ExchangeNames from '@/components/team/ExchangeNames';
+import FewApprovers from '@/components/team/FewApprovers';
 import FinanceLeadNote from '@/components/team/FinanceLeadNote';
 import LeaveRequests from '@/components/team/LeaveRequests';
 import LeaveSection from '@/components/team/LeaveSection';
@@ -104,6 +105,7 @@ export default function TeamCard({
             : `You are the ${FINANCE_LEAD_NAME}. You can invite or add people, and change or remove viewers, staff and approvers. Owners, the wallet’s signers, bank accounts and Add funds or Withdraw access stay with the owners, and so do the people an owner put in charge or gave that access.`}
         </p>
         {manager === 'owner' ? <p className="text-[13px] leading-5 text-[#326273]">{EXISTING_MEMBERS_FUNDS_NOTE}</p> : null}
+        {manager === 'owner' ? <FewApprovers /> : null}
 
         <OwnTitle userId={you.userId} title={you.title} role={you.role} financeLead={manager === 'finance_lead'} onChanged={refresh} />
         <ExchangeNames userId={you.userId} owner={manager === 'owner'} />
@@ -143,7 +145,9 @@ export default function TeamCard({
           })}
         </ul>
 
-        <AddPersonForm manager={manager} onChanged={refresh} />
+        <div id="add-person" className="scroll-mt-24">
+          <AddPersonForm manager={manager} onChanged={refresh} />
+        </div>
 
         <OpenInvitations invitations={invitations} onChanged={refresh} />
 
