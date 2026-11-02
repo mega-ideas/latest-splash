@@ -63,6 +63,7 @@ import { readRequestForSigner, type RequestView } from './wallet-signing.ts';
 import { declinersOfRequests, endedByPeople } from './wallet-signing-store.ts';
 import type { Decliners } from '../team/declined-by.ts';
 import { resolvePayee, isUniqueViolation, maskAddress, TRANSFER_INTENT_LIFETIME_MS, TRANSFER_SETTLE_WINDOW_MS, type PayeeInput, type TransferDeps } from './wallet-transfers.ts';
+import { buildPaymentTrail } from './payment-trail.ts';
 
 /** A batch to run later under a rule (splash_spend, the operator named as executor by an owner) is not built on this server yet. */
 export const BATCH_SCHEDULE_WIRED = false;
@@ -607,10 +608,12 @@ export async function startBatchSigning(
   const payer = org?.legalName || org?.name || deps.orgId;
   const total = rows.reduce((sum, r) => sum + r.amountMinor, 0n);
   // One sealed bundle for the batch; each payment anchors it. It fails closed in production.
-  const record = await deps.paymentRecord({ orgId: deps.orgId, transferId: batchId, payer, payee: `${rows.length} recipients`, amountMinor: total.toString(), maxFeeMinor: totalFee.toString(), reference: row.label });
+  // The record always says who started the batch, when and by which route, and which owners can approve it (lib/server/payment-trail.ts).
+  const now = deps.now();
+  const trail = await buildPaymentTrail(deps.db, { orgId: deps.orgId, actor, route: 'batch_owners', rule: null, spender: null, at: now });
+  const record = await deps.paymentRecord({ orgId: deps.orgId, transferId: batchId, payer, payee: `${rows.length} recipients`, amountMinor: total.toString(), maxFeeMinor: totalFee.toString(), reference: row.label, trail });
   if (!record.ok) return fail(record.status, record.code, record.error);
 
-  const now = deps.now();
   const expiresAtMs = BigInt(now.getTime()) + BigInt(TRANSFER_INTENT_LIFETIME_MS);
   // A batch a person starts by hand is signed within the hour its quote lasts. A scheduled batch is prepared before the owners
   // are at their desks, so the scheduler names a longer window (at most the signing layer's own 24 hours).

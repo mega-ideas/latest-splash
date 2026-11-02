@@ -39,7 +39,12 @@ export type PaymentTrail = {
   startedBy: { userId: string; role: 'owner' | 'approver' | 'staff'; name: string | null; title: string | null };
   /** ISO time the payment was built. */
   startedAt: string;
-  route: 'owners_sign' | 'asked_owners' | 'staff_rule';
+  /**
+   * owners_sign / asked_owners / staff_rule: a wallet payment (Transfer). batch_owners: a batch the owners sign once. scheduled_auto: a
+   * scheduled payment Splash made at the due time under the allowance the owners signed to the scheduled payer; the person is whoever set
+   * the schedule up (an owner), and the allowance is the approval.
+   */
+  route: 'owners_sign' | 'asked_owners' | 'staff_rule' | 'batch_owners' | 'scheduled_auto';
   /** The staff rule it was paid under (a payment within a rule), as the chain said when it was built; null otherwise. */
   rule: { spender: string | null; status: string; perPaymentMaxMinor: string; spendableNowMinor: string; startsAtMs: string | null; expiresAtMs: string | null } | null;
   /** The owners (internal ids, sorted) who could approve it when it was built. */

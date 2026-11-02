@@ -103,7 +103,7 @@ export default function ExchangeNames({ userId, owner }: { userId: string; owner
 
 /**
  * One on/off switch: a real checkbox with role="switch" (kept in the page, so the keyboard and screen readers have it), drawn as a track and
- * a knob. The whole label is the target, at least 44px high. Contrast: the on track is 6.4:1 and the off track 4.1:1 against the card, the
+ * a knob. The whole label is the target, at least 44px high. Contrast: the on track is 6.4:1 and the off track 4.0:1 against the card, the
  * knob white on both; the focus ring shows on the track.
  */
 function Switch({ id, checked, busy, onChange, title, hint }: { id: string; checked: boolean; busy: boolean; onChange: (next: boolean) => void; title: string; hint: string }) {
@@ -112,7 +112,7 @@ function Switch({ id, checked, busy, onChange, title, hint }: { id: string; chec
       <input id={id} type="checkbox" role="switch" checked={checked} aria-disabled={busy} onChange={(e) => onChange(e.target.checked)} className="peer sr-only" />
       <span
         aria-hidden="true"
-        className="relative mt-0.5 inline-block h-6 w-11 shrink-0 rounded-full bg-[#5f7d89] transition-colors peer-checked:bg-[#0d6370] peer-focus-visible:outline peer-focus-visible:outline-2 peer-focus-visible:outline-offset-2 peer-focus-visible:outline-[#0c3e48] motion-reduce:transition-none after:absolute after:left-0.5 after:top-0.5 after:h-5 after:w-5 after:rounded-full after:bg-white after:transition-transform after:content-[''] peer-checked:after:translate-x-5 motion-reduce:after:transition-none"
+        className="relative mt-0.5 inline-block h-6 w-11 shrink-0 rounded-full bg-[var(--pending)] transition-colors peer-checked:bg-[#0d6370] peer-focus-visible:outline peer-focus-visible:outline-2 peer-focus-visible:outline-offset-2 peer-focus-visible:outline-[#0c3e48] motion-reduce:transition-none after:absolute after:left-0.5 after:top-0.5 after:h-5 after:w-5 after:rounded-full after:bg-white after:transition-transform after:content-[''] peer-checked:after:translate-x-5 motion-reduce:after:transition-none"
       />
       <span>
         <span className="block font-semibold">{title}</span>

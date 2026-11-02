@@ -790,16 +790,29 @@ characters.
   form the switches allow **then**: a person who stopped sharing after confirming
   is not named; a switch turned on afterwards never adds a name that was not
   confirmed. (`sendTravelRule` may replace the hash of a message still waiting to
-  be sent, never one that has been claimed or answered.)
+  be sent, never one that has been claimed or answered. The claim that starts the
+  send names the hash it read, so if another caller turned the row into the more
+  private form in between, that claim finds nothing, sends nothing and answers
+  409 `travel_rule_in_progress`; the retry reads the switches again. The hash on
+  the row is therefore always the hash of the message that was sent.)
+- **The kept copy can be more detailed than what was sent.** If a switch is turned
+  off after the person confirmed, the stored disclosure payload (`wallet_transfer_
+  disclosures.payload`, bound on chain by its hash) still holds the name the
+  person read and confirmed, while the exchange is sent the private form. The
+  Travel Rule row's `request_hash` is the record of the form that was sent. The
+  stored payload is never rewritten, so what was read and confirmed stays provable.
 - **Existing payments and rules are not changed.** A stored message keeps its
   text and its hash; a message made before titles existed has no `title` key and
   canonicalises byte for byte as before.
 - **A person with no name on file** who is sharing is told to add one or turn
   sharing off (409 `sender_unknown`).
 - **Sanitised.** Control, hidden and direction-changing characters become
-  spaces; brackets in a name become spaces so a name cannot read as a title
-  ("Eve (CEO)"); the name and the title are cut at 40 characters. The page shows
-  every value as text.
+  spaces; brackets, colons and the words "Sent by" in a name or title become
+  spaces so a name cannot read as a title ("Eve (CEO)") or as another part of the
+  line ("Eve Sent by Mallory: refund"); the name and the title are cut at 40
+  characters, the business name at 80 and the whole line at 140, always on a whole
+  character (an emoji is kept or left out, never split into half, because a lone
+  half is not valid text for the provider). The page shows every value as text.
 
 ### 2. The audit proof always says who
 
@@ -813,7 +826,10 @@ payee's name, the amount, the fee bound and the reference. It carried neither th
 actor nor any approver. **What it holds now** (additive; `splash.payment-record.v2`;
 a withdrawal or payout record is byte for byte what it was): a `trail` with who
 started the payment (internal id, role, name and title as they were), when, the
-route (`owners_sign`, `asked_owners`, `staff_rule`), the rule it was paid under (the
+route (`owners_sign`, `asked_owners`, `staff_rule`; for a batch the owners sign,
+`batch_owners`; for a scheduled payment Splash makes at the due time,
+`scheduled_auto`, whose person is the owner who set the schedule up and whose
+approval is the allowance the owners signed), the rule it was paid under (the
 maximum, what was left of the cap, the dates, as the chain said when it was
 built) and the owners who could approve it.
 
@@ -828,6 +844,25 @@ the record is sealed, and a failure to seal (Seal or Walrus down, or a demo serv
 in production) never stops the decision: the row waits unsealed and the
 `wallet-signing` cron seals it. A replay is one row.
 
+**A decision whose row could not be written is brought back.** The signature, the
+decline or the owner's answer is saved first, and the call that writes its trail
+row is swallowed if it fails (a database fault, a timeout), so it can never stop
+the decision. The cron's `sweepPaymentTrail` therefore derives any missing row from
+what the signing layer and the asks already hold (a signer's `signed_at` or
+`declined_at` on the payment's signing request; an owner's answer to an ask,
+declined, or accepted with its signing request opened, a claim still being made is
+not an answer), with the time the decision was made, then seals what is waiting.
+It is idempotent (the unique index), reads each business's own rows, and only
+covers a payment whose own record carries a trail. A person who has left the
+business before the sweep has no role to record: it is counted as `skipped` and
+nothing is invented.
+
+**Names are kept as stored.** The sealed records hold the name and the title
+exactly as stored (a digit, symbol or emoji stays); the cleaning that stops at the
+first non-plain word belongs on screens, not in encrypted evidence. The user id is
+always in the record. A record whose sealing had to wait reads the name at sealing
+time, so a rename in between shows the new name beside the same id.
+
 - **No name in plain text.** The rows hold internal ids, roles, times and hashes;
   `wallet_transfers.record_hash` and `record_blob_id` are a hash and a blob id.
   Names are inside the encrypted records only.
@@ -838,8 +873,22 @@ in production) never stops the decision: the row waits unsealed and the
   anchored in the payment transaction; the decision records are sealed on Walrus
   and bound to it by hash, but their own hashes are not yet on chain. An
   operator-sent `audit_anchor::anchor_audit_hash` per decision (or one per day for
-  all of them) would do it with no Move change. Batch payouts keep their record
-  unchanged (the trail is for wallet payments).
+  all of them) would do it with no Move change.
+- **Batches and scheduled payments: the start is on record, the decisions are not
+  yet separate records.** A batch the owners sign (`batch_owners`) and a scheduled
+  payment Splash makes automatically (`scheduled_auto`) now seal a record with a
+  trail like a wallet payment: who started it (for a batch, the owner who started
+  the signing; for a scheduled payment, the owner who set the schedule up), when,
+  the route, the allowance the chain showed (scheduled) and the owners who could
+  approve. A scheduled automatic payment has no per-payment approver: the
+  allowance the owners signed is the approval, and it is in the record. But the
+  owners' signatures on a **batch**, and the decisions on a scheduled batch that
+  asks the owners first, are **not** written as separate decision records:
+  `payment_trail_events.transfer_id` is a foreign key to `wallet_transfers`, and a
+  batch is not a wallet transfer. The signatures are still in the signing layer
+  (`wallet_signing_signers.signed_at`) and the chain shows who signed. Recording
+  them as decision records needs a later migration (0086 or higher; this branch
+  ends at 0085) that lets a decision name a batch. Not built here.
 - **Known limit:** a payment built under a staff rule that falls back to the owners
   (the day's network-fee share was used up, or the switch was turned off while it
   was made) keeps the record it was built with, which names the staff rule; the ask
@@ -851,10 +900,16 @@ The screen says the **payment network** the person knows, never the processor or
 institution behind it, even after an agreement is signed: "Payment network:
 DuitNow" for a Malaysia payout, "InstaPay or PESONet" (Philippines), "BI-FAST"
 (Indonesia), "PromptPay" (Thailand), "Napas" (Vietnam), "FAST" (Singapore). It
-still says plainly that the details are shared with a payout partner in that
-country and exactly what is shared: the business's registered name, registration
-number, address and wallet; the recipient's registered name, registration
-number, address and account; the amount; and the payment details above.
+still says plainly where the details go and exactly what is shared. The payment
+is an on-chain USDC transfer to an exchange account, not a transfer on that network,
+so the sentence says the details go to **the exchange that holds the account, which
+pays out in the country over the network, through Splash's Travel Rule provider**
+(which routes the message to the exchange). It lists everything the message carries:
+the business's registered name, registration number, address and wallet, and the
+link to its verification with the provider; the recipient's registered name,
+registration number, address and account; the amount; the payment reference and
+date; and the payment details above. The last line of the screen names the same
+provider, so the two agree.
 
 The map from corridor to network name is **one module**,
 `lib/compliance/payment-networks.ts`, with a test that every corridor (every bank
@@ -870,7 +925,8 @@ institution next to the network ("DuitNow, received by Hata"), and the copy rule
 that bans naming partners has a recorded, tested exception for exactly the flagged
 corridors (`INSTITUTION_NAMING_EXCEPTIONS`, empty as shipped; the test fails if the
 exception list and the flags differ, and if any other corridor ever names an
-institution). The Travel Rule message to the provider is unchanged: it carries the
+institution). The list is written out by hand in the same commit that sets a flag;
+it is not computed from the flags it is checked against. The Travel Rule message to the provider is unchanged: it carries the
 real counterparty data the law needs; only the words on the screen change.
 
 **For Sebastian and compliance, before launch: confirm the wording satisfies
@@ -885,7 +941,14 @@ routes, the migration), `tests/exchange-names-payment.test.mjs` (the payment pat
 default, each switch, either off, read on the server, read at send time, the
 network on the screen), `tests/payment-networks.test.mjs` (the map, the flag, the
 exception), `tests/payment-trail.test.mjs` (the record, the decisions, both switches
-off, cross-tenant, replay, sealing that fails, fail closed).
+off, cross-tenant, replay, sealing that fails, fail closed),
+`tests/payment-trail-recovery.test.mjs` (a decision whose write failed is derived
+by the sweep: signature, decline, ask; idempotent, sealed later, no invention for
+someone who left; names as stored; the scheduled and batch trail),
+`tests/exchange-wording.test.mjs` (the sharing sentence, whole-character cuts, a
+name cannot imitate the line, the reviewed exception list),
+`tests/travel-rule-claim.test.mjs` (the claim names the hash it read),
+`tests/exchange-names-ui.test.mjs` (the switches keep focus and are announced).
 
 ## Release note: existing staff and approvers start without Add funds and Withdraw
 

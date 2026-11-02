@@ -2757,17 +2757,25 @@ Design: `docs/v2/phase3-team-roles.md` ("Names sent to exchanges, the network on
   each later signature, decline and owner's answer to an ask is one more sealed record (`splash.payment-decision.v1`) naming the
   first by its hash (`payment_trail_events`, migration 0085; `wallet_transfers.record_hash`). The rows hold internal ids, times
   and hashes only; the name and title are inside the sealed record. A decision is never stopped by a sealing failure: it is on
-  record, unsealed, until the cron sweep seals it. In production a demo Seal policy or Walrus blob seals nothing.
+  record, unsealed, until the cron sweep seals it. In production a demo Seal policy or Walrus blob seals nothing. A decision whose
+  row could not be written at all (the hook failed after the signature was saved) is derived by the same sweep from the signer's own
+  `signed_at` or `declined_at` or the ask's answer, with the time it was made (`sweepPaymentTrail`); a person who left the business
+  before then is counted as skipped, not invented. The sealed records hold the name and title as stored (they are encrypted evidence);
+  the user id is always in them.
 - **Names in evidence records are only as private as the key policy.** Sebastian: A-13 above (one operator key can decrypt every
   sealed blob) applies to every name now inside an evidence record. Nothing is stored or anchored in plain text with a name.
   Not covered: the decision records are sealed and stored on Walrus, but only the payment's own record is anchored on Sui (in the
   payment transaction). Anchoring each decision record needs an operator-sent `audit_anchor::anchor_audit_hash` per decision or per
   day (an existing AnchorCap function, no Move change), which is not built. If a payment falls back from a staff rule to the
   owners after its record was made, the record says the route it was built under; the ask and its answer are in the decision records.
+  A batch the owners sign and a scheduled automatic payment now seal a record with a trail (who started it, when, the route, the
+  allowance, who could approve), but the owners' signatures on a batch are not separate decision records yet: that needs a later
+  migration (0086 or higher) so a decision can name a batch rather than a wallet transfer. Sebastian and Sky to decide.
 - **Which partner the confirmation names: the network, never the processor.** The words say the payment network the person
   knows (`DuitNow` for Malaysia, `InstaPay or PESONet` for the Philippines, `BI-FAST`, `PromptPay`, and so on), never the
   exchange's company or a processor ("Fiuu"), even after an agreement is signed, and still say plainly that the details are shared
-  with a payout partner in that country and what exactly is shared. The corridor to network map is one module,
+  with the exchange that holds the account, which pays out in that country over that network, through Splash's Travel Rule provider,
+  and what exactly is shared (including the payment reference, the date and the link to the business's verification). The corridor to network map is one module,
   `lib/compliance/payment-networks.ts`. The Travel Rule message to the provider is unchanged: it carries the real counterparty
   data.
 - **The exception: `mustNameReceivingInstitution`.** Per corridor, false by default, changed only in code by Splash compliance

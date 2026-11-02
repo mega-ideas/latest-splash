@@ -124,6 +124,7 @@ import { assertSponsorable, SponsorRefused } from './wallet-sponsor.ts';
 import { createBatch, getBatch, reviewBatch } from './wallet-batches.ts';
 import { declinedByLabel } from '../team/declined-by.ts';
 import { resolvePayee, TRANSFER_INTENT_LIFETIME_MS, type PayeeInput } from './wallet-transfers.ts';
+import { buildPaymentTrail } from './payment-trail.ts';
 
 /** How long the quote of an automatic payment lasts: it is paid within seconds. */
 export const AUTO_SETTLE_WINDOW_MS = 15 * 60_000;
@@ -720,7 +721,10 @@ async function payOne(d: ScheduleDeps, sch: ScheduleRow, run: RunRow, checked: C
     return failRow('The allowance could not be read from the network just before this payment, so it was not sent.');
   }
   const payer = await businessName(d);
-  const record = await d.paymentRecord({ orgId: d.orgId, transferId: row.id, payer, payee: row.payeeName, amountMinor: row.amountMinor.toString(), maxFeeMinor: row.maxFeeMinor.toString(), reference: row.reference });
+  // The record says who set the schedule up (an owner: an automatic schedule is only made by one), when this payment was built, the allowance the
+  // chain showed just now, and which owners can approve. The allowance is the approval; there is no per-payment signature to record.
+  const trail = await buildPaymentTrail(d.db, { orgId: d.orgId, actor: { userId: sch.createdBy, role: 'OWNER' }, route: 'scheduled_auto', rule: read.read.facts.rule, spender: read.read.spender, at: now() });
+  const record = await d.paymentRecord({ orgId: d.orgId, transferId: row.id, payer, payee: row.payeeName, amountMinor: row.amountMinor.toString(), maxFeeMinor: row.maxFeeMinor.toString(), reference: row.reference, trail });
   if (!record.ok) return failRow(record.error);
 
   const at = now();
