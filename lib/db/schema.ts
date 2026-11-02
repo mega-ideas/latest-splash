@@ -2992,3 +2992,49 @@ export const businessLimitAnswers = pgTable('business_limit_answers', {
 }, (table) => [
   uniqueIndex('business_limit_answers_org_unique').on(table.orgId),
 ]);
+
+/**
+ * When nobody who can approve answers (v2 Phase 3, p3-no-approver; migration 0087).
+ *
+ * One row per (kind of request, request id, step): the row is the idempotency key, so a step of the
+ * escalation ladder ("asked", "reminder_10m", "reminder_1h", "reminder_4h", "lapsed", and each
+ * "Remind them now") happens once however often the cron runs. lib/server/approval-wait.ts.
+ */
+export const approvalWaitSteps = pgTable('approval_wait_steps', {
+  /** signing | ask */
+  subjectKind: text('subject_kind').notNull(),
+  subjectId: text('subject_id').notNull(),
+  step: text('step').notNull(),
+  orgId: text('org_id').notNull().references(() => organizations.id),
+  createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+}, (table) => [
+  primaryKey({ columns: [table.subjectKind, table.subjectId, table.step] }),
+  index('approval_wait_steps_org_idx').on(table.orgId, table.subjectKind, table.subjectId),
+]);
+
+/**
+ * One person told at one step: the in-app notice and the record of the e-mail. Words only (no amount,
+ * no payee, no address, no secret). The e-mail is claimed (`sending`) before it is sent.
+ */
+export const approvalNotices = pgTable('approval_notices', {
+  id: text('id').primaryKey(),
+  orgId: text('org_id').notNull().references(() => organizations.id),
+  subjectKind: text('subject_kind').notNull(),
+  subjectId: text('subject_id').notNull(),
+  step: text('step').notNull(),
+  userId: text('user_id').notNull(),
+  /** approver | requester | owner */
+  audience: text('audience').notNull(),
+  title: text('title').notNull(),
+  body: text('body').notNull(),
+  linkPath: text('link_path').notNull(),
+  /** pending | sending | sent | failed | not_configured */
+  emailState: text('email_state').notNull().default('pending'),
+  emailAttempts: integer('email_attempts').notNull().default(0),
+  emailClaimedAt: timestamp('email_claimed_at', { withTimezone: true }),
+  emailSentAt: timestamp('email_sent_at', { withTimezone: true }),
+  createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+}, (table) => [
+  uniqueIndex('approval_notices_once').on(table.subjectKind, table.subjectId, table.step, table.userId),
+  index('approval_notices_user_idx').on(table.orgId, table.userId, table.createdAt),
+]);

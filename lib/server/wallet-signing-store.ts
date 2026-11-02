@@ -81,7 +81,7 @@ type LiveCard = { name: string; title: string };
  * Finance lead appointment while the person is still an approver, else the role's word
  * (lib/team/member-title.ts). The member's own title is memberships.title, read for this business only.
  */
-async function liveCards(db: Pick<DrizzleDb, 'select'>, orgId: string, userIds: string[]): Promise<Map<string, LiveCard>> {
+export async function liveCards(db: Pick<DrizzleDb, 'select'>, orgId: string, userIds: string[]): Promise<Map<string, LiveCard>> {
   const out = new Map<string, LiveCard>();
   const ids = [...new Set(userIds)];
   if (ids.length === 0) return out;

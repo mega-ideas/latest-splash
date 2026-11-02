@@ -98,6 +98,11 @@ export function approveLink(appUrl: string | undefined | null, id: string, env: 
   return appLink(appUrl, approvePath(id), env);
 }
 
+/** The full link to the signed-in Approve page (a notice about an ask the owners were asked about), or null where none may be sent. It carries no id and no secret. */
+export function approveInboxLink(appUrl: string | undefined | null, env: { NODE_ENV?: string }): string | null {
+  return appLink(appUrl, '/dashboard/approve', env);
+}
+
 /** The full link in an invitation email, or null where none may be sent. It carries an id and no secret: opening it asks for sign-in and accepts nothing. */
 export function invitationLink(appUrl: string | undefined | null, id: string, env: { NODE_ENV?: string }): string | null {
   return appLink(appUrl, invitationPath(id), env);

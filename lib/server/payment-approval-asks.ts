@@ -54,6 +54,7 @@ import { and, eq, inArray, isNull } from 'drizzle-orm';
 import { normalizeStructTag, normalizeSuiAddress } from '@mysten/sui/utils';
 
 import { memberships, walletApprovalAsks, walletSigningRequests, walletTransfers } from '../db/schema.ts';
+import { closedWords } from '../approve/wait.ts';
 import { MAX_INTENT_LIFETIME_MS, V2_KIND } from './sui-v2-builders.ts';
 import { financeLeadOf } from './team-admin.ts';
 import { memberRole, recordAuthorityEvent } from './wallet-authority.ts';
@@ -486,7 +487,7 @@ export async function acceptApprovalAsk(
   if (!row) return fail(404, 'not_found', 'no such ask');
   if ((await memberRole(deps.db, input.orgId, input.userId)) !== 'admin') return fail(403, 'not_an_owner', 'only an owner approves a payment');
   const current = await viewOne(deps.db, row, now);
-  if (current.status !== 'open') return fail(409, 'not_open', `this ask is ${current.status}`);
+  if (current.status !== 'open') return fail(409, 'not_open', closedWords('ask', current.status));
   const isDraft = current.intent.source === 'draft';
   if (input.mode !== 'wallet_pays' && input.mode !== 'second_approval') return fail(400, 'bad_mode', 'the owners either pay it from the business wallet or give a second approval');
   if (input.mode === 'wallet_pays' && !input.wallet) return fail(409, 'no_wallet', 'register the business wallet first');
@@ -629,7 +630,7 @@ export async function declineApprovalAsk(
   if (!row) return fail(404, 'not_found', 'no such ask');
   if ((await memberRole(db, input.orgId, input.userId)) !== 'admin') return fail(403, 'not_an_owner', 'only an owner declines a payment');
   const current = await viewOne(db, row, now);
-  if (current.status !== 'open') return fail(409, 'not_open', `this ask is ${current.status}`);
+  if (current.status !== 'open') return fail(409, 'not_open', closedWords('ask', current.status));
   const reason = input.reason == null ? null : String(input.reason).slice(0, 500);
   // The owner's name and title as they are now, kept with the decline: leaving or a rename later does not change who declined it.
   const snapshot = await declineSnapshot(db, input.orgId, input.userId);
@@ -652,7 +653,7 @@ export async function cancelApprovalAsk(
   if (!row) return fail(404, 'not_found', 'no such ask');
   if (row.requestedBy !== input.userId) return fail(403, 'not_requester', 'only the person who asked can withdraw this; an owner can decline it');
   const current = await viewOne(db, row, now);
-  if (current.status !== 'open') return fail(409, 'not_open', `this ask is ${current.status}`);
+  if (current.status !== 'open') return fail(409, 'not_open', closedWords('ask', current.status));
   await db
     .update(walletApprovalAsks)
     .set({ status: 'withdrawn', updatedAt: now })

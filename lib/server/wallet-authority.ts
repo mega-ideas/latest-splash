@@ -85,7 +85,11 @@ export type AuthorityAction =
   | 'member_title_changed'
   | 'exchange_name_sharing_changed'
   | 'limit_answers_saved'
-  | 'limit_request_first_approved';
+  | 'limit_request_first_approved'
+  /** A waiting request ended unpaid because nobody approved it in time (v2 Phase 3, lib/server/approval-wait.ts). */
+  | 'approval_lapsed'
+  /** The requester or an owner reminded the approvers of a waiting request, by hand. */
+  | 'approval_reminded';
 
 export type AuthorityFailure = { ok: false; status: number; code: string; error: string };
 const fail = (status: number, code: string, error: string): AuthorityFailure => ({ ok: false, status, code, error });

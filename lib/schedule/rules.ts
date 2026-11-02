@@ -16,6 +16,7 @@
  *          before. Anything that fails a check is handed back to "ask", and
  *          the owners are told why in plain words.
  */
+import { LAPSE_WORDS } from '../approve/wait.ts';
 import { formatUsdc } from '../fees/copy.ts';
 import { timeLeftWords, plural } from '../team-rules/words.ts';
 import { parseAmountMinor } from '../transfer/plan.ts';
@@ -151,7 +152,7 @@ export const RUN_STATE: Record<RunStatus, { label: string; tone: RunTone; group:
   lapsed: { label: 'Not approved in time', tone: 'bad', group: 'not_paid', says: 'It was not approved in time, so it did not go out. Nothing was paid, and nothing is owed for it.' },
 };
 
-export const LAPSED_REASON = 'Nobody approved it before the request ran out, so it did not go out. Nothing was paid. There is no late fee or penalty.';
+export const LAPSED_REASON = `${LAPSE_WORDS} There is no late fee or penalty.`;
 export const NOT_STARTED_REASON = 'Splash could not start this run within a day of its due time, so it was not run late. Nothing was paid. There is no late fee or penalty.';
 
 export function runIsOpen(status: RunStatus): boolean {

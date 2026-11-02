@@ -84,6 +84,7 @@ import {
   type StoredRequest,
 } from '@/lib/server/wallet-signing-store';
 import type { Decliners } from '@/lib/team/declined-by';
+import { LAPSE_WORDS, closedWords } from '@/lib/approve/wait';
 
 export const MAX_REQUEST_TTL_MS = 24 * 60 * 60 * 1000;
 /** How long a claimed submission may stay `submitting` before the cron asks the chain. */
@@ -828,10 +829,10 @@ export async function submitPartialSignature(
   const signer = request.signers.find((s) => s.userId === input.userId);
   if (!signer) return fail(403, 'not_a_signer', 'you are not a signer of this request');
 
-  if (request.status !== 'collecting') return fail(409, 'closed', `this request is ${request.status}`);
+  if (request.status !== 'collecting') return fail(409, 'closed', closedWords('request', request.status));
   if (request.expiresAt.getTime() <= now.getTime()) {
     await closeSigningRequest(deps.db, { orgId: input.orgId, id: request.id, status: 'expired', from: ['collecting'], now });
-    return fail(410, 'expired', 'this request has expired; nothing was signed for it');
+    return fail(410, 'expired', LAPSE_WORDS);
   }
   if (String(input.digest ?? '') !== request.txDigest) {
     return fail(409, 'digest_mismatch', 'the transaction you reviewed is not the one waiting for signatures; reload it and review again');
@@ -1051,7 +1052,7 @@ export async function cancelSigningRequest(
     return fail(403, 'not_requester', 'only the person who asked can withdraw this request; you can decline to sign it');
   }
   const closed = await closeSigningRequest(deps.db, { orgId: input.orgId, id: input.id, status: 'cancelled', from: ['collecting'], now });
-  return closed ? { ok: true } : fail(409, 'closed', `this request is ${request.status}`);
+  return closed ? { ok: true } : fail(409, 'closed', closedWords('request', request.status));
 }
 
 /**
@@ -1069,7 +1070,7 @@ export async function declineSigningRequest(
   if (!request.signers.some((s) => s.userId === input.userId)) {
     return request.requestedBy === input.userId ? fail(403, 'not_a_signer', 'you are not a signer of this request') : fail(404, 'not_found', 'no such request');
   }
-  if (request.status !== 'collecting') return fail(409, 'closed', `this request is ${request.status}`);
+  if (request.status !== 'collecting') return fail(409, 'closed', closedWords('request', request.status));
   const recorded = await recordDecline(deps.db, { orgId: input.orgId, requestId: input.id, userId: input.userId, now });
   if (!recorded) return fail(409, 'already_answered', 'you have already signed or declined this request');
   await decided(deps, { orgId: input.orgId, signingRequestId: input.id, userId: input.userId, kind: 'declined', at: now });
