@@ -44,7 +44,7 @@ import {
 } from '../lib/server/business-limits.ts';
 import { appointFinanceLead } from '../lib/server/team-admin.ts';
 import { listAuthorityEvents } from '../lib/server/wallet-authority.ts';
-import { DEFAULT_LIMITS, LIMIT_NOTICE_MS, LIMIT_SANITY_MAX, effectiveAtMs } from '../lib/limits/rules.ts';
+import { LIMIT_NOTICE_MS, LIMIT_SANITY_MAX, effectiveAtMs } from '../lib/limits/rules.ts';
 
 const U = (usdc) => BigInt(Math.round(usdc * 1_000_000));
 const T0 = new Date('2026-11-02T09:00:00Z');

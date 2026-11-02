@@ -150,3 +150,39 @@ stay empty) and a new table, `payment_trail_events`: one row per signature, decl
 ask, holding internal ids, roles, times and hashes only (no name in plain text), unique per payment, person
 and kind, with a trigger that refuses any rewrite except sealing a row once. It inserts nothing. Safe to run
 again (`IF NOT EXISTS`, `OR REPLACE`).
+
+## `0086_limit_starts_and_two_approvals`
+
+How a business's limits start, and two people for a large grant (docs/v2/phase3-limits.md).
+
+- **Nothing existing is lowered or changed.** It writes one `business_limits` row for every
+  business and every limit that has none, at the figure the business runs on today: 2,000 USDC a
+  payment, 5,000 a day, 20,000 a month and 90 days (source `raised`, `changed_by`
+  `system:migration`, `held_max` equal to the value), with one `limit_change_applied` line each
+  on the trail whose `before` and `after` are the same figure. A row already there (migration 0079,
+  or a limit an owner lowered) is kept as it is (`ON CONFLICT DO NOTHING`). Before applying it to a
+  shared database, see how many rows it will write:
+
+  ```sql
+  select count(*) * 4 - (select count(*) from business_limits) as rows_to_write from organizations;
+  ```
+
+  Running its pinning statement again writes nothing more. After it, a business made later has no
+  rows and starts at the new figures (50,000 a payment, 100,000 a day, 500,000 a month, 90 days) or
+  at its own answers.
+- A new table, `business_limit_answers` (one row per business: the three answers as written, at
+  most 40 characters each, what was read from them, the proposal and what the working asked for
+  beyond the starting figures, a version, and `applied_at`). It inserts nothing.
+- `business_limits.source` gains `starting`: the CHECK is dropped and added again with the four values
+  (`raised`, `lowered`, `restored`, `starting`).
+- `business_limit_requests` gains `first_approved_by`, `first_approver_role`, `first_approved_at`,
+  `first_granted_value` and `decided_role`, and four CHECKs that hold the two-person rule in the
+  database: the first-approval columns are all set or all null; an approved or applied request has a
+  second approver who is not the first (case-insensitive) and whose role is the other of
+  compliance and operations; and a daily grant above 250,000 USDC or a monthly grant above
+  2,500,000 USDC cannot be approved or applied without a first approver. The two amounts repeat
+  `LARGE_GRANT_LINES` in `lib/limits/rules.ts` as USDC minor units and move with it in a later
+  migration. No existing row can violate them (the old ceilings were 50,000 and 500,000).
+- The trail's allowed actions: `wallet_authority_events_action_check` is dropped and added again
+  **with every value `0084` listed plus the two new ones** (`limit_answers_saved`,
+  `limit_request_first_approved`). Nothing else is dropped, by name and `IF EXISTS`.

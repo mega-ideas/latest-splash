@@ -648,7 +648,7 @@ async function usageOf(db: DrizzleDb, orgId: string, at: Date): Promise<UseWire>
   };
 }
 
-const ROLES = ['compliance', 'operations'] as const;
+
 const otherRole = (role: string): 'compliance' | 'operations' => (role === 'compliance' ? 'operations' : 'compliance');
 const bareEmail = (by: string | null): string => (by ?? '').replace(/^operator:/, '');
 const staffId = (email: string): string => `operator:${email.trim().toLowerCase()}`;
@@ -743,7 +743,7 @@ export async function decideLimitRequestForStaff(db: DrizzleDb, input: DecideInp
   const action = input.action;
   if (action !== 'approve' && action !== 'approve_smaller' && action !== 'decline') return fail(400, 'bad_action', 'Choose approve, approve a smaller figure, or decline.');
   const by = staffId(input.staff.email);
-  const role = input.staff.role as (typeof ROLES)[number];
+  const role = input.staff.role as 'compliance' | 'operations';
   const at = clock(input.now);
 
   return inTransaction(db, async (tx) => {

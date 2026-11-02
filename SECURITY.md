@@ -2699,11 +2699,34 @@ Design: `docs/v2/phase3-team-roles.md` ("Can pay exchange accounts alone") and
 Spec: `docs/v2/phase3-limits.md`. No Move change.
 
 - **What it controls**: four per-business limits (one automatic payment, a day,
-  a month, how long an allowance lasts), standard 2,000 / 5,000 / 20,000 USDC and
-  90 days, with ceilings in code (10,000 USDC for one payment, which is the amount
-  an owner always approves; 50,000 a day; 500,000 a month; 366 days). A limit
-  above its ceiling is refused when asked, refused when staff decide, and clamped
-  if ever stored. The second-approval line is never changed by this path.
+  a month, how long an allowance lasts). A NEW business starts at 50,000 USDC a
+  payment and 100,000 a day, with the month and the lower figures worked out from
+  three answers it gives (`lib/limits/start.ts`); these are starting points, not
+  ceilings (Sky's decision of 2 Nov 2026, replacing round three's 2,000 / 5,000 /
+  20,000 USDC with 10,000 / 50,000 / 500,000 ceilings). `LIMIT_SANITY_MAX` only
+  refuses a typo; the length of an allowance keeps a ceiling of 366 days. The
+  second-approval line is never changed by this path, so an automatic payment above
+  it (10,000 USDC by default) still waits for an owner whatever the per-payment
+  limit says. **Migration 0086 gives every existing business the figures it runs on,
+  so nothing existing is lowered, raised or changed.**
+- **The answers**: owners only; the business and person are the session's; checked
+  and refused in words without being echoed (zero, negative, text, huge, missing,
+  control and direction characters); stored cleaned and at most 40 characters, shown
+  only as text; **never written to the trail, the logs or a request's reason**. A
+  new business is started at its proposal once (one claiming statement, so a double
+  click starts it once); an existing business is never moved by answering.
+  "Ask for higher limits" reads the figures from the stored answers, never from the
+  request, and is keyed by the answers so it asks once.
+- **Two people for a large grant**: a daily limit above 250,000 USDC or a monthly
+  limit above 2,500,000 USDC needs two different Splash staff, one compliance and one
+  operations (`LARGE_GRANT_LINES`, one place). The first approval starts nothing and
+  tells nobody; the 24 hour notice runs from the second; the same person twice is a
+  replay; the trail names both; CHECK constraints in the database hold the rule for a
+  statement that skips the service. With one configured staff login (operations) such
+  a grant cannot be finished until a compliance login exists.
+- **Controls**: the older per-transfer and daily USD guard-rails are a separate model
+  and are shown beside the Limits. No payment path reads both sets, so the page does
+  not claim the lower of the two applies; a test fails if that stops being true.
 - **Who**: only owners ask, cancel and lower; the Finance lead sees. Staff roles
   compliance and operations decide; support is refused. The business and the
   actor are the session's in every customer route.
@@ -2729,8 +2752,10 @@ Spec: `docs/v2/phase3-limits.md`. No Move change.
 - **Restore**: an owner puts a limit they lowered back at once, up to the highest
   figure the business has held (`held_max`); nothing above it without Splash and
   the 24 hour notice. Trail action `limit_restored`.
-- **Not covered**: the 50,000 / 500,000 ceilings need Sebastian and Sky's review;
-  a network-held daily cap still needs a `splash_spend` change.
+- **Not covered**: the monthly start (500,000 USDC), the formula's steps and the
+  minimums are Splash's and need Sky's review; the second-approval line (10,000 USDC)
+  was not moved and may need to move with the new per-payment figure; a network-held
+  daily cap still needs a `splash_spend` change.
 
 ## v2 Phase 3 - Whose name the exchange is told, which partner the screen names, and what the audit proof always holds - 2026-11-02
 

@@ -16,14 +16,14 @@ import { readdir, readFile } from 'node:fs/promises';
 import test from 'node:test';
 
 import { PGlite } from '@electric-sql/pglite';
-import { and, eq } from 'drizzle-orm';
+import { eq } from 'drizzle-orm';
 import { drizzle } from 'drizzle-orm/pglite';
 
 import { migratedDb } from './helpers/store-db.mjs';
 import { LEGACY_LIMITS, pinLegacyLimits } from './helpers/limits-legacy.mjs';
 import * as schema from '../lib/db/schema.ts';
 import { DEFAULT_LIMITS } from '../lib/limits/rules.ts';
-import { currentLimits, decideLimitRequestForStaff, listLimitRequestsForStaff, readLimitsView, requestHigherLimit } from '../lib/server/business-limits.ts';
+import { currentLimits, listLimitRequestsForStaff, readLimitsView, requestHigherLimit } from '../lib/server/business-limits.ts';
 import { askForHigherFromAnswers, limitAnswersNeeded, saveLimitAnswers } from '../lib/server/limit-start.ts';
 import { readOnboardingStateForOrg } from '../lib/server/onboarding.ts';
 import { appointFinanceLead } from '../lib/server/team-admin.ts';
@@ -73,6 +73,9 @@ const answersOf = async (db, orgId) => db.select().from(schema.businessLimitAnsw
 test('a new business answers once: the answers are saved with the proposal, and the proposal is what it starts at', async () => {
   const { db } = await seeded();
   assert.equal(await limitAnswersNeeded(db, 'acme'), true, 'a new business is asked');
+  assert.equal((await readOnboardingStateForOrg(db, 'acme')).limitStart.ask, true, 'the setup page shows the questions to it');
+  assert.equal((await readOnboardingStateForOrg(db, 'oldco')).limitStart.ask, false, 'and not to a business that already runs');
+  assert.equal((await readOnboardingStateForOrg(db, 'acme')).complete, false, 'the questions are not a step: nothing waits on them');
   assert.deepEqual({ ...(await currentLimits(db, 'acme', at(T0.getTime()))) }, { ...DEFAULT_LIMITS }, 'with no answers it starts at the starting figures');
   const done = await save(db);
   assert.equal(done.ok, true, JSON.stringify(done));
