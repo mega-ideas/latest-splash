@@ -16,8 +16,9 @@ import test from 'node:test';
 const card = readFileSync(new URL('../components/team/ExchangeNames.tsx', import.meta.url), 'utf8');
 
 test('a switch keeps keyboard focus while it saves: nothing is `disabled` for the length of a save', () => {
-  assert.doesNotMatch(card, /disabled=\{/);
-  assert.match(card, /aria-disabled=\{busy !== null\}/);
+  assert.doesNotMatch(card, /(?<!aria-)disabled=\{/);
+  assert.match(card, /aria-disabled=\{busy\}/);
+  assert.match(card, /busy=\{busy !== null\}/);
   assert.match(card, /if \(busy\) return;/, 'a second change while one is saving is ignored, not queued');
 });
 
