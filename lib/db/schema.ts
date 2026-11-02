@@ -2904,7 +2904,7 @@ export const businessLimits = pgTable('business_limits', {
   orgId: text('org_id').notNull().references(() => organizations.id),
   kind: text('kind').notNull(),
   value: bigint('value', { mode: 'bigint' }).notNull(),
-  /** raised | lowered | restored (migration 0079). */
+  /** raised | lowered | restored (migration 0079) | starting (a new business, started at its proposal; migration 0086). */
   source: text('source').notNull(),
   /** A user id (an owner), `system:limits` when the notice ran out, or `system:migration` for a figure the business already ran on. */
   changedBy: text('changed_by').notNull(),
@@ -2936,10 +2936,17 @@ export const businessLimitRequests = pgTable('business_limit_requests', {
   requestedAt: timestamp('requested_at', { withTimezone: true }).notNull(),
   status: text('status').notNull().default('pending'),
   grantedValue: bigint('granted_value', { mode: 'bigint' }),
-  /** `operator:<email>`. */
+  /** `operator:<email>`. For a grant that needed two people this is the SECOND approver. */
   decidedBy: text('decided_by'),
   decidedAt: timestamp('decided_at', { withTimezone: true }),
   declineReason: text('decline_reason'),
+  /** The first of two Splash staff to approve a large grant (migration 0086): `operator:<email>`, their role, when, and the figure they approved. The request stays pending; nothing starts. */
+  firstApprovedBy: text('first_approved_by'),
+  firstApproverRole: text('first_approver_role'),
+  firstApprovedAt: timestamp('first_approved_at', { withTimezone: true }),
+  firstGrantedValue: bigint('first_granted_value', { mode: 'bigint' }),
+  /** The role (compliance | operations) of whoever decided: the second approver of a large grant. */
+  decidedRole: text('decided_role'),
   /** decided_at + 24 hours. */
   effectiveAt: timestamp('effective_at', { withTimezone: true }),
   appliedAt: timestamp('applied_at', { withTimezone: true }),
@@ -2953,4 +2960,35 @@ export const businessLimitRequests = pgTable('business_limit_requests', {
   uniqueIndex('business_limit_requests_key_unique').on(table.orgId, table.requestKey),
   uniqueIndex('business_limit_requests_one_open').on(table.orgId, table.kind).where(sql`${table.status} in ('pending', 'approved')`),
   index('business_limit_requests_queue_idx').on(table.status, table.requestedAt),
+]);
+
+/**
+ * The three answers a business gave about how it will use Splash, what was read from them and the proposal worked out
+ * (migration 0086, lib/limits/start.ts). One row per business. The `*_text` columns hold the answers as the owner wrote
+ * them, cleaned and at most 40 characters; they are shown to the owner and to Splash staff as text and are never written
+ * to the trail or the logs. `appliedAt` is set once, when a new business was started at the proposal.
+ */
+export const businessLimitAnswers = pgTable('business_limit_answers', {
+  id: text('id').primaryKey(),
+  orgId: text('org_id').notNull().references(() => organizations.id),
+  monthlyText: text('monthly_text').notNull(),
+  perWeekText: text('per_week_text').notNull(),
+  firstText: text('first_text').notNull(),
+  monthlyMinor: bigint('monthly_minor', { mode: 'bigint' }).notNull(),
+  perWeek: integer('per_week').notNull(),
+  firstMinor: bigint('first_minor', { mode: 'bigint' }).notNull(),
+  proposedPerPayment: bigint('proposed_per_payment', { mode: 'bigint' }).notNull(),
+  proposedDaily: bigint('proposed_daily', { mode: 'bigint' }).notNull(),
+  proposedMonthly: bigint('proposed_monthly', { mode: 'bigint' }).notNull(),
+  wantedPerPayment: bigint('wanted_per_payment', { mode: 'bigint' }).notNull(),
+  wantedDaily: bigint('wanted_daily', { mode: 'bigint' }).notNull(),
+  wantedMonthly: bigint('wanted_monthly', { mode: 'bigint' }).notNull(),
+  /** Counts up each time the answers change: a new version is a new "Ask for higher limits". */
+  version: integer('version').notNull().default(1),
+  formulaVersion: integer('formula_version').notNull(),
+  answeredBy: text('answered_by').notNull(),
+  appliedAt: timestamp('applied_at', { withTimezone: true }),
+  ...timestamps,
+}, (table) => [
+  uniqueIndex('business_limit_answers_org_unique').on(table.orgId),
 ]);

@@ -70,26 +70,33 @@ test('the staff decision route tells the owners only when the request is decided
 // ─── The setup page ──────────────────────────────────────────────────────────
 
 const setup = code(read('components/onboarding/SetupStepper.tsx'));
+const questions = code(read('components/limits/StartQuestions.tsx'));
+const words = code(read('lib/limits/start.ts'));
 
 test('the three questions are in the existing setup page, in plain words, each with its own label', () => {
   assert.match(setup, /state\.limitStart\.ask/);
-  assert.match(setup, /How much do you expect to transfer each month\?/);
-  assert.match(setup, /How many payments do you expect to make each week\?/);
-  assert.match(setup, /How much will your first transfer into your wallet be\?/);
-  assert.equal((setup.match(/<label/g) ?? []).length >= 6, true, 'the profile fields and the three questions are labelled');
-  assert.match(setup, /\/api\/limits\/answers/);
-  assert.match(setup, /inputMode="decimal"/);
-  assert.match(setup, /inputMode="numeric"/);
-  assert.match(setup, /autoComplete="off"/);
-  assert.doesNotMatch(setup, /placeholder="(?:How|Enter)/, 'a label, not a placeholder, asks the question');
-  assert.match(setup, /USDC/);
+  assert.match(setup, /<StartQuestions/, 'the setup page shows the shared questions');
+  assert.match(words, /How much do you expect to transfer each month\?/);
+  assert.match(words, /How many payments do you expect to make each week\?/);
+  assert.match(words, /How much will your first transfer into your wallet be\?/);
+  assert.match(questions, /QUESTIONS\[field\]/, 'each question is the label of its own field');
+  assert.match(questions, /<Field label=\{q\.label\} htmlFor=\{id\}/);
+  assert.match(questions, /\/api\/limits\/answers/);
+  assert.match(questions, /inputMode=\{field === 'paymentsPerWeek' \? 'numeric' : 'decimal'\}/);
+  assert.match(questions, /autoComplete="off"/);
+  assert.doesNotMatch(questions, /placeholder=/, 'a label, not a placeholder, asks the question');
+  assert.match(words, /USDC/);
+  assert.doesNotMatch(questions, /dangerouslySetInnerHTML/, 'what is typed is only ever text');
 });
 
 test('the questions say what they are for, and a refused answer is said beside its question', () => {
   assert.match(setup, /We use your answers to set your starting limits/);
-  assert.match(setup, /aria-invalid/);
-  assert.match(setup, /aria-describedby/);
-  assert.match(setup, /problems\.(monthlyUsdc|paymentsPerWeek|firstTransferUsdc)|problems\[/);
+  assert.match(questions, /aria-invalid/);
+  assert.match(questions, /aria-describedby/);
+  assert.match(questions, /problems\[field\]/);
+  assert.match(questions, /details\?\.problems/, 'the server’s word for a refused answer is shown the same way');
+  assert.match(questions, /proposeStart\(values\)/, 'the page reads the answers the way the server does');
+  assert.match(questions, /\.focus\(\)/, 'a refused send takes the person to the first answer that is wrong');
 });
 
 test('the setup questions are an add-on to the existing flow: no second onboarding page or route was made', () => {
@@ -112,7 +119,7 @@ test('the Limits screen shows "We started you at ..." and a one-tap Ask for high
   assert.match(card, /canAsk/, 'only owners are offered it');
   assert.match(card, /disabled=\{asking\}|disabled=\{busy\}/, 'a second tap while it is asking does nothing');
   assert.match(card, /start\.ask/, 'a business that has not answered can answer here');
-  assert.match(card, /\/api\/limits\/answers['"`]/);
+  assert.match(card, /<StartQuestions/);
   assert.doesNotMatch(card, /dangerouslySetInnerHTML/, 'the owner’s own words are only ever text');
 });
 
@@ -146,7 +153,7 @@ const queue = code(read('components/admin/AdminLimitRequests.tsx'));
 test('the staff card shows the KYB tier, the answers and the last 30 days beside the request, and what approval it needs', () => {
   assert.match(queue, /request\.context/);
   assert.match(queue, /KYB tier/);
-  assert.match(queue, /context\.answers/);
+  assert.match(queue, /c\.answers/);
   assert.match(queue, /Last 30 days/);
   assert.match(queue, /use30\./);
   assert.match(queue, /approvals\.needed/);
@@ -162,5 +169,6 @@ test('the staff card shows the KYB tier, the answers and the last 30 days beside
 test('the first approver is not offered the button again, and the card says why', () => {
   assert.match(queue, /youApprovedFirst/);
   assert.match(queue, /You approved this first/);
-  assert.match(queue, /disabled=\{[^}]*youApprovedFirst/);
+  assert.match(queue, /const mustWait = request\.approvals\.youApprovedFirst && choice !== 'decline'/, 'they can still decline');
+  assert.match(queue, /disabled=\{[^}]*mustWait/);
 });

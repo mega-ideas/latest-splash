@@ -9,6 +9,7 @@ import { organizations, orgSettings, suppliers, termsAcceptances } from '@/lib/d
 import { TERMS_VERSION } from '@/content/legal';
 import type { PayoutPartner, PayoutPartnerId } from '@/lib/payouts/partner';
 import { Iso20022Error, normalizeAddress } from '@/lib/payments/iso20022';
+import { limitAnswersNeeded } from '@/lib/server/limit-start';
 import type { DrizzleDb } from '@/lib/server/wallet-signing-store';
 
 /**
@@ -46,6 +47,12 @@ export interface OnboardingState {
   /** Steps 1–4 complete (the recipient step is optional by design). */
   complete: boolean;
   termsVersion: string;
+  /**
+   * The three questions about how the business will use Splash (lib/limits/start.ts), asked on this page of a NEW
+   * business: one that has answered nothing and has no limits yet. They are not a step and gate nothing; they set the
+   * starting limits. A business that already runs is not asked here (it can answer from Settings, Limits).
+   */
+  limitStart: { ask: boolean };
 }
 
 /** Structural, not nominal: node-postgres in the app, PGlite in the tests. */
@@ -164,6 +171,7 @@ export async function readOnboardingStateForOrg(d: Db, orgId: string): Promise<O
     steps,
     complete: steps.slice(0, 4).every((s) => s.done),
     termsVersion: TERMS_VERSION,
+    limitStart: { ask: await limitAnswersNeeded(d, ctx.orgId) },
   };
 }
 

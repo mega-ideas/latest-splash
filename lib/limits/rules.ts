@@ -2,27 +2,34 @@
  * A business's limits on automatic payments, and how an owner gets a higher one
  * (v2 Phase 3, Sky's decision).
  *
- * Every business starts with the same four limits: the most for one automatic
- * payment, the most in a day, the most in a month, and how long an allowance
- * lasts (ALLOWANCE_DEFAULTS: 2,000, 5,000, 20,000 USDC and 90 days). An owner:
+ * Every business has four limits: the most for one automatic payment, the most
+ * in a day, the most in a month, and how long an allowance lasts. A NEW business
+ * starts at DEFAULT_LIMITS, or lower, at what its own answers to three questions
+ * work out to (lib/limits/start.ts). These are starting points, not ceilings:
+ * they go up on request and approval, and an owner can lower them at once. A
+ * business that existed before keeps the figures it already ran on (migration
+ * 0086).
  *
- *   - LOWERS a limit whenever they like: it applies at once and nothing is asked;
- *   - ASKS Splash for a higher one: Splash staff approve it, approve a smaller
- *     figure, or decline with a reason, and an approved higher limit starts
- *     24 hours after approval (the notice Splash keeps for its own changes), and
- *     the owner can cancel it before then;
- *   - is never offered more than the ceiling in this file, whatever staff say.
+ *   - an owner LOWERS a limit whenever they like: it applies at once and nothing is asked;
+ *   - an owner ASKS Splash for a higher one: Splash staff approve it, approve a
+ *     smaller figure, or decline with a reason, and an approved higher limit
+ *     starts 24 hours after approval (the notice Splash keeps for its own
+ *     changes), and the owner can cancel it before then;
+ *   - a very large grant (LARGE_GRANT_LINES) needs two different Splash staff;
+ *   - nothing is offered past LIMIT_SANITY_MAX, a guard against a typo and not a policy.
  *
  * What this does NOT touch: the second-approval line (10,000 USDC by default,
  * the SpendPolicy's own), which only owners edit and which this path never
- * raises; and the owners' own spending rules, which stay instant.
+ * raises: an automatic payment above it still waits for an owner, whatever the
+ * limit here says (AUTO_APPROVAL_CEILING_MINOR in lib/schedule/rules.ts); and the
+ * owners' own spending rules, which stay instant.
  *
  * Pure and client-safe. Money is whole USDC minor units (6 decimals) as bigint;
  * days are a whole number carried in the same bigint, so one request shape
  * serves all four limits.
  */
 import { formatUsdcBound } from '../fees/copy.ts';
-import { ALLOWANCE_DEFAULTS, ALLOWANCE_MAX_DAYS, AUTO_APPROVAL_CEILING_MINOR, stampWords, type AllowanceForm } from '../schedule/rules.ts';
+import { ALLOWANCE_DEFAULTS, ALLOWANCE_MAX_DAYS, stampWords, type AllowanceForm } from '../schedule/rules.ts';
 import { parseAmountMinor } from '../transfer/plan.ts';
 
 export const LIMIT_KINDS = ['per_payment', 'daily', 'monthly', 'days'] as const;
@@ -34,36 +41,66 @@ export type LimitValues = Record<LimitKind, bigint>;
 
 const USDC = 1_000_000n;
 
-/** What every business starts with. The Mode B allowance defaults, written once. */
+/**
+ * What a new business starts at, and what a business with no answers on file has (Sky's decision, replacing round
+ * three's 2,000 / 5,000 / 20,000 USDC). They are STARTING POINTS: a proposal worked out from a business's own answers
+ * is capped at them (lib/limits/start.ts), and a limit goes up or down on request and approval. None is a ceiling.
+ *
+ *   per_payment  50,000 USDC
+ *   daily        100,000 USDC
+ *   monthly      500,000 USDC. Sky left the monthly start to be worked out from the business's answers; this is the
+ *                round-three figure, kept as the cap of that working and as the start of a business with no answers.
+ *   days         ALLOWANCE_DEFAULTS.expiresInDays
+ *
+ * A business that existed before these figures keeps the ones it ran on (migration 0086 writes them as rows).
+ */
 export const DEFAULT_LIMITS: Readonly<LimitValues> = Object.freeze({
-  per_payment: BigInt(ALLOWANCE_DEFAULTS.perPaymentUsdc) * USDC,
-  daily: BigInt(ALLOWANCE_DEFAULTS.dailyUsdc) * USDC,
-  monthly: BigInt(ALLOWANCE_DEFAULTS.monthlyUsdc) * USDC,
+  per_payment: 50_000n * USDC,
+  daily: 100_000n * USDC,
+  monthly: 500_000n * USDC,
   days: BigInt(ALLOWANCE_DEFAULTS.expiresInDays),
 });
 
 /**
- * The most Splash will ever grant, in code. A request above it is refused when
- * it is asked, when staff decide it and again when it would take effect.
- *
- *   per_payment  AUTO_APPROVAL_CEILING_MINOR: the 10,000 USDC an owner must
- *                always approve. An automatic payment is held to the lower of
- *                this and the business's own second-approval line, so no limit
- *                here can lift it.
- *   daily        50,000 USDC: five of those payments in a day.
- *   monthly      500,000 USDC: the on-chain Tier 3 window cap that
- *                VERIFIED_WINDOW_CAP_MINOR mirrors.
- *   days         ALLOWANCE_MAX_DAYS: an allowance lasts at most a year.
- *
- * The daily and monthly figures are Splash's proposal for Sebastian and Sky to
- * review before mainnet (docs/v2/phase3-limits.md).
+ * The most a limit can be asked for or granted: a guard against a typo or a corrupt row, NOT a policy ceiling. Staff
+ * decide how much to grant, and a very large grant needs two of them (LARGE_GRANT_LINES). Only the length of an
+ * allowance is a true ceiling: an allowance lasts at most a year (ALLOWANCE_MAX_DAYS).
  */
-export const LIMIT_CEILINGS: Readonly<LimitValues> = Object.freeze({
-  per_payment: AUTO_APPROVAL_CEILING_MINOR,
-  daily: 50_000n * USDC,
-  monthly: 500_000n * USDC,
+export const LIMIT_SANITY_MAX: Readonly<LimitValues> = Object.freeze({
+  per_payment: 1_000_000n * USDC,
+  daily: 10_000_000n * USDC,
+  monthly: 100_000_000n * USDC,
   days: BigInt(ALLOWANCE_MAX_DAYS),
 });
+
+/**
+ * THE TWO LINES (Sky approved following the recommendation). A raise that takes the daily limit above 250,000 USDC, or
+ * the monthly limit above 2,500,000 USDC, needs TWO different Splash staff approvals, one from compliance and one from
+ * operations. One person never approves twice. The first approval is recorded and starts nothing; the 24 hour notice
+ * starts only after the second. A grant at or below a line needs one approval, as before.
+ *
+ * These two figures are written here and nowhere else in code: the service, the queue and the page all follow this
+ * file. The database check that holds the rule (migration 0086) has to repeat them as numbers, so a change here is
+ * made together with a new migration.
+ */
+export const LARGE_GRANT_LINES: Readonly<{ daily: bigint; monthly: bigint }> = Object.freeze({
+  daily: 250_000n * USDC,
+  monthly: 2_500_000n * USDC,
+});
+
+/** Does granting `granted` for `kind` need two different Splash staff? Only the daily and monthly limits have a line. */
+export function needsTwoApprovals(kind: LimitKind, granted: bigint): boolean {
+  if (kind === 'daily') return granted > LARGE_GRANT_LINES.daily;
+  if (kind === 'monthly') return granted > LARGE_GRANT_LINES.monthly;
+  return false;
+}
+
+/**
+ * The daily limit automatic runs are held to when the owners never set one of their own: the 5,000 USDC the Automatic
+ * form has always started from (ALLOWANCE_DEFAULTS), not the business's limit. A limit Splash raised, or a business
+ * that started higher, does not raise what the owners never chose.
+ */
+export const UNCHOSEN_DAILY_CAP: bigint = BigInt(ALLOWANCE_DEFAULTS.dailyUsdc) * USDC;
 
 /** The least a limit can be lowered to: one cent of USDC, or one day. */
 export const LIMIT_FLOORS: Readonly<LimitValues> = Object.freeze({ per_payment: 10_000n, daily: 10_000n, monthly: 10_000n, days: 1n });
@@ -112,24 +149,33 @@ export function parseLimitValue(kind: LimitKind, raw: unknown): bigint | null {
   return parseAmountMinor(text);
 }
 
-/** Why a figure is not offered at all, in words. Empty when it is inside the ceiling and above the floor. */
+/** Why a figure is not offered at all, in words. Empty when it is inside the sanity maximum and above the floor. */
 function bounds(kind: LimitKind, units: bigint): string[] {
   if (units < LIMIT_FLOORS[kind]) return [kind === 'days' ? 'A limit is at least one day.' : 'A limit is above zero.'];
-  if (units > LIMIT_CEILINGS[kind]) return [ceilingWords(kind)];
+  if (units > LIMIT_SANITY_MAX[kind]) return [ceilingWords(kind)];
   return [];
 }
 
-/** The ceiling, in the sentence an owner reads when they go past it. */
+/**
+ * What is said when a figure is past the sanity maximum. For an amount this is not a policy ("Splash will not give you
+ * more"): it is a check that the figure is not a typo. For the length of an allowance it is the true ceiling.
+ */
 export function ceilingWords(kind: LimitKind): string {
-  const top = formatLimit(kind, LIMIT_CEILINGS[kind]);
-  switch (kind) {
-    case 'per_payment':
-      return `Splash cannot raise this above ${top}. It is the most Splash pays without an owner approving the payment, and a limit cannot lift it.`;
-    case 'days':
-      return `An allowance lasts at most ${top}. Give it again then.`;
-    default:
-      return `Splash does not offer more than ${top} for this limit.`;
-  }
+  const top = formatLimit(kind, LIMIT_SANITY_MAX[kind]);
+  if (kind === 'days') return `An allowance lasts at most ${top}. Give it again then.`;
+  return `Splash does not offer more than ${top} for this limit. If that is the figure you meant, contact Splash; if not, check it for a typo.`;
+}
+
+/**
+ * What the request sheet says about how much can be asked for, instead of a ceiling: Splash reads every request and
+ * decides how much to grant, and a very large one needs two people at Splash, so it can take longer.
+ */
+export function askNote(kind: LimitKind): string {
+  if (kind === 'days') return ceilingWords(kind);
+  const lines = kind === 'daily' ? ` Above ${formatLimit(kind, LARGE_GRANT_LINES.daily)} a day` : kind === 'monthly' ? ` Above ${formatLimit(kind, LARGE_GRANT_LINES.monthly)} a month` : '';
+  const two = lines ? `${lines} two people at Splash have to agree, so it can take longer.` : '';
+  const line = kind === 'per_payment' ? ' An automatic payment above your second-approval line still waits for an owner, whatever this limit says.' : '';
+  return `Splash reads every request and decides how much to grant.${two}${line}`;
 }
 
 /** Is `requested` a figure an owner may ask for, given what the limit is now? Words for each reason it is not; empty when it is. */
@@ -140,7 +186,7 @@ export function raiseProblems(kind: LimitKind, requested: bigint, current: bigin
   return [];
 }
 
-/** Is `granted` a figure staff may approve? It is above the current limit, inside the ceiling, and no more than what was asked for. */
+/** Is `granted` a figure staff may approve? It is above the current limit, inside the sanity maximum, and no more than what was asked for. */
 export function grantProblems(kind: LimitKind, granted: bigint, requested: bigint, current: bigint): string[] {
   const out = bounds(kind, granted);
   if (out.length > 0) return out;
@@ -205,11 +251,12 @@ export function allowanceLimitProblems(form: AllowanceForm, limits: LimitValues)
 export const stricter = (a: bigint, b: bigint): bigint => (a < b ? a : b);
 
 /**
- * The daily limit automatic runs are held to: the one the owners set, or, when they have set none, the standard 5,000
- * USDC (a limit Splash raised does not raise what the owners never chose), and never more than the business's own.
+ * The daily limit automatic runs are held to: the one the owners set, or, when they have set none, the 5,000 USDC the
+ * Automatic form starts from (a limit Splash raised, or a business that started higher, does not raise what the owners
+ * never chose), and never more than the business's own.
  */
 export function effectiveDailyCap(ownerCapMinor: bigint | null, limits: LimitValues): bigint {
-  return stricter(ownerCapMinor ?? stricter(DEFAULT_LIMITS.daily, limits.daily), limits.daily);
+  return stricter(ownerCapMinor ?? stricter(UNCHOSEN_DAILY_CAP, limits.daily), limits.daily);
 }
 
 // ─── A request, in words ─────────────────────────────────────────────────────

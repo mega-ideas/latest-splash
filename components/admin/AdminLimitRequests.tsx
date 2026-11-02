@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useState } from 'react';
 import { BadgeCheck, CircleAlert, Clock3, Inbox, Loader2, RefreshCcw, XCircle } from 'lucide-react';
 
-import { DECLINE_REASON_MIN, REASON_MAX } from '@/lib/limits/rules';
+import { DECLINE_REASON_MIN, LARGE_GRANT_LINES, REASON_MAX, formatLimit } from '@/lib/limits/rules';
 import { stampWords } from '@/lib/schedule/rules';
 import type { StaffRequestWire } from '@/lib/server/business-limits';
 
@@ -14,9 +14,12 @@ type Choice = 'approve' | 'approve_smaller' | 'decline';
  * Owners' requests for higher limits on automatic payments, for compliance and
  * operations staff. An approval does not change the limit: it starts a 24 hour
  * notice, the owners are told, and any owner can cancel before it starts. The
- * page says that where the decision is made, and names the ceiling in code that
- * no approval can pass. Every decision is written to the business's trail under
- * the staff member's address.
+ * card shows the business beside the request: its KYB tier, the answers it gave
+ * and the proposal worked out from them, and its last 30 days of use. A grant
+ * above a large-grant line needs two different staff (one compliance, one
+ * operations): the card says which approval it is waiting for and does not offer
+ * the first approver the button again. Every decision is written to the
+ * business's trail under the staff member's address.
  */
 export default function AdminLimitRequests({ initial, allowed, problem }: { initial: Queue; allowed: boolean; problem: string | null }) {
   const [queue, setQueue] = useState(initial);
@@ -47,6 +50,9 @@ export default function AdminLimitRequests({ initial, allowed, problem }: { init
           <h1 className="text-2xl font-black tracking-tight text-[#1F4452]">Limit requests</h1>
           <p className="mt-1 text-sm leading-6 text-[#1F4452]">
             Owners asking for a higher limit on automatic payments. An approval starts a 24 hour notice: the owners are told, any owner can cancel, and the limit changes only when the notice has passed.
+          </p>
+          <p className="mt-1 text-sm leading-6 text-[#1F4452]">
+            Taking the daily limit above {formatLimit('daily', LARGE_GRANT_LINES.daily)} or the monthly limit above {formatLimit('monthly', LARGE_GRANT_LINES.monthly)} needs two people: one from compliance and one from operations. The notice starts only after the second approves.
           </p>
         </div>
         {allowed ? (
@@ -135,6 +141,9 @@ function RequestCard({ request, onDecided, onError }: { request: StaffRequestWir
   const [here, setHere] = useState<string | null>(null);
   // Once the decision is saved the card is closed: a second click on a card that is still on screen would only replay it.
   const [saved, setSaved] = useState<Choice | null>(null);
+  // The first of two approvals is saved but decides nothing: the card stays, and says what it is waiting for.
+  const [firstSaved, setFirstSaved] = useState(false);
+  const mustWait = request.approvals.youApprovedFirst && choice !== 'decline';
   const days = request.kind === 'days';
   const declineShort = choice === 'decline' && reason.replace(/\s+/g, ' ').trim().length < DECLINE_REASON_MIN;
   const smallerMissing = choice === 'approve_smaller' && smaller.trim() === '';
@@ -149,12 +158,13 @@ function RequestCard({ request, onDecided, onError }: { request: StaffRequestWir
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ action: choice, ...(choice === 'approve_smaller' ? { granted: smaller } : {}), ...(choice === 'decline' ? { reason } : {}) }),
       });
-      const body = (await response.json().catch(() => ({}))) as { error?: string };
+      const body = (await response.json().catch(() => ({}))) as { error?: string; stage?: string };
       if (!response.ok) {
         setHere(body.error ?? 'The decision was not saved. Nothing was changed.');
         return;
       }
-      setSaved(choice);
+      if (body.stage === 'first_approval') setFirstSaved(true);
+      else setSaved(choice);
       await onDecided();
     } catch {
       setHere('Could not reach Splash. Nothing was changed.');
@@ -189,10 +199,21 @@ function RequestCard({ request, onDecided, onError }: { request: StaffRequestWir
             <span className="sr-only">is asked to be raised to</span>
             <span className="text-2xl font-black tabular-nums">{request.requestedWords}</span>
           </p>
-          <p className="mt-1 text-[13px] text-[#326273]">The most Splash will ever grant for this is {request.ceilingWords}. A figure above it is refused.</p>
+          <ApprovalsNote request={request} />
         </div>
         <blockquote className="border-l-4 border-[#5C9EAD] pl-4 text-sm leading-6 text-[#1F4452]">{request.reason}</blockquote>
+        <BusinessContext request={request} />
       </div>
+
+      {firstSaved || (request.approvals.youApprovedFirst && !saved) ? (
+        <div role="status" className="space-y-2 border-t border-[#326273]/12 bg-[var(--info-bg)] px-5 py-4 text-[13px] font-semibold text-[#1F4452]">
+          <p className="flex items-start gap-2">
+            <BadgeCheck className="mt-0.5 h-4 w-4 shrink-0" aria-hidden="true" />
+            <span>You approved this first. It needs a second approval from {request.approvals.waitingFor ?? 'the other team'} staff, and from a different person. Nothing has started and the owners have been told nothing.</span>
+          </p>
+          <p className="pl-6 font-normal">If you have changed your mind, you can still decline it.</p>
+        </div>
+      ) : null}
 
       {saved ? (
         <div role="status" className="flex items-start gap-2 border-t border-[#326273]/12 bg-[var(--info-bg)] px-5 py-4 text-[13px] font-semibold text-[#1F4452]">
@@ -257,16 +278,80 @@ function RequestCard({ request, onDecided, onError }: { request: StaffRequestWir
         <div className="flex justify-end">
           <button
             type="button"
-            disabled={busy || declineShort || smallerMissing}
+            disabled={busy || declineShort || smallerMissing || mustWait}
             onClick={() => void send()}
             className="inline-flex min-h-11 items-center gap-2 rounded-lg bg-[#0d6370] px-4 text-[13px] font-black text-white transition-colors hover:bg-[#1F4452] focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[#0d6370] disabled:cursor-not-allowed disabled:opacity-50"
           >
             {busy ? <Loader2 className="h-4 w-4 animate-spin" aria-hidden="true" /> : null}
-            {choice === 'decline' ? 'Decline and tell the owners' : choice === 'approve_smaller' ? 'Approve the smaller figure' : `Approve ${request.requestedWords}`}
+            {choice === 'decline' ? 'Decline and tell the owners' : choice === 'approve_smaller' ? 'Approve the smaller figure' : request.approvals.needed === 2 && !request.approvals.first ? `Give the first approval for ${request.requestedWords}` : `Approve ${request.approvals.first?.figureWords ?? request.requestedWords}`}
           </button>
         </div>
       </div>
       )}
     </article>
+  );
+}
+
+/** What approving takes: one person, or two (one from each team), and where a first approval stands. */
+function ApprovalsNote({ request }: { request: StaffRequestWire }) {
+  const a = request.approvals;
+  if (a.first) {
+    return (
+      <p className="mt-2 text-[13px] leading-5 text-[#1F4452]">
+        <span className="font-bold">First approval given</span> by {a.first.by} ({a.first.role}) for {a.first.figureWords}, {stampWords(Date.parse(a.first.at))}. {a.youApprovedFirst ? 'You cannot approve it again.' : `It needs a second approval from ${a.waitingFor ?? 'the other team'} staff.`} The 24 hour notice starts only after the second.
+      </p>
+    );
+  }
+  if (a.needed === 2) {
+    return (
+      <p className="mt-2 text-[13px] leading-5 text-[#1F4452]">
+        <span className="font-bold">Two approvals needed</span> if you approve it as asked: one from compliance and one from operations, from two different people. The first approval starts nothing. To approve a figure up to {formatLimit(request.kind, request.kind === 'monthly' ? LARGE_GRANT_LINES.monthly : LARGE_GRANT_LINES.daily)}, choose a smaller figure; that takes one.
+      </p>
+    );
+  }
+  return <p className="mt-2 text-[13px] leading-5 text-[#326273]">One approval is enough for this figure.</p>;
+}
+
+/** The business beside its request: its KYB tier, the answers it gave, and the last 30 days of automatic payments. Everything here is shown as text. */
+function BusinessContext({ request }: { request: StaffRequestWire }) {
+  const c = request.context;
+  const answers = c.answers;
+  return (
+    <div className="grid gap-4 rounded-xl bg-[#F6F0ED] p-4 text-[13px] leading-5 text-[#1F4452] sm:grid-cols-3" role="group" aria-label={`About ${request.org.name}`}>
+      <div>
+        <h4 className="font-black text-[#0c3e48]">Verification</h4>
+        <dl className="mt-1.5 space-y-1">
+          <div><dt className="inline text-[#326273]">KYB tier: </dt><dd className="inline font-bold">{c.kybTier ?? 'not recorded'}</dd></div>
+          <div><dt className="inline text-[#326273]">State: </dt><dd className="inline font-bold">{c.kybStateWords}</dd></div>
+        </dl>
+      </div>
+      <div>
+        <h4 className="font-black text-[#0c3e48]">What they told us</h4>
+        {answers ? (
+          <>
+            <dl className="mt-1.5 space-y-1">
+              <div><dt className="inline text-[#326273]">Each month: </dt><dd className="inline font-bold">{answers.monthlyText}</dd></div>
+              <div><dt className="inline text-[#326273]">Payments a week: </dt><dd className="inline font-bold">{answers.perWeekText}</dd></div>
+              <div><dt className="inline text-[#326273]">First transfer in: </dt><dd className="inline font-bold">{answers.firstText}</dd></div>
+            </dl>
+            <p className="mt-1.5">
+              {answers.startedFromAnswers ? 'Started at' : 'A new business like this would start at'} {answers.proposedWords.per_payment} a payment, {answers.proposedWords.daily} a day and {answers.proposedWords.monthly} a month.
+              {' '}Their answers work out to {answers.wantedWords.per_payment}, {answers.wantedWords.daily} and {answers.wantedWords.monthly}.
+            </p>
+          </>
+        ) : (
+          <p className="mt-1.5 text-[#326273]">They have not answered the three questions.</p>
+        )}
+      </div>
+      <div>
+        <h4 className="font-black text-[#0c3e48]">Last 30 days</h4>
+        <dl className="mt-1.5 space-y-1">
+          <div><dt className="inline text-[#326273]">Automatic payments: </dt><dd className="inline font-bold tabular-nums">{c.use30.payments}</dd></div>
+          <div><dt className="inline text-[#326273]">Paid in all: </dt><dd className="inline font-bold tabular-nums">{c.use30.totalWords}</dd></div>
+          <div><dt className="inline text-[#326273]">Largest payment: </dt><dd className="inline font-bold tabular-nums">{c.use30.largestWords}</dd></div>
+          <div><dt className="inline text-[#326273]">Busiest day: </dt><dd className="inline font-bold tabular-nums">{c.use30.busiestDayWords}</dd></div>
+        </dl>
+      </div>
+    </div>
   );
 }

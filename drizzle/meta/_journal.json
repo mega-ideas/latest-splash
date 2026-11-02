@@ -603,6 +603,13 @@
       "when": 1795910400000,
       "tag": "0085_payment_trail",
       "breakpoints": true
+    },
+    {
+      "idx": 86,
+      "version": "7",
+      "when": 1795996800000,
+      "tag": "0086_limit_starts_and_two_approvals",
+      "breakpoints": true
     }
   ]
 }

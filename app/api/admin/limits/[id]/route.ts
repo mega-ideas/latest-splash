@@ -21,6 +21,12 @@ export const dynamic = 'force-dynamic';
  * The decision is a line on the business's trail under the staff member's
  * address. The owners are told afterwards; if nobody could be reached the cron
  * tries again. Deciding twice the same way decides once.
+ *
+ * A grant above a large-grant line (lib/limits/rules.ts) takes two different
+ * staff, one compliance and one operations: the first approval answers
+ * `stage: 'first_approval'`, is recorded, starts nothing and tells nobody; the
+ * second, from the other role and a different person, answers `stage: 'decided'`
+ * and starts the 24 hour notice.
  */
 export async function PATCH(request: Request, { params }: { params: Promise<{ id: string }> }) {
   const session = await getAdminSession();
@@ -32,10 +38,11 @@ export async function PATCH(request: Request, { params }: { params: Promise<{ id
   const db = getDb() as unknown as DrizzleDb;
   const result = await decideLimitRequestForStaff(db, { requestId: id, staff: { email: session.email, role: session.role }, action: body.action, granted: body.granted, reason: body.reason });
   if (!result.ok) return NextResponse.json({ error: result.error, code: result.code, ...(result.details ? { details: result.details } : {}) }, { status: result.status });
-  if (!result.replayed) {
+  // The owners are told when a request is decided. The first of two approvals decides nothing, so nobody is told.
+  if (!result.replayed && result.stage === 'decided') {
     await sendLimitNotices(db, {
       notify: (orgId, notice) => tellOwners(db, orgId, { subject: notice.subject, text: notice.text, path: notice.path, emailLead: 'Open Settings, Limits:', whatsappTail: 'Open Splash, Settings, Limits.' }),
     }).catch(() => undefined);
   }
-  return NextResponse.json({ request: result.request, replayed: result.replayed });
+  return NextResponse.json({ request: result.request, replayed: result.replayed, stage: result.stage });
 }

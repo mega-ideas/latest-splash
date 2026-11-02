@@ -62,7 +62,7 @@ test('an allowance is held to the business’s limits, which now start higher', 
 
 test('a small business is proposed figures worked out from what it said, and nothing is capped', () => {
   const p = proposeStart(answers('20,000', '5', '10,000'));
-  assert.equal(p.ok, true, JSON.stringify(p));
+  assert.equal(p.ok, true, String(JSON.stringify(p.problems)));
   assert.equal(p.limits.monthly, U(30_000), 'half as much again as the month it expects');
   assert.equal(p.limits.per_payment, U(1_900), 'twice the average payment, to two figures, rounded up');
   assert.equal(p.limits.daily, U(3_000), 'a tenth of the month in a day, never less than a payment');

@@ -62,7 +62,9 @@ async function seeded() {
 }
 
 const save = (db, over = {}) => saveLimitAnswers(db, { orgId: 'acme', actorUserId: 'u-owner', answers: SMALL, now: at(T0.getTime()), ...over });
-const actions = async (db, orgId = 'acme') => (await listAuthorityEvents(db, orgId)).map((e) => e.action);
+// The Finance lead's appointment is part of the fixture, not of what these tests are about.
+const trailOf = async (db, orgId = 'acme') => (await listAuthorityEvents(db, orgId)).filter((e) => e.action !== 'finance_lead_appointed');
+const actions = async (db, orgId = 'acme') => (await trailOf(db, orgId)).map((e) => e.action);
 const rowsOf = async (db, orgId) => db.select().from(schema.businessLimits).where(eq(schema.businessLimits.orgId, orgId));
 const answersOf = async (db, orgId) => db.select().from(schema.businessLimitAnswers).where(eq(schema.businessLimitAnswers.orgId, orgId));
 
@@ -115,7 +117,7 @@ test('the trail says the answers were saved and the limits started, and holds no
   } finally {
     Object.assign(console, originals);
   }
-  const trail = await listAuthorityEvents(db, 'acme');
+  const trail = await trailOf(db, 'acme');
   assert.deepEqual(trail.map((e) => e.action), ['limit_answers_saved', 'limit_change_applied', 'limit_change_applied', 'limit_change_applied']);
   assert.ok(trail.slice(1).every((e) => e.actorUserId === 'system:onboarding'));
   const flat = JSON.stringify(trail.map((e) => ({ a: e.action, d: e.detail, r: e.ref })));
@@ -373,7 +375,7 @@ test('the staff card shows the business’s KYB tier, its answers and its last 3
   await client.exec(`SET session_replication_role = replica`);
   const pay = (id, day, amount, status = 'paid') =>
     client.exec(`INSERT INTO payment_schedule_run_payments (id, run_id, org_id, position, payment_ref, payee_name, address, amount_minor, max_fee_minor, fee_kind, status, attempted_at)
-      VALUES ('${id}', 'run-1', 'oldco', ${Number(id.slice(-1))}, 'ref-${id}', 'Supplier', '0x${'ab'.repeat(32)}', ${amount}, 0, 0, '${status}', '${day}')`);
+      VALUES ('${id}', 'run-1', 'oldco', ${Number(id.slice(-1))}, '${id.slice(-1).repeat(64)}', 'Supplier', '0x${'ab'.repeat(32)}', ${amount}, 0, 0, '${status}', '${day}')`);
   await pay('p-1', '2026-10-30T10:00:00Z', U(1_200));
   await pay('p-2', '2026-10-30T11:00:00Z', U(1_800));
   await pay('p-3', '2026-10-20T10:00:00Z', U(900));

@@ -147,7 +147,7 @@ export default function SettingsPage({ alerts, billingOn }: { alerts: Governance
           ) : (
             <Card id="wallet-note" title="Spending rules, signers and funding">{walletNote()}</Card>
           )}
-          {limitsVisible ? <LimitsCard /> : null}
+          {limitsVisible ? <LimitsCard controls={ops.settings ? { perTransferUsd: ops.settings.perTransferLimitUsd, dailyUsd: ops.settings.dailyLimitUsd } : ops.problem ? null : undefined} /> : null}
           {billingOn ? <BillingCard owner={owner === true} /> : null}
           {ops.settings ? <OperatingControls settings={ops.settings} setSettings={ops.setSettings} editable={canEditControls(o?.role)} /> : ops.problem ? <OperatingControlsUnavailable problem={ops.problem} /> : <Card id="controls" title="Operating controls"><Loading label="Reading your controls…" /></Card>}
         </div>

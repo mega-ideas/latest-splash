@@ -5,6 +5,7 @@ import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { ArrowRight, Check, Clock3 } from 'lucide-react';
 
+import StartQuestions from '@/components/limits/StartQuestions';
 import type { OnboardingState } from '@/lib/server/onboarding';
 import { setupSummary } from '@/lib/setup-page/view';
 
@@ -22,6 +23,8 @@ export default function SetupStepper({ state }: { state: OnboardingState }) {
   const [busy, setBusy] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [profile, setProfile] = useState({ legalName: '', registrationNumber: '', addressCountry: '' });
+  // What the answers to the three questions started the business at, said once they are saved (the questions then leave the page).
+  const [started, setStarted] = useState<string | null>(null);
   const summary = setupSummary(state);
   const percent = Math.round((summary.requiredDone / summary.requiredTotal) * 100);
 
@@ -222,6 +225,30 @@ export default function SetupStepper({ state }: { state: OnboardingState }) {
           </form>
         )}
       </StepCard>
+
+      {/* The three questions that set the starting limits: for a new business only, not a step, and nothing waits on them. */}
+      {state.limitStart.ask || started ? (
+        <StepCard id="usage" compact={false} next={false}>
+          <h2 className="text-lg font-bold text-[#1F4452]">How you will use Splash</h2>
+          {started ? (
+            <p role="status" className="mt-2 max-w-2xl text-sm leading-relaxed text-[#326273]">{started} You can see this, and ask Splash for more, in Settings, Limits.</p>
+          ) : (
+            <>
+              <p className="mt-2 max-w-2xl text-sm leading-relaxed text-[#326273]">
+                We use your answers to set your starting limits on automatic payments. A rough figure is fine: it is your estimate, you can lower any limit yourself at any time, and you can ask Splash for more.
+              </p>
+              <div className="mt-4">
+                <StartQuestions
+                  onSaved={(start) => {
+                    setStarted(start.headline ?? 'Your answers are saved.');
+                    router.refresh();
+                  }}
+                />
+              </div>
+            </>
+          )}
+        </StepCard>
+      ) : null}
 
       {/* 3 to 5 · Owned elsewhere; this page shows the truth and points at the door. */}
       {state.steps.slice(2).map((step, i) => (

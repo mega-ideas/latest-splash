@@ -3,10 +3,12 @@
 import { useRef, useState } from 'react';
 import { CircleAlert, Clock3, Loader2, RefreshCw, Undo2 } from 'lucide-react';
 
+import StartQuestions from '@/components/limits/StartQuestions';
 import { call, errorText } from '@/components/transfer/api';
 import { CONTROL, Field, Modal, PrimaryButton, QuietButton, TextInput } from '@/components/transfer/ui';
 import { Card, Loading, Note, Pill, newKey, useLoad } from '@/components/wallet/parts';
-import { WHAT_HAPPENS_NEXT, REASON_MAX, REASON_MIN, limitInputValue, lowerNeedsConfirm, lowerProblems, parseLimitValue, raiseProblems, reasonProblems, type LimitKind } from '@/lib/limits/rules';
+import { WHAT_HAPPENS_NEXT, REASON_MAX, REASON_MIN, limitInputValue, lowerNeedsConfirm, lowerProblems, parseLimitValue, raiseProblems, reasonProblems, type LimitKind, type LimitValues } from '@/lib/limits/rules';
+import { controlsAndLimitsWords, type ControlsFigures } from '@/lib/limits/start';
 import type { LimitWire, LimitsWire, RequestWire } from '@/lib/server/business-limits';
 
 const TEXTAREA = CONTROL.replace('h-11 ', 'min-h-28 py-2.5 leading-6 ');
@@ -16,20 +18,32 @@ type Sheet = { mode: 'raise' | 'lower'; limit: LimitWire } | null;
 /**
  * Limits (v2 Phase 3, Sky's decision): the four limits Splash holds automatic
  * payments to, each in plain words with its figure and why it is that figure.
- * An owner lowers one at once, puts one they lowered back at once (up to the most
- * their business has held), or asks Splash for a higher one: Splash reviews it
- * and, if it approves, the higher limit starts after a 24 hour notice that any
- * owner can cancel. The Finance lead sees all of it and asks for nothing.
+ * A new business starts at the starting figures, or lower at what its own
+ * answers worked out to, and the page says so ("We started you at ... because you
+ * told us ..."). An owner lowers one at once, puts one they lowered back at once
+ * (up to the most their business has held), or asks Splash for a higher one:
+ * Splash reviews it and, if it approves, the higher limit starts after a 24 hour
+ * notice that any owner can cancel. "Ask for higher limits" asks, in one tap, for
+ * what the answers worked out to beyond the start. The Finance lead sees all of
+ * it and asks for nothing.
+ *
+ * Settings, Controls (the older per-transfer and daily guard-rails, in USD) are a
+ * separate set that guards the payments the team sends; they are shown beside
+ * these Limits, with which payments each one holds, in one block at the foot.
  *
  * The page does the same arithmetic as the server (lib/limits/rules.ts) so a
  * figure that would be refused is said so before it is sent; the server decides.
  * It reads the signed-in person's own business only.
+ *
+ * `controls`: the Controls figures; `undefined` while they are being read and `null` when they could not be.
  */
-export default function LimitsCard() {
+export default function LimitsCard({ controls }: { controls?: ControlsFigures | null }) {
   const view = useLoad<LimitsWire>('/api/limits', 'Your limits could not be read.');
   const [sheet, setSheet] = useState<Sheet>(null);
   const [cancelling, setCancelling] = useState<string | null>(null);
   const [restoring, setRestoring] = useState<string | null>(null);
+  const [asking, setAsking] = useState(false);
+  const [askedNote, setAskedNote] = useState<string | null>(null);
   const [problem, setProblem] = useState<string | null>(null);
   const { reload } = view;
 
@@ -66,35 +80,131 @@ export default function LimitsCard() {
     reload();
   }
 
+  // One tap asks Splash, on the ordinary request path, for what the answers worked out to beyond the limits now. The server reads the figures from the answers it holds.
+  async function askForHigher() {
+    if (asking) return;
+    setAsking(true);
+    setProblem(null);
+    setAskedNote(null);
+    const answer = await call<{ asked?: unknown[]; skipped?: unknown[] }>('/api/limits/answers/ask', { method: 'POST', body: {} });
+    setAsking(false);
+    if (!answer.ok) setProblem(errorText(answer, 'The request was not sent. Nothing was changed.'));
+    else {
+      const count = answer.body?.asked?.length ?? 0;
+      setAskedNote(count > 0 ? `Sent. Splash is reviewing ${count === 1 ? 'your request' : `your ${count} requests`}. ${WHAT_HAPPENS_NEXT}` : 'There is nothing more to ask for: your limits already cover what you told us, or a request is already open.');
+    }
+    reload();
+  }
+
+  const current = Object.fromEntries(data.limits.map((l) => [l.kind, BigInt(l.current)])) as LimitValues;
+  const newBusiness = data.limits.every((l) => l.source === 'standard');
+  const start = data.start;
+
   return (
     <Card id="limits" title="Limits on automatic payments">
       <div className="space-y-4">
         <p className="max-w-[62ch] text-[13px] leading-5 text-[#1F4452]">
-          These are the most Splash will pay for you automatically. Every business starts with the same four. {data.canAsk ? 'You can lower any of them at once, and put one back at once. To go higher than your business has had, ask Splash.' : 'Only an owner can lower a limit or ask Splash for a higher one.'}
+          These are the most Splash will pay for you automatically. They are where your business started, and they can go up or down. {data.canAsk ? 'You can lower any of them at once, and put one back at once. To go higher than your business has had, ask Splash.' : 'Only an owner can lower a limit or ask Splash for a higher one.'}
         </p>
         {problem ? <Note tone="error">{problem}</Note> : null}
+
+        {start.headline ? (
+          <div className="space-y-2 rounded-xl bg-[#F6F0ED] p-3" aria-labelledby="limits-start-title">
+            <p id="limits-start-title" className="text-[13px] font-bold text-[#0c3e48]">How your limits started</p>
+            <p className="max-w-[62ch] text-[13px] leading-5 text-[#1F4452]">{start.headline}</p>
+            {start.capped ? <p className="max-w-[62ch] text-[13px] leading-5 text-[#1F4452]">{start.capped}</p> : null}
+            {start.canAskHigher ? (
+              <div className="pt-1">
+                <PrimaryButton type="button" onClick={() => void askForHigher()} disabled={asking}>
+                  {asking ? <Loader2 className="h-4 w-4 animate-spin" aria-hidden="true" /> : null}
+                  Ask for higher limits
+                </PrimaryButton>
+                <p className="mt-1.5 max-w-[62ch] text-[13px] leading-5 text-[#326273]">{WHAT_HAPPENS_NEXT}</p>
+              </div>
+            ) : null}
+            {askedNote ? <p role="status" className="max-w-[62ch] text-[13px] font-semibold leading-5 text-[#1F4452]">{askedNote}</p> : null}
+          </div>
+        ) : start.ask ? (
+          <div className="space-y-3 rounded-xl bg-[#F6F0ED] p-3">
+            <p className="text-[13px] font-bold text-[#0c3e48]">Tell us how you will use Splash</p>
+            <p className="max-w-[62ch] text-[13px] leading-5 text-[#1F4452]">
+              {newBusiness
+                ? 'We use your answers to set your starting limits. A rough figure is fine.'
+                : 'Your business keeps the limits it already runs on. Answer these three questions and we will show you what a new business like yours would start at, and you can ask Splash for it.'}
+            </p>
+            <StartQuestions submitLabel="Save my answers" onSaved={() => reload()} />
+          </div>
+        ) : null}
+
         <ul className="divide-y divide-[#326273]/12 border-y border-[#326273]/12">
           {data.limits.map((limit) => (
             <LimitRow key={limit.kind} limit={limit} canAsk={data.canAsk} cancelling={cancelling} restoring={restoring} onRaise={() => setSheet({ mode: 'raise', limit })} onLower={() => setSheet({ mode: 'lower', limit })} onRestore={() => void restore(limit)} onCancel={cancel} />
           ))}
         </ul>
-        <p className="max-w-[62ch] text-[13px] leading-5 text-[#326273]">
-          These apply only to payments Splash makes for you automatically. The per-transfer and daily limits in Settings, Controls apply to payments your team sends, and the amount above which an owner approves every payment is set in your spending policy. Nothing here changes those.
-        </p>
+        <ControlsBlock controls={controls} limits={current} />
       </div>
       {sheet ? <LimitSheet key={`${sheet.mode}-${sheet.limit.kind}`} sheet={sheet} onClose={() => setSheet(null)} onDone={() => { setSheet(null); reload(); }} /> : null}
     </Card>
   );
 }
 
+/**
+ * The older Settings, Controls figures and these Limits, side by side, with the payments each one holds. They are two
+ * models and stay two: a payment is held to one set, never both (the words are lib/limits/start.ts controlsAndLimitsWords,
+ * and a test reads the code to keep them true).
+ */
+function ControlsBlock({ controls, limits }: { controls?: ControlsFigures | null; limits: LimitValues }) {
+  const words = controlsAndLimitsWords(controls ?? null, limits);
+  return (
+    <section aria-labelledby="limits-controls-title" className="space-y-3 rounded-xl border border-[#326273]/20 bg-white p-3">
+      <h3 id="limits-controls-title" className="text-[14px] font-extrabold text-[#0c3e48]">Controls and Limits, together</h3>
+      <div className="grid gap-4 sm:grid-cols-2">
+        <div className="space-y-1.5">
+          <p className="text-[13px] font-bold text-[#0c3e48]">{words.controls.title} <span className="font-normal text-[#326273]">(Settings, Controls)</span></p>
+          {controls === undefined ? (
+            <p className="text-[13px] text-[#326273]">Reading your Controls…</p>
+          ) : words.controls.unavailable ? (
+            <p className="text-[13px] leading-5 text-[#1F4452]">{words.controls.unavailable}</p>
+          ) : (
+            <dl className="grid gap-1">
+              {words.controls.figures.map((f) => (
+                <div key={f.label} className="flex items-baseline justify-between gap-3">
+                  <dt className="text-[13px] text-[#326273]">{f.label}</dt>
+                  <dd className="text-[14px] font-extrabold tabular-nums text-[#0c3e48]">{f.value}</dd>
+                </div>
+              ))}
+            </dl>
+          )}
+          <p className="text-[13px] leading-5 text-[#1F4452]">{words.controls.says}</p>
+        </div>
+        <div className="space-y-1.5">
+          <p className="text-[13px] font-bold text-[#0c3e48]">{words.limits.title} <span className="font-normal text-[#326273]">(above)</span></p>
+          <dl className="grid gap-1">
+            {words.limits.figures.map((f) => (
+              <div key={f.label} className="flex items-baseline justify-between gap-3">
+                <dt className="text-[13px] text-[#326273]">{f.label}</dt>
+                <dd className="text-[14px] font-extrabold tabular-nums text-[#0c3e48]">{f.value}</dd>
+              </div>
+            ))}
+          </dl>
+          <p className="text-[13px] leading-5 text-[#1F4452]">{words.limits.says}</p>
+        </div>
+      </div>
+      <p className="max-w-[62ch] text-[13px] leading-5 text-[#1F4452]">{words.order}</p>
+      <p className="max-w-[62ch] text-[13px] leading-5 text-[#326273]">{words.approvalLine}</p>
+    </section>
+  );
+}
+
 function LimitRow({ limit, canAsk, cancelling, restoring, onRaise, onLower, onRestore, onCancel }: { limit: LimitWire; canAsk: boolean; cancelling: string | null; restoring: string | null; onRaise: () => void; onLower: () => void; onRestore: () => void; onCancel: (request: RequestWire) => Promise<void> }) {
   const open = limit.open;
   const last = limit.last && !open && limit.last.phase !== 'in_force' ? limit.last : null;
-  const atCeiling = BigInt(limit.current) >= BigInt(limit.ceiling);
+  // Only the length of an allowance has a ceiling (a year); an amount can always be asked for, and Splash decides.
+  const atLongest = limit.ceiling != null && BigInt(limit.current) >= BigInt(limit.ceiling);
   const atFloor = BigInt(limit.current) <= BigInt(limit.floor);
   // A control that is off says why in words on the page: a title attribute is not read on a phone or reliably by a screen reader.
   const whyOff = [
-    atCeiling ? 'This is the most Splash offers.' : open ? 'A request is already open for this limit.' : null,
+    atLongest ? 'This is the longest an allowance can last.' : open ? 'A request is already open for this limit.' : null,
     atFloor ? 'This is the lowest a limit can be.' : null,
   ].filter((text): text is string => text !== null);
   const whyId = `limit-${limit.kind}-why`;
@@ -105,7 +215,7 @@ function LimitRow({ limit, canAsk, cancelling, restoring, onRaise, onLower, onRe
       <div className="flex flex-col gap-3 sm:col-start-2 sm:row-span-3 sm:row-start-1 sm:items-end sm:text-right">
         <div>
           <p className="text-2xl font-extrabold tabular-nums leading-none text-[#0c3e48]">{limit.currentWords}</p>
-          <p className="mt-1.5 text-[13px] text-[#326273]">Most Splash offers: <span className="tabular-nums">{limit.ceilingWords}</span></p>
+          {limit.ceilingWords ? <p className="mt-1.5 text-[13px] text-[#326273]">Longest an allowance can last: <span className="tabular-nums">{limit.ceilingWords}</span></p> : null}
         </div>
         {canAsk ? (
           <div className="flex flex-col gap-2 sm:items-end">
@@ -116,7 +226,7 @@ function LimitRow({ limit, canAsk, cancelling, restoring, onRaise, onLower, onRe
                   Restore to <span className="tabular-nums">{limit.heldWords}</span>
                 </QuietButton>
               ) : null}
-              <QuietButton type="button" onClick={onRaise} disabled={atCeiling || Boolean(open)} aria-label={`Ask for more: ${limit.label}`} aria-describedby={atCeiling || open ? whyId : undefined}>Ask for more</QuietButton>
+              <QuietButton type="button" onClick={onRaise} disabled={atLongest || Boolean(open)} aria-label={`Ask for more: ${limit.label}`} aria-describedby={atLongest || open ? whyId : undefined}>Ask for more</QuietButton>
               <QuietButton type="button" onClick={onLower} disabled={atFloor} aria-label={`Lower: ${limit.label}`} aria-describedby={atFloor ? whyId : undefined}>Lower</QuietButton>
             </div>
             {whyOff.length > 0 ? <p id={whyId} className="max-w-[34ch] text-[13px] leading-5 text-[#326273] sm:text-right">{whyOff.join(' ')}</p> : null}
@@ -209,15 +319,15 @@ function LimitSheet({ sheet, onClose, onDone }: { sheet: NonNullable<Sheet>; onC
             <dd className="mt-0.5 text-base font-extrabold tabular-nums text-[#0c3e48]">{limit.currentWords}</dd>
           </div>
           <div>
-            <dt className="text-[#326273]">{raising ? 'Most Splash offers' : 'Lowest you can set'}</dt>
-            <dd className="mt-0.5 text-base font-extrabold tabular-nums text-[#0c3e48]">{raising ? limit.ceilingWords : days ? '1 day' : '0.01 USDC'}</dd>
+            <dt className="text-[#326273]">{raising ? (days ? 'Longest it can be' : 'After Splash approves') : 'Lowest you can set'}</dt>
+            <dd className="mt-0.5 text-base font-extrabold tabular-nums text-[#0c3e48]">{raising ? (days ? limit.ceilingWords : '24 hour notice') : days ? '1 day' : '0.01 USDC'}</dd>
           </div>
         </dl>
 
         <Field label={raising ? 'New limit' : 'Lower it to'} hint={days ? 'days' : 'USDC'} htmlFor="limit-figure" error={touched || figureSeen ? figureProblems[0] ?? null : null}>
-          <TextInput id="limit-figure" inputMode={days ? 'numeric' : 'decimal'} autoComplete="off" value={figure} onChange={(e) => setFigure(e.target.value)} onBlur={() => setFigureSeen(figure.trim() !== '')} className="tabular-nums" aria-describedby={raising ? 'limit-ceiling' : undefined} />
+          <TextInput id="limit-figure" inputMode={days ? 'numeric' : 'decimal'} autoComplete="off" value={figure} onChange={(e) => setFigure(e.target.value)} onBlur={() => setFigureSeen(figure.trim() !== '')} className="tabular-nums" aria-describedby={raising ? 'limit-ask-note' : undefined} />
         </Field>
-        {raising ? <p id="limit-ceiling" className="-mt-2 text-[13px] leading-5 text-[#326273]">{limit.ceilingSentence}</p> : null}
+        {raising ? <p id="limit-ask-note" className="-mt-2 text-[13px] leading-5 text-[#326273]">{limit.askNote}</p> : null}
 
         {lookAgain && parsed != null ? (
           <p role="status" className="flex items-start gap-2 rounded-xl border border-[#326273]/25 bg-[var(--warn-bg)] p-3 text-[13px] leading-5 text-[#1F4452]">
