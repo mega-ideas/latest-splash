@@ -46,7 +46,7 @@ export default function WaitingForOthers() {
     void load();
   }, [load]);
 
-  if (error && !data) return <p role="alert" className="flex items-start gap-2 text-[13px] font-medium text-[var(--error)]"><TriangleAlert className="mt-0.5 h-4 w-4 shrink-0" aria-hidden="true" />{error}</p>;
+  if (error && !data) return <p role="alert" className="flex items-start gap-2 rounded-xl border border-[var(--error)]/30 bg-[var(--error-bg)] p-3 text-[13px] font-medium text-[var(--error)]"><TriangleAlert className="mt-0.5 h-4 w-4 shrink-0" aria-hidden="true" />{error}</p>;
   if (!data || (data.waiting.length === 0 && data.notices.length === 0)) return null;
   const shown = all ? data.notices : data.notices.slice(0, NOTICES_SHOWN);
 
