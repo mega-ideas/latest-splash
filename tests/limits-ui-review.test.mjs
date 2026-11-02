@@ -81,7 +81,8 @@ test('the Limits card and Settings, Controls each say which limit governs which 
 });
 
 test('the queue: the choice that approves as asked is not labelled like the submit button, a failed refresh is said, and a decided card is closed', () => {
-  assert.match(queue, /Approve as asked/);
+  // The choices and their labels live in lib/limits/decision.ts, so the label and the body behind it are tested together.
+  assert.match(code(read('lib/limits/decision.ts')), /Approve as asked/);
   assert.doesNotMatch(queue, /\['approve', `Approve \$\{request\.requestedWords\}`\]/);
   assert.match(queue, /could not be refreshed|Refresh failed|could not be read/i);
   assert.match(queue, /Decision saved|You decided this/);
