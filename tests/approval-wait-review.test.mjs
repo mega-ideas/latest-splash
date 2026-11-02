@@ -300,8 +300,10 @@ test('step 0 does not wait on a mail provider that does not answer; the cron sen
   assert.equal((await noticesOf(db, id, 'asked')).length, 2);
   // The notice left 'sending' with the provider silent: after the lease the cron claims it once more, within its tries.
   const ok = mailbox();
-  const later = await sweep(db, at(11 * MIN), ok);
-  assert.equal(later.emails.sent, 2);
+  await sweep(db, at(11 * MIN), ok);
+  const asked = await noticesOf(db, id, 'asked');
+  assert.deepEqual(asked.map((n) => n.emailState), ['sent', 'sent']);
+  assert.deepEqual(ok.sent.filter((m) => /^Needs your approval/.test(m.subject)).map((m) => m.to).sort(), ['owner2@acme.test', 'owner@acme.test']);
   await client.close();
 });
 
@@ -325,7 +327,10 @@ test('a notice stuck in sending is claimed again only while it has tries left, a
   await db.update(schema.approvalNotices).set({ emailState: 'sending', emailAttempts: MAX_EMAIL_ATTEMPTS, emailClaimedAt: T0 }).where(eq(schema.approvalNotices.id, n.id));
   const after = mailbox();
   await sweep(db, at(HOUR), after);
-  assert.equal(after.calls, 0);
+  assert.equal(after.sent.filter((m) => /^Needs your approval/.test(m.subject)).length, 0, 'the asked notice is not sent again');
+  const [still] = await noticesOf(db, id, 'asked');
+  assert.equal(still.emailState, 'sending');
+  assert.equal(still.emailAttempts, MAX_EMAIL_ATTEMPTS);
   await client.close();
 });
 

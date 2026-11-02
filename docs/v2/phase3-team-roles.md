@@ -1129,8 +1129,10 @@ When a request reaches its existing end and nobody approved it, it **lapses unpa
 
 - **"Nobody approved in time. Nothing was paid. Ask again."** goes to the person who asked and to every owner, in the app and
   by e-mail, **once** (the `lapsed` step), with one trail line, `approval_lapsed`, under `system:approval_lapse`.
-- It is told for any request that ran out in the last 7 days (an older one is history, not news), and it does not matter
-  whether the signing cron has closed the request yet: past its end is lapsed.
+- It is told only for a request **the ladder began on** (it has an `asked` step) that ran out in the **last 24 hours** (the
+  cron's interval with a wide margin). A request that ended before the ladder existed, or that the cron never saw open, is
+  history, not news: the first run after a deploy tells nobody about old requests. It does not matter whether the signing
+  cron has closed the request yet: past its end is lapsed.
 - **A late approval is refused with the same words**: a signature on a lapsed request answers 410 with the sentence
   (`submitPartialSignature`), and so does accepting a lapsed ask (`acceptApprovalAsk`); the status "expired" says the same
   thing wherever it is refused (`closedWords`). Nothing is kept: no partial signature, no payment.
@@ -1148,7 +1150,9 @@ who is being waited on, "Nobody has answered yet", when it ends, and two choices
 - **Remind them now.** The person who asked, or an owner, tells everyone who can still approve it. **Once per 10 minutes per
   request** (`REMIND_NOW_COOLDOWN_MS`); the page says when it can be pressed again, and the server answers 429 `too_soon`
   with `retryAfterSec`. Of two presses at once one wins (the step is a primary key). It writes an `approval_reminded` trail
-  line, and the person pressing is not reminded of their own reminder.
+  line, and the person pressing is not reminded of their own reminder. When nobody else is left to remind (the person
+  pressing is the only one who has not answered), the server answers 409 `nobody_to_remind` ("There is nobody else to
+  remind. You are the one who must approve it."), writes nothing and starts no cooldown, and the button is not offered.
 - **Cancel this request.** The person who asked only, after one confirmation. This is the existing withdraw
   (`DELETE /api/wallet/signing-requests/:id`; `POST /api/wallet/approval-asks/:id { action: 'withdraw' }`), unchanged. Nothing is paid.
 
@@ -1167,6 +1171,12 @@ the **owners who hold a working passkey on this site** (`approverCountOf`: role 
 id is this site's). An owner with no passkey yet, a revoked passkey or a passkey for another site cannot sign here and is not
 counted; staff, approvers and viewers do not sign for the business wallet and are not counted. So the new person has to be
 added as an **owner** to raise the count, and the warning says so. `GET /api/team/approvers` answers only owners.
+
+**Once the business has a wallet, the count is owners whose passkey is a key that wallet holds** (`approversOf`, read from the
+executed registration or the latest confirmed rotation). A request's signers are fixed to the wallet's members, so an owner
+added after the wallet was built cannot sign its requests until the wallet's signers are updated. The warning therefore does not
+disappear when a third owner is added; a second line says "N owners are not yet signers of the business wallet, so they cannot
+approve its payments" (`ownersNotSigning`, shown to owners on Limits and Team, even when the count is three or more).
 
 ### What Splash cannot do (and does not)
 

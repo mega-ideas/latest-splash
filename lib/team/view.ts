@@ -8,6 +8,7 @@
  * same server rule.
  */
 import type { MembershipRole } from '../membership-roles.ts';
+import { whatIsWaiting } from '../approve/wait.ts';
 import { plainTitle } from './declined-by.ts';
 import type { InviteEmailWire } from './invitation-email.ts';
 
@@ -353,6 +354,8 @@ export const TEAM_ACTIONS = [
   'leave_approved',
   'leave_declined',
   'leave_follow_up',
+  'approval_lapsed',
+  'approval_reminded',
 ] as const;
 
 /** One trail line in plain words: who did what to whom. */
@@ -414,6 +417,12 @@ export function activitySummary(e: { action: string; detail: unknown; actorName:
       const rules = d.rules === 'opened' || d.rules === 'none' ? d.rules : 'not_opened';
       const signer = d.signer === 'still_signer' || d.signer === 'not_a_signer' ? d.signer : 'unknown';
       return `After ${who} left: ${leaveFollowUpNote({ rules, signer })}`;
+    }
+    case 'approval_lapsed':
+      return `Nobody approved ${whatIsWaiting(d.kind === 'ask' ? 'ask' : 'signing')} in time. Nothing was paid.`;
+    case 'approval_reminded': {
+      const n = typeof d.reminded === 'number' && Number.isFinite(d.reminded) ? d.reminded : null;
+      return `${e.actorName} reminded ${n === null ? 'the approvers' : `${n} ${n === 1 ? 'person' : 'people'}`} to approve ${whatIsWaiting(d.kind === 'ask' ? 'ask' : 'signing')}.`;
     }
     default:
       return `${e.actorName} changed the team.`;

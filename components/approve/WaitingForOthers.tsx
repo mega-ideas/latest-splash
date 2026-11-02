@@ -70,7 +70,7 @@ export default function WaitingForOthers() {
             {shown.map((n) => (
               <li key={n.id} className="dash-surface p-4">
                 <p className="text-sm font-bold text-[#0c3e48]">{n.title}</p>
-                <p className="mt-1 whitespace-pre-line text-[13px] leading-5 text-[#1F4452]">{n.body.split('\n\n')[0]}</p>
+                <p className="mt-1 whitespace-pre-line text-[13px] leading-5 text-[#1F4452]">{n.body}</p>
                 <p className="mt-1.5 flex flex-wrap items-center gap-x-3 gap-y-1 text-[13px] text-[#326273]">
                   <span>{utcWhen(new Date(n.createdAt))}</span>
                   <Link href={n.linkPath} className="font-semibold text-[#0d6370] underline decoration-1 underline-offset-2 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[#0d6370]">Open</Link>
@@ -100,7 +100,9 @@ function WaitingCard({ item, now, onChanged }: { item: WaitingView; now: number;
     setMessage(null);
     const answer = await call<{ reminded?: number; error?: string }>(`/api/approvals/waiting/${item.kind}/${encodeURIComponent(item.id)}/remind`, { method: 'POST', body: {} });
     setBusy(null);
-    if (answer.ok) setMessage({ tone: 'ok', text: 'They were reminded just now. You can remind them again in 10 minutes.' });
+    // Said only when someone was reminded; with nobody to remind the server answers in plain words and nothing is counted.
+    if (answer.ok && (answer.body?.reminded ?? 0) > 0) setMessage({ tone: 'ok', text: 'They were reminded just now. You can remind them again in 10 minutes.' });
+    else if (answer.ok) setMessage({ tone: 'error', text: 'There was nobody to remind.' });
     else setMessage({ tone: 'error', text: errorText(answer, 'They were not reminded. Nothing was changed.') });
     await onChanged();
   }

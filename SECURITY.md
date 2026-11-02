@@ -2845,8 +2845,14 @@ Design: `docs/v2/phase3-team-roles.md` ("When nobody who can approve answers"). 
 - **"Remind them now" is rate-limited in the database, not the browser.** Once per 10 minutes per request; two presses at once make
   one (the step is a primary key); only the person who asked or an owner may press it (a signer who is neither: 403; any other
   person or business: 404). It writes an `approval_reminded` trail line. A per-person route limit sits beside it.
-- **The "fewer than three approvers" warning counts people who can sign.** Owners with a working passkey on this site (a revoked
-  passkey, one for another site, and every non-owner role are not counted). It is shown to owners only and blocks nothing.
+- **The "fewer than three approvers" warning counts people who can sign for the wallet that exists.** Owners with a working passkey on this site who are
+  signers of that wallet (a revoked passkey, one for another site, an owner added after the wallet was built, and every non-owner
+  role are not counted); a second line says how many owners are not yet signers. It is shown to owners only and blocks nothing.
+- **Failures are seen, and e-mail is bounded.** A request the ladder cannot tell is logged by id and the kind of failure and
+  makes the cron answer 502, as does an e-mail half that is not working (every try failed in the last hour, or no sender in
+  production). A lapse is told only for a request the ladder began on and that ended in the last 24 hours, so the first run after a
+  deploy tells nobody about old requests. A notice is e-mailed only to a person who is still a member, at most three times in every
+  state, under one idempotency key for its life; a call a person waits on gives the mail provider four seconds and then comes back.
 - **Known limits.** A reminder can be up to one cron interval late. A business whose owners are all away until a request ends
   gets a lapse, not an approval by someone else: a backup approver who counts only after a delay would need a Move change
   (`docs/v2/phase3-team-roles.md`, for Sebastian). An owner can get both the schedule's own lapse e-mail and this one for a

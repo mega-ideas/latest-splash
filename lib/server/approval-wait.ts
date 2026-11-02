@@ -58,6 +58,10 @@ export const EMAIL_LEASE_MS = 10 * MINUTE_MS;
 export const EMAIL_MAX_AGE_MS = 48 * 60 * MINUTE_MS;
 /** The most e-mails one pass sends. */
 const EMAIL_BATCH = 200;
+/** How long a call made while a person waits for its answer lets the mail provider take; the cron sends what is left. */
+export const REQUEST_EMAIL_BUDGET_MS = 4_000;
+/** A notice whose tries all failed is news to the scheduler for this long after its last try. */
+export const EMAIL_TROUBLE_MS = 60 * MINUTE_MS;
 
 /** One waiting (or lately ended) request, as the ladder sees it. */
 export type WaitSubject = {
@@ -234,7 +238,10 @@ export async function sendDueStep(db: DrizzleDb, s: WaitSubject, now: Date): Pro
 /** Send the lapse of an ended request, once: to the person who asked and to the owners. */
 export async function sendLapse(db: DrizzleDb, s: WaitSubject, now: Date): Promise<boolean> {
   if (s.state !== 'lapsed' || !s.waitsOnOthers) return false;
-  if (Date.parse(s.expiresAt.toISOString()) < now.getTime() - LAPSE_NOTICE_WINDOW_MS) return false;
+  if (s.expiresAt.getTime() < now.getTime() - LAPSE_NOTICE_WINDOW_MS) return false;
+  // Only a request the ladder began on is told as lapsed. One that ended before the ladder existed, or that the cron never saw
+  // open, is history: its people were not told it was waiting, and are not told now that it is over.
+  if (!(await stepsDone(db, s)).has('asked')) return false;
   const owners = await ownersOf(db, s.orgId);
   const cards = await liveCards(db, s.orgId, [s.requestedBy, ...owners]);
   const facts = { kind: s.kind, purpose: s.purpose, requester: null, expiresAt: s.expiresAt };
@@ -255,7 +262,12 @@ export type WaitDeps = {
   mail?: WaitMail | null;
   appUrl?: string;
   env?: { NODE_ENV?: string } & NodeJS.ProcessEnv;
+  /** For a call a person waits on: the most time e-mail may take before the call comes back (default REQUEST_EMAIL_BUDGET_MS). */
+  emailBudgetMs?: number;
 };
+
+/** What went wrong, as a kind and never a message: a message can carry a name, an address or a figure. */
+const kindOf = (error: unknown) => (error instanceof Error && /^\w+$/.test(error.name) ? error.name : 'error');
 
 function mailOf(deps: WaitDeps): WaitMail | null {
   if (deps.mail !== undefined) return deps.mail;
@@ -282,12 +294,15 @@ export async function deliverNoticeEmails(db: DrizzleDb, deps: WaitDeps, filter?
       .select({ n: approvalNotices, email: users.email })
       .from(approvalNotices)
       .innerJoin(users, eq(users.id, approvalNotices.userId))
+      // Only a person who is still a member of this business: a notice written before they left is not sent after.
+      .innerJoin(memberships, and(eq(memberships.orgId, approvalNotices.orgId), eq(memberships.userId, approvalNotices.userId)))
       .where(
         and(
           gte(approvalNotices.createdAt, new Date(now.getTime() - EMAIL_MAX_AGE_MS)),
           or(
             and(inArray(approvalNotices.emailState, ['pending', 'failed']), lt(approvalNotices.emailAttempts, MAX_EMAIL_ATTEMPTS)),
-            and(eq(approvalNotices.emailState, 'sending'), lte(approvalNotices.emailClaimedAt, new Date(now.getTime() - EMAIL_LEASE_MS))),
+            // A claim left by a run that died is taken again after the lease, but only while the notice has tries left.
+            and(eq(approvalNotices.emailState, 'sending'), lt(approvalNotices.emailAttempts, MAX_EMAIL_ATTEMPTS), lte(approvalNotices.emailClaimedAt, new Date(now.getTime() - EMAIL_LEASE_MS))),
           ),
           ...(filter ? [eq(approvalNotices.orgId, filter.orgId), eq(approvalNotices.subjectKind, filter.subjectKind), eq(approvalNotices.subjectId, filter.subjectId)] : []),
         ),
@@ -304,7 +319,7 @@ export async function deliverNoticeEmails(db: DrizzleDb, deps: WaitDeps, filter?
       continue;
     }
     if (!email || !email.trim()) {
-      await db.update(approvalNotices).set({ emailState: 'failed', emailAttempts: MAX_EMAIL_ATTEMPTS }).where(eq(approvalNotices.id, n.id));
+      await db.update(approvalNotices).set({ emailState: 'failed', emailAttempts: MAX_EMAIL_ATTEMPTS, emailClaimedAt: now }).where(eq(approvalNotices.id, n.id));
       out.failed += 1;
       continue;
     }
@@ -319,12 +334,12 @@ export async function deliverNoticeEmails(db: DrizzleDb, deps: WaitDeps, filter?
       ? `${n.body}\n\nOpen it in Splash. You will be asked to sign in first, and nothing happens from the link alone:\n\n${link}`
       : `${n.body}\n\nOpen Splash, sign in and go to Approve. Nothing happens from this message alone.`;
     try {
-      await mail.sendMessage({ to: email, subject: n.title, text, ...(link ? { link } : {}), idempotencyKey: `splash-approval-${n.id}-${n.emailAttempts + 1}` });
+      await mail.sendMessage({ to: email, subject: n.title, text, ...(link ? { link } : {}), idempotencyKey: `splash-approval-${n.id}` });
       await db.update(approvalNotices).set({ emailState: 'sent', emailSentAt: now }).where(eq(approvalNotices.id, n.id));
       out.sent += 1;
     } catch (error) {
       // An id and the kind of failure, never a name, an address or a figure.
-      console.warn(`[approval-wait] e-mail for notice ${n.id} did not go: ${error instanceof Error ? error.name : 'error'}`);
+      console.warn(`[approval-wait] e-mail for notice ${n.id} did not go: ${kindOf(error)}`);
       await db.update(approvalNotices).set({ emailState: 'failed' }).where(eq(approvalNotices.id, n.id));
       out.failed += 1;
     }
@@ -334,7 +349,37 @@ export async function deliverNoticeEmails(db: DrizzleDb, deps: WaitDeps, filter?
 
 // ─── The sweep ──────────────────────────────────────────────────────────────
 
-export type WaitSweep = { steps: Array<{ kind: WaitKind; step: LadderStep }>; lapsed: number; emails: { sent: number; failed: number; skipped: number }; errors: number };
+export type WaitSweep = {
+  steps: Array<{ kind: WaitKind; step: LadderStep }>;
+  lapsed: number;
+  emails: { sent: number; failed: number; skipped: number };
+  errors: number;
+  /**
+   * Notices the scheduler should hear about: those whose every e-mail try failed within the last hour, and, in production, every
+   * notice that could not leave because no sender is set. The notices are in the app either way; this says the e-mail half is not working.
+   */
+  emailTrouble: number;
+};
+
+/** Notices that used up their tries lately and did not go. */
+async function abandonedEmails(db: DrizzleDb, now: Date): Promise<number> {
+  try {
+    const rows = await db
+      .select({ id: approvalNotices.id })
+      .from(approvalNotices)
+      .where(
+        and(
+          gte(approvalNotices.createdAt, new Date(now.getTime() - EMAIL_MAX_AGE_MS)),
+          inArray(approvalNotices.emailState, ['failed', 'sending']),
+          gte(approvalNotices.emailAttempts, MAX_EMAIL_ATTEMPTS),
+          gte(approvalNotices.emailClaimedAt, new Date(now.getTime() - EMAIL_TROUBLE_MS)),
+        ),
+      );
+    return rows.length;
+  } catch {
+    return 0;
+  }
+}
 
 /**
  * One pass over every business: the step each waiting request is due, the lapse of each one that ended, and
@@ -343,32 +388,50 @@ export type WaitSweep = { steps: Array<{ kind: WaitKind; step: LadderStep }>; la
  */
 export async function sweepApprovalWaitsForStaff(db: DrizzleDb, deps: WaitDeps = {}): Promise<WaitSweep> {
   const now = (deps.now ?? (() => new Date()))();
-  const result: WaitSweep = { steps: [], lapsed: 0, emails: { sent: 0, failed: 0, skipped: 0 }, errors: 0 };
+  const result: WaitSweep = { steps: [], lapsed: 0, emails: { sent: 0, failed: 0, skipped: 0 }, errors: 0, emailTrouble: 0 };
   let open: WaitSubject[] = [];
   let ended: WaitSubject[] = [];
   try {
     [open, ended] = await Promise.all([openSubjectsForStaff(db, now), lapsedSubjectsForStaff(db, now)]);
-  } catch {
+  } catch (error) {
+    console.warn(`[approval-wait] the waiting requests could not be read: ${kindOf(error)}`);
     result.errors += 1;
     return result;
   }
+  // A request that cannot be told is logged by its id and the kind of failure, never a name or a figure, and counted.
   for (const s of open) {
     try {
       const step = await sendDueStep(db, s, now);
       if (step) result.steps.push({ kind: s.kind, step });
-    } catch {
+    } catch (error) {
+      console.warn(`[approval-wait] request ${s.id} could not be told: ${kindOf(error)}`);
       result.errors += 1;
     }
   }
   for (const s of ended) {
     try {
       if (await sendLapse(db, s, now)) result.lapsed += 1;
-    } catch {
+    } catch (error) {
+      console.warn(`[approval-wait] request ${s.id} could not be told: ${kindOf(error)}`);
       result.errors += 1;
     }
   }
   result.emails = await deliverNoticeEmails(db, { ...deps, now: () => now });
+  const production = (deps.env ?? process.env).NODE_ENV === 'production';
+  result.emailTrouble = (await abandonedEmails(db, now)) + (production ? result.emails.skipped : 0);
   return result;
+}
+
+/**
+ * E-mail for a call a person is waiting on (a payment request being made, a press of "Remind them now"): the provider
+ * gets `emailBudgetMs`, and then the call comes back. A notice still in flight stays claimed, and the cron sends it after
+ * the lease, within its tries. The app already has every notice, so a slow provider delays nothing a person sees.
+ */
+async function deliverWithinBudget(db: DrizzleDb, deps: WaitDeps, now: Date, filter: { orgId: string; subjectKind: WaitKind; subjectId: string }): Promise<void> {
+  // The platform's own timeout signal: it holds nothing open and needs no clearing, and it is not a timer of the ladder.
+  const over = AbortSignal.timeout(deps.emailBudgetMs ?? REQUEST_EMAIL_BUDGET_MS);
+  const budget = new Promise<void>((resolve) => over.addEventListener('abort', () => resolve(), { once: true }));
+  await Promise.race([deliverNoticeEmails(db, { ...deps, now: () => now }, filter).then(() => undefined), budget]);
 }
 
 /**
@@ -382,7 +445,7 @@ export async function tellApproversNow(db: DrizzleDb, input: { orgId: string; ki
     const subject = await loadSubject(db, input.orgId, input.kind, input.id, now);
     if (!subject) return null;
     const step = await sendDueStep(db, subject, now);
-    await deliverNoticeEmails(db, { ...deps, now: () => now }, { orgId: input.orgId, subjectKind: input.kind, subjectId: input.id });
+    await deliverWithinBudget(db, deps, now, { orgId: input.orgId, subjectKind: input.kind, subjectId: input.id });
     return step;
   } catch {
     return null;
@@ -427,6 +490,11 @@ export async function remindNow(
   }
   if (s.state === 'lapsed') return fail(409, 'lapsed', 'Nobody approved in time. Nothing was paid. Ask again.');
   if (s.state !== 'open' || !s.waitsOnOthers) return fail(409, 'not_open', 'This request is not waiting for anyone else to approve it.');
+  // Nobody to remind is said plainly, before anything is written: no step, no trail line and no cooldown.
+  const others = s.approvers.filter((u) => u !== input.userId);
+  if (others.length === 0) {
+    return fail(409, 'nobody_to_remind', s.approvers.includes(input.userId) ? 'There is nobody else to remind. You are the one who must approve it.' : 'There is nobody left to remind. Everyone who can approve it has answered.');
+  }
 
   const done = await stepsDone(db, s);
   const manual = [...done].filter((x) => x.startsWith('manual_')).map((x) => Number(x.slice(7)));
@@ -436,7 +504,6 @@ export async function remindNow(
     return fail(429, 'too_soon', `You reminded them a moment ago. You can remind them again at ${utcWhen(nextAt)}.`, { retryAfterSec: Math.max(1, Math.ceil((nextAt.getTime() - now.getTime()) / 1000)), nextAt: nextAt.toISOString() });
   }
   const { cards, facts } = await factsOf(db, s);
-  const others = s.approvers.filter((u) => u !== input.userId);
   const words = manualNotice(facts, labelOf(cards, input.userId));
   const recipients: Recipient[] = others.map((userId) => ({ userId, audience: 'approver', ...words }));
   const n = Math.max(0, ...manual) + 1;
@@ -445,7 +512,7 @@ export async function remindNow(
     const nextAt = new Date(now.getTime() + REMIND_NOW_COOLDOWN_MS);
     return fail(429, 'too_soon', `They were just reminded. You can remind them again at ${utcWhen(nextAt)}.`, { retryAfterSec: Math.ceil(REMIND_NOW_COOLDOWN_MS / 1000), nextAt: nextAt.toISOString() });
   }
-  await deliverNoticeEmails(db, { ...deps, now: () => now }, { orgId: s.orgId, subjectKind: s.kind, subjectId: s.id });
+  await deliverWithinBudget(db, deps, now, { orgId: s.orgId, subjectKind: s.kind, subjectId: s.id });
   return { ok: true, reminded: recipients.length, nextAt: new Date(now.getTime() + REMIND_NOW_COOLDOWN_MS).toISOString() };
 }
 
@@ -520,7 +587,8 @@ export async function waitingFor(db: DrizzleDb, deps: WaitDeps, input: { orgId: 
       waitingOn: s.approvers.filter((u) => u !== s.requestedBy).map((u) => labelOf(cards, u)),
       nobodyAnswered: answered === 0,
       expiresAt: s.expiresAt.toISOString(),
-      canRemind: true,
+      // Nobody else left to remind (the person looking is the only one who has not answered): the button is not offered.
+      canRemind: s.approvers.some((u) => u !== input.userId),
       remindAt,
       canCancel: asker,
       linkPath: pathOf(s),
@@ -548,16 +616,52 @@ async function answeredCount(db: DrizzleDb, requestId: string): Promise<number> 
 // ─── Who can really approve ─────────────────────────────────────────────────
 
 /**
- * How many people can approve payments for this business RIGHT NOW: the owners who hold a working passkey on
- * this site (`relyingPartyId`). The business wallet is signed by its owners' passkeys, so an owner with no
- * passkey, a passkey that was revoked, or a passkey for another site cannot sign, and a member of any other
- * role does not sign wallet payments at all. Counting members would say three where one can sign.
+ * The people whose keys the business wallet that exists is made of: user id to the public keys of that user in the wallet,
+ * read from the registration (or the latest confirmed rotation) Splash executed. A request's signers are fixed to these, so an
+ * owner added since cannot sign it until the wallet's signers are updated. Null while the business has no wallet.
  */
-export async function approverCountOf(db: DrizzleDb, orgId: string, relyingPartyId: string): Promise<number> {
+async function walletSignerKeys(db: DrizzleDb, orgId: string): Promise<Map<string, Set<string>> | null> {
+  const [source] = await db
+    .select({ id: walletSigningRequests.id })
+    .from(walletSigningRequests)
+    .where(and(eq(walletSigningRequests.orgId, orgId), eq(walletSigningRequests.status, 'executed'), inArray(walletSigningRequests.purpose, ['register_wallet', 'confirm_wallet_rotation'])))
+    .orderBy(desc(walletSigningRequests.createdAt))
+    .limit(1);
+  if (!source) return null;
   const rows = await db
-    .select({ userId: memberships.userId })
+    .select({ userId: walletSigningSigners.userId, publicKey: walletSigningSigners.publicKey })
+    .from(walletSigningSigners)
+    .where(and(eq(walletSigningSigners.requestId, source.id), eq(walletSigningSigners.orgId, orgId), gt(walletSigningSigners.weight, 0)));
+  const keys = new Map<string, Set<string>>();
+  for (const r of rows) keys.set(r.userId, (keys.get(r.userId) ?? new Set<string>()).add(r.publicKey));
+  return keys;
+}
+
+/**
+ * Who can approve payments for this business RIGHT NOW. The business wallet is signed by its owners' passkeys, so an approver is
+ * an owner with a working passkey on this site (`relyingPartyId`), and, once the business has a wallet, one whose passkey is a key
+ * that wallet holds. An owner with no passkey, a revoked passkey, a passkey for another site, or one added after the wallet was
+ * built cannot sign its requests, and a member of any other role does not sign wallet payments at all. Counting members, or owners,
+ * would say three where two can sign.
+ *
+ *   count             the people who can sign.
+ *   ownersNotSigning  owners with a working passkey who are not (yet) signers of the wallet; 0 while there is no wallet.
+ *   walletKnown       whether the business has a wallet Splash set up.
+ */
+export async function approversOf(db: DrizzleDb, orgId: string, relyingPartyId: string): Promise<{ count: number; ownersNotSigning: number; walletKnown: boolean }> {
+  const rows = await db
+    .select({ userId: memberships.userId, publicKey: passkeyCredentials.publicKey })
     .from(memberships)
     .innerJoin(passkeyCredentials, eq(passkeyCredentials.userId, memberships.userId))
     .where(and(eq(memberships.orgId, orgId), eq(memberships.role, 'admin'), eq(passkeyCredentials.rpId, relyingPartyId), isNull(passkeyCredentials.revokedAt)));
-  return new Set(rows.map((r) => r.userId)).size;
+  const withPasskey = new Set(rows.map((r) => r.userId));
+  const wallet = await walletSignerKeys(db, orgId);
+  if (wallet === null) return { count: withPasskey.size, ownersNotSigning: 0, walletKnown: false };
+  const signing = new Set(rows.filter((r) => wallet.get(r.userId)?.has(r.publicKey)).map((r) => r.userId));
+  return { count: signing.size, ownersNotSigning: withPasskey.size - signing.size, walletKnown: true };
+}
+
+/** How many people can approve payments for this business right now (see `approversOf`). */
+export async function approverCountOf(db: DrizzleDb, orgId: string, relyingPartyId: string): Promise<number> {
+  return (await approversOf(db, orgId, relyingPartyId)).count;
 }

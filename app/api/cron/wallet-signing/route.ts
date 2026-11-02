@@ -16,7 +16,7 @@
  * 4. every request still waiting for people who can approve it is told the step it is due (at 0, 10 minutes, 1 hour and 4
  *    hours), and every request that ran out with nobody approving it is told as lapsed: "Nobody approved in time. Nothing was
  *    paid. Ask again." (lib/server/approval-wait.ts). Each step is one row, so running this twice sends nothing twice. It
- *    approves nothing and moves no money. An error there answers 502, so the scheduler's own alerting sees it.
+ *    approves nothing and moves no money. An error there, or an e-mail half that is not working (every try failed lately, or no sender in production), answers 502, so the scheduler's own alerting sees it.
  *
  * Health: it answers 502 if any partial signature is still held for a
  * request that is no longer open, or any request is still submitting past
@@ -73,12 +73,12 @@ async function handle(request: Request) {
   //    plain "Nobody approved in time. Nothing was paid. Ask again." for each request that ran out. Each step is one row, so
   //    this running twice sends nothing twice. It approves nothing and moves no money.
   const { sweepApprovalWaitsForStaff } = await import('@/lib/server/approval-wait');
-  const waits = await sweepApprovalWaitsForStaff(db, { now: () => now }).catch(() => ({ steps: [], lapsed: 0, emails: { sent: 0, failed: 0, skipped: 0 }, errors: 1 }));
+  const waits = await sweepApprovalWaitsForStaff(db, { now: () => now }).catch(() => ({ steps: [], lapsed: 0, emails: { sent: 0, failed: 0, skipped: 0 }, errors: 1, emailTrouble: 0 }));
   const lingering = await countLingeringSignaturesForStaff(db);
   const stuck = await countStuckSubmissionsForStaff(db, new Date(now.getTime() - SUBMISSION_LEASE_MS));
-  if (lingering > 0 || stuck > 0 || reconciled.errors > 0 || waits.errors > 0) {
+  if (lingering > 0 || stuck > 0 || reconciled.errors > 0 || waits.errors > 0 || waits.emailTrouble > 0) {
     return NextResponse.json(
-      { success: false, expired, reconciled, waits, error: `${lingering} partial signatures held for closed requests, ${stuck} submissions stuck past the lease, ${reconciled.errors} chain reads failed, ${waits.errors} waiting requests could not be told` },
+      { success: false, expired, reconciled, waits, error: `${lingering} partial signatures held for closed requests, ${stuck} submissions stuck past the lease, ${reconciled.errors} chain reads failed, ${waits.errors} waiting requests could not be told, ${waits.emailTrouble} approval e-mails could not go out` },
       { status: 502 },
     );
   }

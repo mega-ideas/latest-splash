@@ -50,8 +50,11 @@ export const askerIsReminded = (step: LadderStep): boolean => step !== 'asked' &
 /** "Remind them now" may be used once in this long, per request. */
 export const REMIND_NOW_COOLDOWN_MS = 10 * MINUTE_MS;
 
-/** A lapse is told for a request that ended in this long; an older one is history, not news. */
-export const LAPSE_NOTICE_WINDOW_MS = 7 * 24 * HOUR_MS;
+/**
+ * A lapse is told for a request that ended in this long and that the ladder began on; an older one is history, not news.
+ * A day is the cron's interval with a wide margin: a cron that was down longer does not tell a stale lapse.
+ */
+export const LAPSE_NOTICE_WINDOW_MS = 24 * HOUR_MS;
 
 /** How long the notices stay on the Approve page. */
 export const NOTICE_SHOWN_MS = 7 * 24 * HOUR_MS;
@@ -207,6 +210,18 @@ export function fewApproversWarning(count: number): string | null {
   if (!Number.isFinite(count) || count >= MIN_APPROVERS) return null;
   if (count <= 0) return 'Nobody can approve payments right now. Payments wait until someone can. Add another approver.';
   return `Only ${count} ${count === 1 ? 'person' : 'people'} can approve payments. If they are all away, payments wait. Add another approver.`;
+}
+
+/**
+ * The second line under the warning when some owners are not yet signers of the business wallet. A wallet is signed by
+ * the owners it was built with, so an owner added since cannot approve its payments until the wallet's signers are
+ * updated. Null when there are none.
+ */
+export function ownersNotSigningNote(count: number): string | null {
+  if (!Number.isFinite(count) || count <= 0) return null;
+  return count === 1
+    ? '1 owner is not yet a signer of the business wallet, so they cannot approve its payments. Add them as a signer of the wallet.'
+    : `${count} owners are not yet signers of the business wallet, so they cannot approve its payments. Add them as signers of the wallet.`;
 }
 
 /** Where "Add another approver" goes: the add-a-person form in Settings, Team. */
