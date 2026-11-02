@@ -244,12 +244,12 @@ test('existing payments are not changed by a switch: the kept message and its ha
   await t.w.client.close();
 });
 
-test('the confirmation says the network, not the processor, and that details go to a payout partner in that country', async () => {
+test('the confirmation says the network, not the processor, and that the exchange pays out in that country over it', async () => {
   const t = await world();
   const shown = await t.preview(t.deps());
   assert.equal(rows(shown)['Payment network'], 'InstaPay or PESONet');
   assert.ok(!('Exchange you saved this account at' in rows(shown)));
-  assert.match(shown.text.sharing, /payout partner in the Philippines/);
+  assert.match(shown.text.sharing, /pays out in the Philippines/);
   assert.doesNotMatch(JSON.stringify(shown.text), /PDAX|payout partner\b.*PDAX/);
   // Even with the agreement signed, the screen names the network and not the company.
   const signed = await t.preview(t.deps({ signedPartners: new Set(['pdax', 'fiuu', 'hata']) }));

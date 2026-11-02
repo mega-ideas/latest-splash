@@ -111,7 +111,7 @@ test('the place the money goes is the network the person knows, with what is sha
   assert.ok(!text.rows.some((r) => r.label === 'Exchange you saved this account at'));
   const all = JSON.stringify(text);
   assert.doesNotMatch(all, /PDAX|our Philippines payout partner/);
-  assert.match(text.sharing, /shared with the payout partner in the Philippines that receives this payment over InstaPay or PESONet/);
+  assert.match(text.sharing, /shared with the exchange that holds the account, which pays out in the Philippines over InstaPay or PESONet/);
   for (const what of [/registered name/i, /registration number/i, /address/i, /wallet/i, /amount/i, /payment details/i]) assert.match(text.sharing, what);
   assert.ok(text.lines.includes(text.sharing));
   assert.match(disclosureText(disclosure({ beneficiary: { ...disclosure().beneficiary, exchange: 'hata', country: 'MY' } })).rows.find((r) => r.label === 'Payment network').value, /^DuitNow$/);
