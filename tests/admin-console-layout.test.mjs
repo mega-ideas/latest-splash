@@ -42,3 +42,16 @@ test('the transactions page speaks USDC, with the peg in words and no emoji or r
   assert.match(page, /Transfer volume/);
   assert.match(page, /PEG_WORDS/);
 });
+
+const css = await readFile(new URL('../app/globals.css', import.meta.url), 'utf8');
+
+test('the desktop sidebar scrolls inside itself and keeps its posture and account blocks whole on a 900px screen', () => {
+  // Eleven links, the posture block, the signed-in person and Log out are taller than 900px. The aside is a column of fixed height, so
+  // without these the posture block shrank to a strip with its second line cut off.
+  const aside = layout.slice(layout.indexOf('<aside'), layout.indexOf('>', layout.indexOf('<aside')));
+  assert.match(aside, /overflow-y-auto/, 'the sidebar scrolls inside itself when its content is taller than the screen');
+  const trust = css.slice(css.lastIndexOf('.fintech-admin-trust {'));
+  assert.match(trust.slice(0, trust.indexOf('}')), /flex-shrink:\s*0/, 'the posture block is never squeezed');
+  const account = layout.slice(layout.indexOf('rounded-2xl border border-white/10 bg-white/10 p-4'), layout.indexOf('<AdminLogoutButton />'));
+  assert.match(account, /shrink-0/, 'the account block is never squeezed');
+});
