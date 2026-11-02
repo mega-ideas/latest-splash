@@ -27,6 +27,7 @@ import { PGlite } from '@electric-sql/pglite';
 import { and, eq } from 'drizzle-orm';
 import { drizzle } from 'drizzle-orm/pglite';
 
+import { LEGACY_LIMITS, pinLegacyLimits } from './helpers/limits-legacy.mjs';
 import { migratedDb } from './helpers/store-db.mjs';
 import * as schema from '../lib/db/schema.ts';
 import { evaluateAutoRun } from '../lib/schedule/auto-check.ts';
@@ -44,7 +45,7 @@ import {
 } from '../lib/server/business-limits.ts';
 import { appointFinanceLead } from '../lib/server/team-admin.ts';
 import { listAuthorityEvents } from '../lib/server/wallet-authority.ts';
-import { DEFAULT_LIMITS, LIMIT_CEILINGS, allowanceLimitProblems, effectiveDailyCap, effectiveAtMs, lowerNeedsConfirm, restoreProblems } from '../lib/limits/rules.ts';
+import { allowanceLimitProblems, effectiveDailyCap, effectiveAtMs, lowerNeedsConfirm, restoreProblems } from '../lib/limits/rules.ts';
 
 const U = (usdc) => BigInt(Math.round(usdc * 1_000_000));
 const T0 = new Date('2026-11-02T09:00:00Z');
@@ -72,6 +73,8 @@ async function seeded() {
   }
   const appointed = await appointFinanceLead(db, { orgId: 'acme', actorUserId: 'u-owner', userId: 'u-lead', now: () => T0 });
   assert.equal(appointed.ok, true, JSON.stringify(appointed));
+  // Acme and Northwind existed before the starting figures (migration 0086): they run on the old standard.
+  await pinLegacyLimits(db, ['acme', 'northwind']);
   return { client, db };
 }
 const ask = (db, over = {}) => requestHigherLimit(db, { orgId: 'acme', actorUserId: 'u-owner', kind: 'daily', requested: '8,000', reason: REASON, requestKey: key(), now: at(T0.getTime()), ...over });
@@ -146,13 +149,13 @@ test('migration 0079: a business already running on a bigger allowance or daily 
   const acme = await currentLimits(db, 'acme', at(T0.getTime()));
   assert.deepEqual({ ...acme }, { per_payment: U(5_000), daily: U(8_000), monthly: U(30_000), days: 180n }, 'the allowance that is running, and the owners’ daily limit');
   const big = await currentLimits(db, 'bigco', at(T0.getTime()));
-  assert.deepEqual({ ...big }, { per_payment: LIMIT_CEILINGS.per_payment, daily: LIMIT_CEILINGS.daily, monthly: LIMIT_CEILINGS.monthly, days: LIMIT_CEILINGS.days }, 'never above a ceiling');
+  assert.deepEqual({ ...big }, { per_payment: U(10_000), daily: U(50_000), monthly: U(500_000), days: 366n }, 'never above the ceilings migration 0079 used (10,000 a payment, 50,000 a day, 500,000 a month, a year)');
   for (const org of ['small', 'plain', 'failed']) {
-    assert.deepEqual({ ...(await currentLimits(db, org, at(T0.getTime()))) }, { ...DEFAULT_LIMITS }, `${org} keeps the standard`);
+    assert.deepEqual({ ...(await currentLimits(db, org, at(T0.getTime()))) }, { ...LEGACY_LIMITS }, `${org} keeps the old standard (migration 0086 writes it as a row)`);
   }
   const rows = await db.select().from(schema.businessLimits);
   assert.equal(rows.filter((r) => r.orgId === 'acme').length, 4);
-  assert.equal(rows.filter((r) => ['small', 'plain', 'failed'].includes(r.orgId)).length, 0, 'no row where the standard already covers it');
+  assert.equal(rows.filter((r) => ['small', 'plain', 'failed'].includes(r.orgId)).length, 12, 'migration 0086 gives each of the three a row for each limit, at the old standard');
   for (const r of rows) {
     assert.equal(r.changedBy, 'system:migration');
     assert.equal(r.source, 'raised');
@@ -168,7 +171,7 @@ test('migration 0079: a business already running on a bigger allowance or daily 
   const view = await readLimitsView(db, { orgId: 'acme', userId: 'u-1', now: at(T0.getTime()) });
   assert.equal(view.ok, true, JSON.stringify(view));
   const per = view.view.limits.find((l) => l.kind === 'per_payment');
-  assert.match(per.why, /already ran on this before limits/i);
+  assert.match(per.why, /already ran on this before the new starting figures/i);
   assert.doesNotMatch(per.why, /because you asked/i);
 });
 

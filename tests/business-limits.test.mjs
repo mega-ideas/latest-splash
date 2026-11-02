@@ -4,7 +4,7 @@
  * every migration), with an injected clock.
  *
  *   ask        owners only; the same key is the same request; one open request
- *              per limit; a figure above the limit, inside the ceiling, with a
+ *              per limit; a figure above the limit, inside the sanity maximum, with a
  *              reason; nothing changes by asking
  *   decide     compliance and operations staff approve, approve a smaller
  *              figure, or decline with a reason; support is refused; deciding
@@ -14,7 +14,11 @@
  *   cancel     an owner cancels until it starts, never after; twice cancels once
  *   lower      an owner lowers at once and nothing is asked; a request still
  *              open for that limit is cancelled
- *   ceiling    refused when asked, refused when decided, clamped if ever stored
+ *   sanity     a figure past the sanity maximum (a typo guard, not a ceiling) is refused when asked, refused when decided, clamped if ever stored
+ *
+ * These businesses are ones that existed before the starting figures: migration 0086 gives them rows at the old
+ * 2,000 / 5,000 / 20,000 USDC and 90 days (tests/helpers/limits-legacy.mjs). How a new business starts is
+ * tests/limits-start-answers.test.mjs.
  *   tenants    every read and write is the session's business only
  *   audit      every action is a line on the trail with who did it
  *   notices    the owners are told once when it is approved, declined and started
@@ -25,6 +29,7 @@ import test from 'node:test';
 import { and, eq } from 'drizzle-orm';
 
 import { migratedDb } from './helpers/store-db.mjs';
+import { LEGACY_LIMITS, pinLegacyLimits } from './helpers/limits-legacy.mjs';
 import * as schema from '../lib/db/schema.ts';
 import {
   cancelLimitRequest,
@@ -39,7 +44,7 @@ import {
 } from '../lib/server/business-limits.ts';
 import { appointFinanceLead } from '../lib/server/team-admin.ts';
 import { listAuthorityEvents } from '../lib/server/wallet-authority.ts';
-import { DEFAULT_LIMITS, LIMIT_CEILINGS, LIMIT_NOTICE_MS, effectiveAtMs } from '../lib/limits/rules.ts';
+import { DEFAULT_LIMITS, LIMIT_NOTICE_MS, LIMIT_SANITY_MAX, effectiveAtMs } from '../lib/limits/rules.ts';
 
 const U = (usdc) => BigInt(Math.round(usdc * 1_000_000));
 const T0 = new Date('2026-11-02T09:00:00Z');
@@ -69,6 +74,8 @@ async function seeded() {
   }
   const appointed = await appointFinanceLead(db, { orgId: 'acme', actorUserId: 'u-owner', userId: 'u-lead', now: () => T0 });
   assert.equal(appointed.ok, true, JSON.stringify(appointed));
+  // Acme and Northwind existed before the starting figures: they run on what they ran on.
+  await pinLegacyLimits(db, ['acme', 'northwind']);
   return { client, db };
 }
 
@@ -90,7 +97,7 @@ test('an owner asks for a higher limit: it is recorded as pending, and nothing a
   assert.equal(made.request.phase, 'asked');
   assert.equal(made.request.requestedWords, '8,000 USDC');
   assert.match(made.request.says, /Splash is reviewing it, and your limit stays 5,000 USDC until it answers/);
-  assert.deepEqual({ ...(await currentLimits(db, 'acme', at(T0.getTime()))) }, { ...DEFAULT_LIMITS }, 'a pending request changes nothing');
+  assert.deepEqual({ ...(await currentLimits(db, 'acme', at(T0.getTime()))) }, { ...LEGACY_LIMITS }, 'a pending request changes nothing');
   const [event] = (await trail(db)).filter((e) => e.action === 'limit_raise_requested');
   assert.equal(event.actorUserId, 'u-owner', 'the trail names who asked');
   assert.equal(event.ref, made.request.id);
@@ -146,17 +153,17 @@ test('only an owner may ask: the Finance lead sees but cannot ask, and nobody el
   assert.match(lead.error, /Only an owner can ask Splash for a higher limit\. You can see the limits/);
 });
 
-test('a figure that is not higher, is above the ceiling, has no reason or no key is refused with the reason in plain words', async () => {
+test('a figure that is not higher, is past the sanity maximum, has no reason or no key is refused with the reason in plain words', async () => {
   const { db } = await seeded();
   const same = await ask(db, { requested: '5000' });
   assert.equal(same.status, 400);
   assert.match(same.error, /not higher than your limit of 5,000 USDC/);
   const lower = await ask(db, { requested: '4000' });
   assert.match(lower.error, /not higher/);
-  const above = await ask(db, { requested: '50,001' });
+  const above = await ask(db, { requested: '10,000,001' });
   assert.equal(above.status, 400);
-  assert.match(above.error, /does not offer more than 50,000 USDC/);
-  assert.equal((await ask(db, { requested: '50,000' })).ok, true, 'exactly the ceiling is asked for');
+  assert.match(above.error, /does not offer more than 10,000,000 USDC/);
+  assert.equal((await ask(db, { requested: '10,000,000' })).ok, true, 'exactly the maximum is asked for');
   const days = await ask(db, { kind: 'days', requested: '400' });
   assert.match(days.error, /at most 366 days/);
   assert.equal((await ask(db, { kind: 'days', requested: '1.5' })).code, 'bad_figure');
@@ -168,37 +175,36 @@ test('a figure that is not higher, is above the ceiling, has no reason or no key
   assert.equal((await ask(db, { kind: 'monthly', requested: '30000', requestKey: undefined })).code, 'bad_key');
 });
 
-test('the 10,000 USDC second-approval line is not raised by this path: a per-payment limit above it is refused when asked and when decided', async () => {
+test('a limit can be asked for above the old ceilings, and a request past the sanity maximum cannot be approved as asked', async () => {
   const { db } = await seeded();
+  // Round three refused a per-payment limit above 10,000: the starting figures are 50,000, so that is no longer a limit on what can be asked for.
   const over = await ask(db, { kind: 'per_payment', requested: '10,000.01' });
-  assert.equal(over.ok, false);
-  assert.equal(over.status, 400);
-  assert.match(over.error, /cannot raise this above 10,000 USDC/);
-  assert.match(over.error, /without an owner approving the payment/);
-  assert.equal(over.details.ceiling, U(10_000).toString());
-  const exact = await ask(db, { kind: 'per_payment', requested: '10,000' });
-  assert.equal(exact.ok, true, 'the line itself is the most that can be asked for');
-  // A request that somehow holds more than the ceiling (a row from before a ceiling was lowered, or written by hand) cannot be approved as asked.
-  await db.insert(schema.businessLimitRequests).values({ id: 'blr_over', orgId: 'acme', kind: 'monthly', requestedValue: LIMIT_CEILINGS.monthly + U(1), currentValue: U(20_000), reason: REASON, requestKey: 'hand-written-key', requestedBy: 'u-owner', requestedAt: T0, status: 'pending' });
+  assert.equal(over.ok, true, JSON.stringify(over));
+  // A request that somehow holds more than the sanity maximum (written by hand) cannot be approved as asked.
+  await db.insert(schema.businessLimitRequests).values({ id: 'blr_over', orgId: 'acme', kind: 'monthly', requestedValue: LIMIT_SANITY_MAX.monthly + U(1), currentValue: U(20_000), reason: REASON, requestKey: 'hand-written-key', requestedBy: 'u-owner', requestedAt: new Date(T0.getTime()), status: 'pending' });
   const refused = await decide(db, 'blr_over');
   assert.equal(refused.ok, false);
   assert.equal(refused.status, 400);
-  assert.match(refused.error, /does not offer more than 500,000 USDC/);
+  assert.match(refused.error, /does not offer more than 100,000,000 USDC/);
   assert.equal((await rowOf(db, 'blr_over')).status, 'pending', 'and it stays pending');
-  const smaller = await decide(db, 'blr_over', { action: 'approve_smaller', granted: '500,000' });
-  assert.equal(smaller.ok, true, 'a figure inside the ceiling can be granted');
+  const smaller = await decide(db, 'blr_over', { action: 'approve_smaller', granted: '1,000,000' });
+  assert.equal(smaller.ok, true, JSON.stringify(smaller));
+  assert.equal(smaller.request.granted, U(1_000_000).toString(), 'a figure inside the maximum can be granted');
 });
 
-test('a stored figure above the ceiling is never believed, and an approved one above it is clamped when it starts', async () => {
+test('a stored figure past the sanity maximum is never believed, and an approved one past it is clamped when it starts', async () => {
   const { db } = await seeded();
+  await db.delete(schema.businessLimits).where(and(eq(schema.businessLimits.orgId, 'acme'), eq(schema.businessLimits.kind, 'days')));
   await db.insert(schema.businessLimits).values({ orgId: 'acme', kind: 'days', value: 9_999n, heldMax: 9_999n, source: 'raised', changedBy: 'u-owner' });
   assert.equal((await currentLimits(db, 'acme', at(T0.getTime()))).days, 366n);
   const decidedAt = new Date(T0.getTime() - 2 * LIMIT_NOTICE_MS);
   await db.insert(schema.businessLimitRequests).values({
-    id: 'blr_clamp', orgId: 'acme', kind: 'daily', requestedValue: LIMIT_CEILINGS.daily + U(5_000), currentValue: U(5_000), reason: REASON, requestKey: 'clamp-key-000001', requestedBy: 'u-owner', requestedAt: decidedAt,
-    status: 'approved', grantedValue: LIMIT_CEILINGS.daily + U(5_000), decidedBy: 'operator:x@splash.test', decidedAt, effectiveAt: new Date(decidedAt.getTime() + LIMIT_NOTICE_MS),
+    id: 'blr_clamp', orgId: 'acme', kind: 'daily', requestedValue: LIMIT_SANITY_MAX.daily + U(5_000), currentValue: U(5_000), reason: REASON, requestKey: 'clamp-key-000001', requestedBy: 'u-owner', requestedAt: decidedAt,
+    status: 'approved', grantedValue: LIMIT_SANITY_MAX.daily + U(5_000), decidedBy: 'operator:x@splash.test', decidedRole: 'operations', decidedAt, effectiveAt: new Date(decidedAt.getTime() + LIMIT_NOTICE_MS),
+    // A grant this large was approved by two people, as the database requires.
+    firstApprovedBy: 'operator:y@splash.test', firstApproverRole: 'compliance', firstApprovedAt: decidedAt, firstGrantedValue: LIMIT_SANITY_MAX.daily + U(5_000),
   });
-  assert.equal((await currentLimits(db, 'acme', at(T0.getTime()))).daily, LIMIT_CEILINGS.daily, 'never above the ceiling');
+  assert.equal((await currentLimits(db, 'acme', at(T0.getTime()))).daily, LIMIT_SANITY_MAX.daily, 'never past the maximum');
 });
 
 // ─── The 24 hour notice ───────────────────────────────────────────────────
@@ -222,7 +228,7 @@ test('an approval starts a 24 hour notice: nothing changes one millisecond befor
   assert.equal(row.status, 'applied');
   assert.equal(row.appliedAt.getTime(), effective);
   assert.equal((await currentLimits(db, 'acme', at(effective + H))).daily, U(8_000), 'and it stays');
-  const [stored] = await db.select().from(schema.businessLimits).where(eq(schema.businessLimits.orgId, 'acme'));
+  const [stored] = await db.select().from(schema.businessLimits).where(and(eq(schema.businessLimits.orgId, 'acme'), eq(schema.businessLimits.kind, 'daily')));
   assert.deepEqual([stored.kind, stored.value, stored.source, stored.changedBy, stored.requestId], ['daily', U(8_000), 'raised', 'system:limits', made.request.id]);
   const applied = (await trail(db)).filter((e) => e.action === 'limit_change_applied');
   assert.equal(applied.length, 1, 'once, however often it is read');
@@ -370,7 +376,7 @@ test('the staff queue reads every business’s open requests, oldest first, with
   assert.deepEqual(queue.open.map((r) => r.org.name), ['Acme Trading', 'Northwind']);
   assert.equal(queue.open[0].requestedBy, 'u-owner');
   assert.equal(queue.open[0].currentWords, '5,000 USDC');
-  assert.equal(queue.open[1].ceilingWords, '10,000 USDC');
+  assert.equal(queue.open[1].currentWords, '2,000 USDC');
   await decide(db, a.request.id, { now: at(T0.getTime() + 3 * H) });
   const after = await listLimitRequestsForStaff(db, COMPLIANCE, at(T0.getTime() + 4 * H));
   assert.deepEqual(after.open.map((r) => r.id), [b.request.id]);
@@ -396,7 +402,7 @@ test('an owner cancels a request before it is decided, and before the higher lim
   const cancelled = await cancelLimitRequest(db, { orgId: 'acme', actorUserId: 'u-owner', requestId: made.request.id, now: at(effective - 1) });
   assert.equal(cancelled.ok, true, 'one millisecond before it starts');
   assert.equal((await currentLimits(db, 'acme', at(effective + 10 * H))).monthly, U(20_000), 'and it never starts');
-  assert.equal((await db.select().from(schema.businessLimits)).length, 0);
+  assert.equal((await db.select().from(schema.businessLimits)).length, 8, 'only the rows the two businesses already had: nothing was written');
   assert.equal((await trail(db)).filter((e) => e.action === 'limit_request_cancelled').length, 2);
   const [event] = (await trail(db)).filter((e) => e.action === 'limit_request_cancelled' && e.ref === made.request.id);
   assert.equal(event.actorUserId, 'u-owner');
@@ -458,7 +464,7 @@ test('an owner lowers a limit at once and nothing is asked', async () => {
   const view = await readLimitsView(db, { orgId: 'acme', userId: 'u-owner2', now: at(T0.getTime()) });
   const daily = view.view.limits.find((l) => l.kind === 'daily');
   assert.equal(daily.source, 'lowered');
-  assert.match(daily.why, /An owner of your business lowered it on 2 Nov 2026\. The standard is 5,000 USDC/);
+  assert.match(daily.why, /An owner of your business lowered it on 2 Nov 2026\. You can put it back to 5,000 USDC/);
   // Lowering again to the same figure is the same call, not an error and not a second line.
   const same = await lowerLimit(db, { orgId: 'acme', actorUserId: 'u-owner', kind: 'daily', value: '1,500', now: at(T0.getTime() + H) });
   assert.equal(same.ok, true);
@@ -520,8 +526,8 @@ test('owners and the Finance lead see the limits; the Finance lead cannot ask; n
   assert.equal(owner.view.manager, 'owner');
   assert.deepEqual(owner.view.limits.map((l) => l.kind), ['per_payment', 'daily', 'monthly', 'days']);
   assert.deepEqual(owner.view.limits.map((l) => l.currentWords), ['2,000 USDC', '5,000 USDC', '20,000 USDC', '90 days']);
-  assert.deepEqual(owner.view.limits.map((l) => l.ceilingWords), ['10,000 USDC', '50,000 USDC', '500,000 USDC', '366 days']);
-  for (const l of owner.view.limits) assert.equal(l.why, 'Every business starts with this limit.');
+  assert.deepEqual(owner.view.limits.map((l) => l.ceilingWords), [null, null, null, '366 days'], 'only the length of an allowance has a ceiling');
+  for (const l of owner.view.limits) assert.match(l.why, /^Your business already ran on this before the new starting figures, so it keeps it\. A new business starts at /);
   const lead = await readLimitsView(db, { orgId: 'acme', userId: 'u-lead', now: at(T0.getTime()) });
   assert.equal(lead.ok, true);
   assert.equal(lead.view.canAsk, false);
@@ -542,7 +548,7 @@ test('one business never sees another’s requests or limits', async () => {
   for (const l of north.view.limits) {
     assert.equal(l.open, null);
     assert.equal(l.last, null);
-    assert.equal(l.source, 'standard');
+    assert.equal(l.source, 'kept', 'northwind’s own limits, untouched by acme lowering its monthly');
   }
   assert.equal(north.view.limits.find((l) => l.kind === 'monthly').currentWords, '20,000 USDC');
   // Asking in northwind with acme's key is a new request there, not acme's.

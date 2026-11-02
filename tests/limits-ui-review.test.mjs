@@ -31,7 +31,7 @@ const queue = code(read('components/admin/AdminLimitRequests.tsx'));
 
 test('a button that is off says why in visible words, not only in a title attribute', () => {
   assert.doesNotMatch(card, /<QuietButton[^>]*\stitle=/, 'no control relies on a title attribute for its reason');
-  assert.match(card, /This is the most Splash offers\./);
+  assert.match(card, /This is the longest an allowance can last\./, 'only the length of an allowance has a ceiling now');
   assert.match(card, /A request is already open for this limit\./);
   assert.match(card, /This is the lowest a limit can be\./);
 });

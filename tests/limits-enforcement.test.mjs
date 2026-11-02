@@ -25,6 +25,14 @@ import { runScheduledPayments } from '../lib/server/scheduled-runner.ts';
 import { listRuns, saveSettings } from '../lib/server/scheduled-store.ts';
 import { effectiveAtMs } from '../lib/limits/rules.ts';
 import { DAY, OWNER_ACTOR, U, sched, scheduleWorld, t0 } from './fixtures/schedule-world.mjs';
+import { pinLegacyLimits } from './helpers/limits-legacy.mjs';
+
+// Acme here is a business that existed before the starting figures (migration 0086): it runs on 2,000 / 5,000 / 20,000 USDC and 90 days.
+async function legacyWorld() {
+  const t = await scheduleWorld();
+  await pinLegacyLimits(t.w.db, ['acme']);
+  return t;
+}
 
 const HOUR = 3_600_000;
 const FIRST = new Date(Number(t0) + 2 * Number(DAY));
@@ -69,7 +77,7 @@ const form = (over = {}) => ({ perPaymentUsdc: '2000', dailyUsdc: '5000', monthl
 const askAllowance = async (t, input) => S.requestAllowance(t.sdeps(), OWNER_ACTOR, await t.confirmed(input));
 
 test('an allowance above the business’s limits is refused with the reason, and one inside them is asked', async () => {
-  const t = await scheduleWorld();
+  const t = await legacyWorld();
   for (const [field, value, pattern] of [
     ['perPaymentUsdc', '3000', /one payment cannot be more than your business’s limit of 2,000 USDC/],
     ['dailyUsdc', '6000', /daily limit cannot be more than your business’s limit of 5,000 USDC/],
@@ -87,7 +95,7 @@ test('an allowance above the business’s limits is refused with the reason, and
 });
 
 test('a request for a higher limit changes nothing until its notice has passed; then the same allowance goes through', async () => {
-  const t = await scheduleWorld();
+  const t = await legacyWorld();
   const { db } = t.w;
   const wide = form({ perPaymentUsdc: '3000', dailyUsdc: '6000' });
   const made = ok(await requestHigherLimit(db, { orgId: 'acme', actorUserId: 'u-founder', kind: 'per_payment', requested: '3,000', reason: 'Our two largest suppliers invoice about 2,800 a month.', requestKey: 'raise-per-payment-1', now: () => at(t0) }));
@@ -108,7 +116,7 @@ test('a request for a higher limit changes nothing until its notice has passed; 
 });
 
 test('an allowance the owners lowered their limit under is refused, and the form is told the limits to hold itself to', async () => {
-  const t = await scheduleWorld();
+  const t = await legacyWorld();
   ok(await lowerLimit(t.w.db, { orgId: 'acme', actorUserId: 'u-founder', kind: 'monthly', value: '10,000', now: () => at(t0) }));
   const refused = await askAllowance(t, form());
   assert.equal(refused.code, 'above_limit');
@@ -129,7 +137,7 @@ test('the Automatic panel holds itself to the same limits, with the same sentenc
 // ─── An automatic run ─────────────────────────────────────────────────────
 
 async function ready() {
-  const t = await scheduleWorld();
+  const t = await legacyWorld();
   await t.allowance();
   await t.payBefore(t.ids.a, 1);
   await t.payBefore(t.ids.b, 1);

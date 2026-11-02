@@ -1,6 +1,6 @@
 /**
- * A business's limits on automatic payments (v2 Phase 3): the figures, the
- * ceilings in code, what an owner may ask for, what staff may grant, what an
+ * A business's limits on automatic payments (v2 Phase 3): the starting figures,
+ * the sanity maximum (a guard against a typo, not a ceiling), what an owner may ask for, what staff may grant, what an
  * owner may lower to, the 24 hour notice and the words. Pure: no database.
  *
  * What each function does to a real database, cross-tenant included, is
@@ -11,12 +11,13 @@ import test from 'node:test';
 
 import {
   DEFAULT_LIMITS,
-  LIMIT_CEILINGS,
   LIMIT_FLOORS,
   LIMIT_KINDS,
   LIMIT_NOTICE_MS,
+  LIMIT_SANITY_MAX,
   WHAT_HAPPENS_NEXT,
   allowanceLimitProblems,
+  askNote,
   cleanReason,
   effectiveAtMs,
   effectiveDailyCap,
@@ -31,28 +32,29 @@ import {
   stricter,
 } from '../lib/limits/rules.ts';
 import { limitNoticeText } from '../lib/limits/notice.ts';
-import { ALLOWANCE_DEFAULTS, ALLOWANCE_MAX_DAYS, AUTO_APPROVAL_CEILING_MINOR } from '../lib/schedule/rules.ts';
+import { ALLOWANCE_DEFAULTS, ALLOWANCE_MAX_DAYS } from '../lib/schedule/rules.ts';
 
 const U = (usdc) => BigInt(Math.round(usdc * 1_000_000));
+// What a business that existed before the starting figures runs on (migration 0086 pins it): the old standard.
+const LEGACY = { per_payment: U(2_000), daily: U(5_000), monthly: U(20_000), days: 90n };
 
-test('every business starts with the Mode B defaults: 2,000 a payment, 5,000 a day, 20,000 a month, 90 days', () => {
+test('a new business starts at 50,000 a payment, 100,000 a day, 500,000 a month and 90 days (starting points; the old 2,000 / 5,000 / 20,000 is what existing businesses keep)', () => {
   assert.deepEqual(
     { ...DEFAULT_LIMITS },
-    { per_payment: U(2_000), daily: U(5_000), monthly: U(20_000), days: 90n },
+    { per_payment: U(50_000), daily: U(100_000), monthly: U(500_000), days: 90n },
   );
-  assert.equal(DEFAULT_LIMITS.per_payment, BigInt(ALLOWANCE_DEFAULTS.perPaymentUsdc) * 1_000_000n, 'one source for the defaults');
+  assert.equal(DEFAULT_LIMITS.days, BigInt(ALLOWANCE_DEFAULTS.expiresInDays), 'the length of an allowance is still the form’s default');
   assert.deepEqual([...LIMIT_KINDS], ['per_payment', 'daily', 'monthly', 'days']);
 });
 
-test('the ceilings are in code: the per-payment ceiling is the 10,000 USDC an owner must always approve, and an allowance lasts at most a year', () => {
-  assert.equal(LIMIT_CEILINGS.per_payment, AUTO_APPROVAL_CEILING_MINOR);
-  assert.equal(LIMIT_CEILINGS.per_payment, U(10_000));
-  assert.equal(LIMIT_CEILINGS.days, BigInt(ALLOWANCE_MAX_DAYS));
+test('the sanity maximum catches a typo and is not a ceiling; only the length of an allowance has a true one (a year)', () => {
+  assert.equal(LIMIT_SANITY_MAX.days, BigInt(ALLOWANCE_MAX_DAYS));
   for (const kind of LIMIT_KINDS) {
-    assert.ok(LIMIT_CEILINGS[kind] > DEFAULT_LIMITS[kind], `${kind}: there is room above the default`);
+    assert.ok(LIMIT_SANITY_MAX[kind] > DEFAULT_LIMITS[kind], `${kind}: there is room above the start`);
     assert.ok(LIMIT_FLOORS[kind] < DEFAULT_LIMITS[kind], `${kind}: and room below it`);
   }
-  assert.ok(LIMIT_CEILINGS.daily >= LIMIT_CEILINGS.per_payment && LIMIT_CEILINGS.monthly >= LIMIT_CEILINGS.daily, 'the ceilings keep the order a payment, a day and a month have');
+  for (const kind of ['per_payment', 'daily', 'monthly']) assert.ok(LIMIT_SANITY_MAX[kind] >= DEFAULT_LIMITS[kind] * 10n, `${kind}: a limit can go to ten times the start and more`);
+  assert.ok(LIMIT_SANITY_MAX.daily >= LIMIT_SANITY_MAX.per_payment && LIMIT_SANITY_MAX.monthly >= LIMIT_SANITY_MAX.daily, 'the maxima keep the order a payment, a day and a month have');
 });
 
 test('the notice is 24 hours, and an approval starts it from the moment of the decision', () => {
@@ -77,29 +79,32 @@ test('figures are read as an owner types them', () => {
   assert.equal(formatLimit('days', 1n), '1 day');
 });
 
-test('an owner may ask for a figure above the limit and inside the ceiling, and for nothing else', () => {
+test('an owner may ask for a figure above the limit and inside the sanity maximum, and for nothing else', () => {
   assert.deepEqual(raiseProblems('daily', U(8_000), U(5_000)), []);
-  assert.deepEqual(raiseProblems('daily', LIMIT_CEILINGS.daily, U(5_000)), [], 'exactly the ceiling is allowed');
+  assert.deepEqual(raiseProblems('daily', U(300_000), U(100_000)), [], 'well above the start is fine to ask for');
+  assert.deepEqual(raiseProblems('daily', LIMIT_SANITY_MAX.daily, U(5_000)), [], 'exactly the maximum is allowed');
   assert.match(raiseProblems('daily', U(5_000), U(5_000))[0], /not higher than your limit of 5,000 USDC/);
   assert.match(raiseProblems('daily', U(4_000), U(5_000))[0], /not higher/);
-  assert.match(raiseProblems('daily', LIMIT_CEILINGS.daily + 1n, U(5_000))[0], /does not offer more than 50,000 USDC/);
+  assert.match(raiseProblems('daily', LIMIT_SANITY_MAX.daily + 1n, U(5_000))[0], /does not offer more than 10,000,000 USDC/);
+  assert.match(raiseProblems('daily', LIMIT_SANITY_MAX.daily + 1n, U(5_000))[0], /typo/);
   assert.match(raiseProblems('days', 400n, 90n)[0], /at most 366 days/);
 });
 
-test('the per-payment ceiling is the owners’ approval line, and it says so', () => {
-  const over = raiseProblems('per_payment', U(10_000) + 1n, U(2_000));
-  assert.equal(over.length, 1);
-  assert.match(over[0], /cannot raise this above 10,000 USDC/);
-  assert.match(over[0], /without an owner approving the payment/);
-  assert.deepEqual(raiseProblems('per_payment', U(10_000), U(2_000)), [], 'the line itself is the most');
+test('a per-payment limit can be asked for above the old 10,000 line, and the page still says the owners’ approval line holds', () => {
+  assert.deepEqual(raiseProblems('per_payment', U(10_000) + 1n, U(2_000)), [], 'no longer refused at 10,000');
+  assert.deepEqual(raiseProblems('per_payment', U(50_000), U(2_000)), []);
+  assert.match(askNote('per_payment'), /second-approval line still waits for an owner/);
+  assert.match(askNote('daily'), /two people at Splash have to agree/);
+  assert.match(askNote('days'), /at most 366 days/);
 });
 
-test('staff may grant a figure above the limit, no more than was asked and inside the ceiling', () => {
+test('staff may grant a figure above the limit, no more than was asked and inside the sanity maximum', () => {
   assert.deepEqual(grantProblems('monthly', U(30_000), U(40_000), U(20_000)), []);
   assert.deepEqual(grantProblems('monthly', U(40_000), U(40_000), U(20_000)), []);
   assert.match(grantProblems('monthly', U(20_000), U(40_000), U(20_000))[0], /must be higher than/);
   assert.match(grantProblems('monthly', U(41_000), U(40_000), U(20_000))[0], /cannot be more than the 40,000 USDC the owner asked for/);
-  assert.match(grantProblems('monthly', LIMIT_CEILINGS.monthly + 1n, LIMIT_CEILINGS.monthly + 5n, U(20_000))[0], /does not offer more than/);
+  assert.match(grantProblems('monthly', LIMIT_SANITY_MAX.monthly + 1n, LIMIT_SANITY_MAX.monthly + 5n, U(20_000))[0], /does not offer more than/);
+  assert.deepEqual(grantProblems('monthly', U(3_000_000), U(3_000_000), U(500_000)), [], 'a grant far above the start is the staff’s to make');
 });
 
 test('an owner may lower to a figure below the limit and above the floor', () => {
@@ -122,7 +127,7 @@ test('a reason is a sentence in the owner’s own words', () => {
 });
 
 test('an allowance is held to the business’s limits, with the same sentences on the page and on the server', () => {
-  const limits = { ...DEFAULT_LIMITS };
+  const limits = { ...LEGACY };
   const fits = { perPaymentMinor: U(2_000), dailyMinor: U(5_000), monthlyMinor: U(20_000), expiresInDays: 90 };
   assert.deepEqual(allowanceLimitProblems(fits, limits), []);
   const over = allowanceLimitProblems({ perPaymentMinor: U(3_000), dailyMinor: U(6_000), monthlyMinor: U(21_000), expiresInDays: 91 }, limits);
@@ -138,8 +143,8 @@ test('an allowance is held to the business’s limits, with the same sentences o
   assert.equal(stricter(U(5), U(3)), U(3));
 });
 
-test('the daily limit automatic runs are held to: the owners’ own, else the standard, never more than the business’s', () => {
-  const limits = { ...DEFAULT_LIMITS };
+test('the daily limit automatic runs are held to: the owners’ own, else the 5,000 the form starts from, never more than the business’s', () => {
+  const limits = { ...LEGACY };
   assert.equal(effectiveDailyCap(null, limits), U(5_000), 'none set: the standard');
   assert.equal(effectiveDailyCap(U(3_000), limits), U(3_000), 'the owners’ own, lower');
   assert.equal(effectiveDailyCap(U(9_000), limits), U(5_000), 'the owners’ own can never lift the business’s');

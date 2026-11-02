@@ -44,6 +44,9 @@ const CUSTOMER = {
   'app/api/limits/requests/[id]/route.ts': { DELETE: ['cancelLimitRequest', true] },
   'app/api/limits/lower/route.ts': { POST: ['lowerLimit', true] },
   'app/api/limits/restore/route.ts': { POST: ['restoreLimit', true] },
+  // How a business's limits start: tests/limits-start-routes-ui.test.mjs reads these two in full.
+  'app/api/limits/answers/route.ts': { POST: ['saveLimitAnswers', true] },
+  'app/api/limits/answers/ask/route.ts': { POST: ['askForHigherFromAnswers', true] },
 };
 
 test('the customer limit routes start at the session gate, take the business and the actor from it, and call one service function each', () => {
@@ -97,10 +100,13 @@ test('the decision route tells the owners, and the cron fails closed without its
 });
 
 test('only those routes change a limit: the writing functions are called nowhere else', () => {
-  const writers = ['requestHigherLimit', 'cancelLimitRequest', 'lowerLimit', 'restoreLimit', 'decideLimitRequestForStaff', 'runLimitChangesForCron'];
+  const writers = ['requestHigherLimit', 'cancelLimitRequest', 'lowerLimit', 'restoreLimit', 'decideLimitRequestForStaff', 'runLimitChangesForCron', 'saveLimitAnswers', 'askForHigherFromAnswers'];
   const files = [...walk('app/'), ...walk('lib/'), ...walk('components/')].filter((f) => /\.(ts|tsx)$/.test(f));
   const allowed = new Set([
     'lib/server/business-limits.ts',
+    'lib/server/limit-start.ts',
+    'app/api/limits/answers/route.ts',
+    'app/api/limits/answers/ask/route.ts',
     'app/api/limits/requests/route.ts',
     'app/api/limits/requests/[id]/route.ts',
     'app/api/limits/lower/route.ts',
@@ -130,7 +136,7 @@ test('the Limits section is in Settings for owners and the Finance lead, and the
   const settings = code(read('components/settings/SettingsPage.tsx'));
   assert.match(settings, /id: 'limits', label: 'Limits'/);
   assert.match(settings, /people\.data\?\.you\.manager/);
-  assert.match(settings, /<LimitsCard \/>/);
+  assert.match(settings, /<LimitsCard controls=\{/);
   const nav = code(read('app/admin/(console)/layout.tsx'));
   assert.match(nav, /href: '\/admin\/limits'/);
 });
