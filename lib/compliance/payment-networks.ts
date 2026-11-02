@@ -76,8 +76,12 @@ export function institutionNamingExceptions(table: NetworkTable = PAYMENT_NETWOR
   return CORRIDORS.filter((c) => table[c].mustNameReceivingInstitution === true);
 }
 
-/** The recorded exceptions in the code as shipped. Empty unless compliance flagged a corridor. */
-export const INSTITUTION_NAMING_EXCEPTIONS: readonly Corridor[] = institutionNamingExceptions();
+/**
+ * The recorded exceptions to the ban on naming a partner: a reviewed list, written out by hand, not computed from the flags above. A
+ * corridor goes on this list in the same commit that sets its `mustNameReceivingInstitution` flag, and a test fails if the two disagree,
+ * so flagging a corridor without recording the exception (or the reverse) cannot pass review unnoticed. Empty as shipped.
+ */
+export const INSTITUTION_NAMING_EXCEPTIONS: readonly Corridor[] = [];
 
 export type NetworkWords = {
   corridor: Corridor | null;

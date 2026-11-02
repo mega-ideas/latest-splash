@@ -102,11 +102,24 @@ export function canonicalDisclosure(d: ExchangeDisclosure): string {
 /** Control, hidden and direction-changing characters: they become spaces, so a name cannot break a line or reorder what is read. */
 const HIDDEN = new RegExp('[\u0000-\u001f\u007f-\u009f\u00ad\u200b-\u200f\u2028-\u202e\u2060-\u206f\ufeff]', 'g');
 
-/** Printable, single-line plain words, cut to `max`. */
-const plain = (value: string | null | undefined, max: number) => (value ?? '').replace(HIDDEN, ' ').replace(/\s+/g, ' ').trim().slice(0, max).trim();
+/** The first `max` UTF-16 units of the text that end on a whole character: an emoji is kept or left out, never split into half. */
+export function cut(value: string, max: number): string {
+  let out = '';
+  for (const ch of value) {
+    if (out.length + ch.length > max) break;
+    out += ch;
+  }
+  return out;
+}
 
-/** A person's name or title as it travels: also without brackets, so a name can never dress itself as a title ("Eve (CEO)"). */
-const personal = (value: string | null | undefined, max: number) => plain((value ?? '').replace(/[()]/g, ' '), max);
+/** Printable, single-line plain words, cut to `max` without splitting a character. */
+const plain = (value: string | null | undefined, max: number) => cut((value ?? '').replace(HIDDEN, ' ').replace(/\s+/g, ' ').trim(), max).trim();
+
+/**
+ * A person's name or title as it travels: also without brackets (so a name can never dress itself as a title, "Eve (CEO)"), without a colon
+ * and without the words "Sent by" (so it cannot pass for the rest of the line, "Sent by Eve Sent by Mallory: refund").
+ */
+const personal = (value: string | null | undefined, max: number) => plain((value ?? '').replace(/[():：（）]/g, ' ').replace(/\bsent\s+by\b/gi, ' '), max);
 
 /**
  * Who the exchange is told sent the payment, and the screen says the same. "NAME (Title)" while the business and the person both allow
@@ -126,7 +139,7 @@ export const namesAPerson = (d: ExchangeDisclosure): boolean => personal(d.sende
 
 /** What the provider is told the payment is for: who sends it first, then why. At most 140 characters. */
 export function purposeTextOf(d: ExchangeDisclosure): string {
-  return `Sent by ${senderOf(d)}: ${d.purpose.label}`.slice(0, 140);
+  return cut(`Sent by ${senderOf(d)}: ${d.purpose.label}`, 140).trim();
 }
 
 export type DisclosureText = {
@@ -167,7 +180,7 @@ export function disclosureText(d: ExchangeDisclosure, table: NetworkTable = PAYM
   const notes = namesAPerson(d)
     ? [`Your name${personal(d.sender.title, 40) ? ' and job title are' : ' is'} sent to the exchange, because your business and you both allow it. You can stop sharing your own in Settings.`]
     : ['No person’s name or job title is sent. The exchange is told your business sent this payment. Your business’s owners and you each decide this in Settings.'];
-  const sharing = `These details are shared with the payout partner in ${where.country} that receives this payment over ${where.text}: the business’s registered name, registration number, address and wallet; the recipient’s registered name, registration number, address and account; the amount; and the payment details above.`;
+  const sharing = `These details are shared with the exchange that holds the account, which pays out in ${where.country} over ${where.text}, through Splash’s Travel Rule provider: the business’s registered name, registration number, address and wallet, and the link to its verification with that provider; the recipient’s registered name, registration number, address and account; the amount; the payment reference and date; and the payment details above.`;
   return {
     headline: 'What will be shared with the exchange',
     rows,
@@ -177,7 +190,7 @@ export function disclosureText(d: ExchangeDisclosure, table: NetworkTable = PAYM
       ...rows.map((r) => `${r.label}: ${r.value}.`),
       ...notes,
       sharing,
-      'Splash sends this once, for this payment only, to the exchange that holds the account, through its Travel Rule provider. The exchange uses it to check the payment against the account.',
+      'Splash sends this once, for this payment only, to the exchange that holds the account, through Splash’s Travel Rule provider. The exchange uses it to check the payment against the account.',
       'Nothing is sent until you confirm. If any of it is wrong, do not confirm; go back and check the recipient.',
     ],
   };
