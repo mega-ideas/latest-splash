@@ -83,12 +83,16 @@ export async function saveLimitAnswers(db: DrizzleDb, input: SaveAnswersInput): 
     let replayed = false;
     const same = (r: typeof businessLimitAnswers.$inferSelect) =>
       r.monthlyText === values.monthlyText && r.perWeekText === values.perWeekText && r.firstText === values.firstText && r.formulaVersion === values.formulaVersion;
+    // New answers on an existing row: the row takes them (version + 1), so what is stored and what the caller is told are the same answers.
+    const restate = async (current: typeof businessLimitAnswers.$inferSelect) => {
+      const [updated] = await tx.update(businessLimitAnswers).set({ ...values, version: current.version + 1, answeredBy: input.actorUserId, updatedAt: at }).where(eq(businessLimitAnswers.id, current.id)).returning();
+      await recordAuthorityEvent(tx, { orgId: input.orgId, actorUserId: input.actorUserId, action: 'limit_answers_saved', ref: updated.id, detail: { version: updated.version, first: false }, now: () => at });
+      return updated;
+    };
     if (row && same(row)) {
       replayed = true;
     } else if (row) {
-      const [updated] = await tx.update(businessLimitAnswers).set({ ...values, version: row.version + 1, answeredBy: input.actorUserId, updatedAt: at }).where(eq(businessLimitAnswers.id, row.id)).returning();
-      row = updated;
-      await recordAuthorityEvent(tx, { orgId: input.orgId, actorUserId: input.actorUserId, action: 'limit_answers_saved', ref: row.id, detail: { version: row.version, first: false }, now: () => at });
+      row = await restate(row);
     } else {
       const id = `bla_${randomUUID()}`;
       const [created] = await tx
@@ -100,10 +104,12 @@ export async function saveLimitAnswers(db: DrizzleDb, input: SaveAnswersInput): 
         row = created;
         await recordAuthorityEvent(tx, { orgId: input.orgId, actorUserId: input.actorUserId, action: 'limit_answers_saved', ref: row.id, detail: { version: 1, first: true }, now: () => at });
       } else {
-        // Another save got there first: it is the same save when the answers are the same.
+        // Another save got there first. When its answers are the same this is a replay; when they differ, these are the
+        // newer answers and they are saved as such, so the caller is never shown another tab's figures as its own.
         row = await answersOf(tx, input.orgId);
         if (!row) return fail(500, 'unreadable', 'The answers could not be saved. Nothing was changed.');
-        replayed = same(row);
+        if (same(row)) replayed = true;
+        else row = await restate(row);
       }
     }
     if (!row) return fail(500, 'unreadable', 'The answers could not be saved. Nothing was changed.');
@@ -147,13 +153,14 @@ export async function saveLimitAnswers(db: DrizzleDb, input: SaveAnswersInput): 
 }
 
 export type AskedFromAnswers = { kind: StartKind; request: RequestWire; replayed: boolean };
-export type SkippedFromAnswers = { kind: StartKind; why: 'fits' | 'restore' | 'open' | 'refused'; error?: string };
+export type SkippedFromAnswers = { kind: StartKind; why: 'fits' | 'restore' | 'open' | 'closed' | 'refused'; error?: string };
 
 /**
  * "Ask for higher limits": one request to Splash for each limit the answers asked for more than the business has, on the
  * ordinary request path (an owner asks, Splash staff decide, a 24 hour notice). The figures come from the answers stored
  * for the business, never from the request; the reason is a sentence with none of the answers in it; each request is keyed
- * by the answers and their version, so a double click or a second tab asks once, and new answers are a new ask.
+ * by the answers and their version, so a double click or a second tab asks once, and new answers are a new ask. A request
+ * that Splash already answered (or the owner cancelled) is not asked again under the same answers: it is reported as closed.
  */
 export async function askForHigherFromAnswers(db: DrizzleDb, input: { orgId: string; actorUserId: string; now?: Clock }): Promise<{ ok: true; asked: AskedFromAnswers[]; skipped: SkippedFromAnswers[] } | LimitFailure> {
   const manager = await teamManager(db, input.orgId, input.actorUserId);
@@ -187,7 +194,11 @@ export async function askForHigherFromAnswers(db: DrizzleDb, input: { orgId: str
       requestKey: `start-${answers.id}-v${answers.version}-${kind}`,
       now: () => at,
     });
-    if (result.ok) asked.push({ kind, request: result.request, replayed: result.replayed });
+    // The key is the answers and their version, so asking again brings back the same request. While it is still open that
+    // is a double click and counts as asked; once Splash declined it, the owner cancelled it, or it was approved and has
+    // run its course, it is closed, and saying "sent" would be false: nothing new was sent.
+    if (result.ok && result.replayed && result.request.phase !== 'asked' && result.request.phase !== 'waiting') skipped.push({ kind, why: 'closed' });
+    else if (result.ok) asked.push({ kind, request: result.request, replayed: result.replayed });
     else if (result.code === 'already_open') skipped.push({ kind, why: 'open' });
     else skipped.push({ kind, why: 'refused', error: result.error });
   }

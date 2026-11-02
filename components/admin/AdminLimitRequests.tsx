@@ -3,12 +3,13 @@
 import { useCallback, useEffect, useState } from 'react';
 import { BadgeCheck, CircleAlert, Clock3, Inbox, Loader2, RefreshCcw, XCircle } from 'lucide-react';
 
+import { decisionBody, decisionChoices, type DecisionChoice } from '@/lib/limits/decision';
 import { DECLINE_REASON_MIN, LARGE_GRANT_LINES, REASON_MAX, formatLimit } from '@/lib/limits/rules';
 import { stampWords } from '@/lib/schedule/rules';
 import type { StaffRequestWire } from '@/lib/server/business-limits';
 
 type Queue = { open: StaffRequestWire[]; recent: StaffRequestWire[] };
-type Choice = 'approve' | 'approve_smaller' | 'decline';
+type Choice = DecisionChoice;
 
 /**
  * Owners' requests for higher limits on automatic payments, for compliance and
@@ -156,7 +157,7 @@ function RequestCard({ request, onDecided, onError }: { request: StaffRequestWir
       const response = await fetch(`/api/admin/limits/${request.id}`, {
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ action: choice, ...(choice === 'approve_smaller' ? { granted: smaller } : {}), ...(choice === 'decline' ? { reason } : {}) }),
+        body: JSON.stringify(decisionBody(request, choice, { smaller, reason })),
       });
       const body = (await response.json().catch(() => ({}))) as { error?: string; stage?: string };
       if (!response.ok) {
@@ -173,11 +174,8 @@ function RequestCard({ request, onDecided, onError }: { request: StaffRequestWir
     }
   }
 
-  const options: Array<[Choice, string]> = [
-    ['approve', 'Approve as asked'],
-    ['approve_smaller', 'Approve a smaller figure'],
-    ['decline', 'Decline'],
-  ];
+  // When someone else has given the first of two approvals, the figure is theirs: the card offers to agree with it, or to decline.
+  const options = decisionChoices(request);
 
   return (
     <article className="overflow-hidden rounded-2xl border border-[#326273]/20 bg-white shadow-sm" aria-labelledby={`limit-${request.id}`}>
@@ -345,6 +343,7 @@ function BusinessContext({ request }: { request: StaffRequestWire }) {
       </div>
       <div>
         <h4 className="font-black text-[#0c3e48]">Last 30 days</h4>
+        <p className="mt-1.5 text-[#326273]">Automatic payments only. Manual transfers are not counted.</p>
         <dl className="mt-1.5 space-y-1">
           <div><dt className="inline text-[#326273]">Automatic payments: </dt><dd className="inline font-bold tabular-nums">{c.use30.payments}</dd></div>
           <div><dt className="inline text-[#326273]">Paid in all: </dt><dd className="inline font-bold tabular-nums">{c.use30.totalWords}</dd></div>

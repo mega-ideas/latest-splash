@@ -8,7 +8,7 @@ import { call, errorText } from '@/components/transfer/api';
 import { CONTROL, Field, Modal, PrimaryButton, QuietButton, TextInput } from '@/components/transfer/ui';
 import { Card, Loading, Note, Pill, newKey, useLoad } from '@/components/wallet/parts';
 import { WHAT_HAPPENS_NEXT, REASON_MAX, REASON_MIN, limitInputValue, lowerNeedsConfirm, lowerProblems, parseLimitValue, raiseProblems, reasonProblems, type LimitKind, type LimitValues } from '@/lib/limits/rules';
-import { controlsAndLimitsWords, type ControlsFigures } from '@/lib/limits/start';
+import { askedNoteWords, controlsAndLimitsWords, type AskedKind, type ControlsFigures, type SkippedKind } from '@/lib/limits/start';
 import type { LimitWire, LimitsWire, RequestWire } from '@/lib/server/business-limits';
 
 const TEXTAREA = CONTROL.replace('h-11 ', 'min-h-28 py-2.5 leading-6 ');
@@ -86,13 +86,10 @@ export default function LimitsCard({ controls }: { controls?: ControlsFigures | 
     setAsking(true);
     setProblem(null);
     setAskedNote(null);
-    const answer = await call<{ asked?: unknown[]; skipped?: unknown[] }>('/api/limits/answers/ask', { method: 'POST', body: {} });
+    const answer = await call<{ asked?: AskedKind[]; skipped?: SkippedKind[] }>('/api/limits/answers/ask', { method: 'POST', body: {} });
     setAsking(false);
     if (!answer.ok) setProblem(errorText(answer, 'The request was not sent. Nothing was changed.'));
-    else {
-      const count = answer.body?.asked?.length ?? 0;
-      setAskedNote(count > 0 ? `Sent. Splash is reviewing ${count === 1 ? 'your request' : `your ${count} requests`}. ${WHAT_HAPPENS_NEXT}` : 'There is nothing more to ask for: your limits already cover what you told us, or a request is already open.');
-    }
+    else setAskedNote(askedNoteWords(answer.body?.asked ?? [], answer.body?.skipped ?? []));
     reload();
   }
 
@@ -109,7 +106,7 @@ export default function LimitsCard({ controls }: { controls?: ControlsFigures | 
         {problem ? <Note tone="error">{problem}</Note> : null}
 
         {start.headline ? (
-          <div className="space-y-2 rounded-xl bg-[#F6F0ED] p-3" aria-labelledby="limits-start-title">
+          <div role="group" className="space-y-2 rounded-xl bg-[#F6F0ED] p-3" aria-labelledby="limits-start-title">
             <p id="limits-start-title" className="text-[13px] font-bold text-[#0c3e48]">How your limits started</p>
             <p className="max-w-[62ch] text-[13px] leading-5 text-[#1F4452]">{start.headline}</p>
             {start.capped ? <p className="max-w-[62ch] text-[13px] leading-5 text-[#1F4452]">{start.capped}</p> : null}
@@ -188,6 +185,7 @@ function ControlsBlock({ controls, limits }: { controls?: ControlsFigures | null
             ))}
           </dl>
           <p className="text-[13px] leading-5 text-[#1F4452]">{words.limits.says}</p>
+          <p className="text-[13px] leading-5 text-[#326273]">{words.limits.dailyNote}</p>
         </div>
       </div>
       <p className="max-w-[62ch] text-[13px] leading-5 text-[#1F4452]">{words.order}</p>

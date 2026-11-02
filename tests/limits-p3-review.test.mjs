@@ -182,8 +182,9 @@ test('the staff card says its 30 days count automatic payments only', () => {
 
 test('"How your limits started" is a named group, not a bare div with a label', () => {
   const text = read('components/settings/LimitsCard.tsx');
-  assert.doesNotMatch(text, /<div[^>]*aria-labelledby="limits-start-title"/, 'aria-labelledby on a plain div is ignored');
-  assert.match(text, /<(section|div)[^>]*(role="group"[^>]*aria-labelledby="limits-start-title"|aria-labelledby="limits-start-title"[^>]*role="group")/);
+  const tag = text.match(/<(div|section)\b[^>]*aria-labelledby="limits-start-title"[^>]*>/);
+  assert.ok(tag, 'the block is labelled by its title');
+  assert.ok(tag[1] === 'section' || /role="group"/.test(tag[0]), 'aria-labelledby on a plain div is ignored; give it a role');
 });
 
 // ─── Two tabs ────────────────────────────────────────────────────────────────

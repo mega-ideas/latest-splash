@@ -30,7 +30,7 @@
  *
  * Pure and client-safe. Money is USDC minor units (6 decimals) as bigint.
  */
-import { DEFAULT_LIMITS, LIMIT_SANITY_MAX, formatLimit, type LimitKind, type LimitValues } from './rules.ts';
+import { DEFAULT_LIMITS, LIMIT_SANITY_MAX, LIMIT_WORDS, UNCHOSEN_DAILY_CAP, WHAT_HAPPENS_NEXT, formatLimit, type LimitKind, type LimitValues } from './rules.ts';
 
 export const FORMULA_VERSION = 1;
 
@@ -287,13 +287,36 @@ export function startWhy(p: Extract<StartProposal, { ok: true }>, kind: StartKin
   return `We started you at ${usdc(p.limits[kind])} because you told us ${toldUsWords(p)}.`;
 }
 
+// ─── After "Ask for higher limits" ───
+
+export type AskedKind = { kind: string; replayed?: boolean };
+export type SkippedKind = { kind: string; why: 'fits' | 'restore' | 'open' | 'closed' | 'refused'; error?: string };
+
+const labelOf = (kind: string): string => `“${kind in LIMIT_WORDS ? LIMIT_WORDS[kind as LimitKind].label : kind}”`;
+const joinWords = (parts: string[]): string => (parts.length <= 1 ? (parts[0] ?? '') : `${parts.slice(0, -1).join(', ')} and ${parts[parts.length - 1]}`);
+
+/**
+ * What to tell the owner after "Ask for higher limits", per limit: what was sent, what Splash had already answered (the
+ * same ask would only bring the same answer back), and what was refused, with the reason. "There is nothing more to ask
+ * for" is said only when nothing was sent and nothing was refused or closed.
+ */
+export function askedNoteWords(asked: AskedKind[], skipped: SkippedKind[]): string {
+  const parts: string[] = [];
+  if (asked.length > 0) parts.push(`Sent. Splash is reviewing ${asked.length === 1 ? 'your request' : `your ${asked.length} requests`}. ${WHAT_HAPPENS_NEXT}`);
+  const closed = skipped.filter((s) => s.why === 'closed').map((s) => labelOf(s.kind));
+  if (closed.length > 0) parts.push(`Splash already answered your request for ${joinWords(closed)}, so nothing new was sent for it. Change your answers, or use Ask for more on that limit.`);
+  for (const s of skipped.filter((x) => x.why === 'refused')) parts.push(`The request for ${labelOf(s.kind)} was not sent. ${s.error ?? 'Nothing was changed.'}`);
+  if (parts.length === 0) return 'There is nothing more to ask for: your limits already cover what you told us, or a request is already open.';
+  return parts.join(' ');
+}
+
 // ─── Controls and Limits, together ───────────────────────────────────────────
 
 export type ControlsFigures = { perTransferUsd: number; dailyUsd: number };
 export type Figure = { label: string; value: string };
 export type ControlsAndLimitsWords = {
   controls: { title: string; figures: Figure[]; says: string; unavailable: string | null };
-  limits: { title: string; figures: Figure[]; says: string };
+  limits: { title: string; figures: Figure[]; says: string; /** Said under the daily row: a day of automatic payments is held to the unchosen cap until the owners choose one. */ dailyNote: string };
   /** Which applies when: stated as the code is. */
   order: string;
   /** The second-approval line, which sits beside both. */
@@ -325,6 +348,7 @@ export function controlsAndLimitsWords(controls: ControlsFigures | null, limits:
         { label: 'In a month', value: formatLimit('monthly', limits.monthly) },
       ],
       says: 'These guard the payments Splash makes for you automatically, inside an allowance you gave.',
+      dailyNote: `Until your owners choose a daily amount in the allowance they give for automatic payments, a day of automatic payments is held to ${formatLimit('daily', UNCHOSEN_DAILY_CAP)}, even where the daily limit above is higher.`,
     },
     order: 'A payment is held to one set, never both: the payments your team sends to Controls, and the payments Splash makes for you automatically to Limits. So there is no order between them. To change one, change it where it is set.',
     approvalLine: 'Whichever limit applies, an automatic payment above your second-approval line waits for an owner.',

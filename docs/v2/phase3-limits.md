@@ -391,6 +391,24 @@ approval a large grant is waiting for.
   from Settings, Limits; answering never changes their limits, it shows what a new business like
   them would start at and lets them ask staff. If you want an answer to move an existing
   business's limits without staff, that is a different rule.
+- **Review fixes (independent review of the starting limits).**
+  - The second approver of a grant sees one choice, "Approve <the first approver's figure>", and
+    decline. A click sends that figure (a plain approve when it was the figure asked for, "approve a
+    smaller figure" with the first approver's figure when it was not), so the label and the request
+    agree (`lib/limits/decision.ts`). The server is unchanged: any other figure is still refused.
+  - "Ask for higher limits" reports a request Splash already declined, or the owner cancelled, as
+    closed ("Splash already answered ... Change your answers, or use Ask for more") and not as
+    sent; a refusal is said with its reason (`askedNoteWords` in `lib/limits/start.ts`). The key is
+    still the answers and their version, so new answers are a new ask.
+  - The Limits screen says, under the limits, that a day of automatic payments is held to the
+    unchosen cap (5,000 USDC) until the owners choose a daily amount in their allowance.
+  - The staff card says its 30 days count automatic payments only; manual transfers are not counted.
+  - Two first-time saves with different answers: the later one now saves its own answers (version
+    + 1) instead of being told the earlier tab's figures.
+  - Not changed, on purpose: a business that mistyped its first answer cannot re-start itself (it
+    asks staff, as any raise does; letting a started business re-start would be a new rule, Sky's
+    to decide), and the staff queue still reads every request (its size is the number of requests
+    ever made, small and bounded by owners asking by hand).
 - Whether support staff should ever see the queue read-only (today: no).
 - Schedule `/api/cron/limit-changes` every 15 minutes in production. Without it a
   limit still starts on the next read, but the owners are not told it started
