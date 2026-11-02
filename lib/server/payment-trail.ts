@@ -19,6 +19,16 @@
  *                  seal are down, the decision is still on record and the row
  *                  waits unsealed; `sealPendingDecisions` seals it later. A
  *                  decision is never stopped by a sealing failure.
+ *   recovery       the signature, the decline or the owner's answer is saved
+ *                  FIRST, and the call that records it here can fail (a
+ *                  database fault, a timeout) and is swallowed so it never
+ *                  stops the decision. `sweepPaymentTrail` (run by the cron)
+ *                  therefore derives any decision row that is missing from what
+ *                  the signing layer and the asks already hold (a signer's
+ *                  signed_at or declined_at; an owner's answer to an ask), with
+ *                  the time it was made, then seals what is waiting. It makes
+ *                  each row once (the unique index), for a payment whose own
+ *                  record carries a trail, in its own business only.
  *
  * Names are inside the encrypted records only. Nothing stored in plain text
  * (these rows, the payment's record hash and blob id) or anchored on chain holds
@@ -31,12 +41,12 @@
  */
 import { randomUUID } from 'node:crypto';
 
-import { and, asc, eq, isNull } from 'drizzle-orm';
+import { and, asc, eq, inArray, isNotNull, isNull, notExists } from 'drizzle-orm';
 
-import { memberships, paymentTrailEvents, walletApprovalAsks, walletTransfers } from '../db/schema.ts';
+import { memberships, paymentTrailEvents, users, walletApprovalAsks, walletSigningSigners, walletTransfers } from '../db/schema.ts';
 import type { StaffRuleFacts } from '../transfer/plan.ts';
 import type { PaymentTrail, RecordSealer } from './payment-record.ts';
-import { declineSnapshot, type DrizzleDb } from './wallet-signing-store.ts';
+import type { DrizzleDb } from './wallet-signing-store.ts';
 import { memberRole } from './wallet-authority.ts';
 
 export type DecisionKind = 'signed' | 'declined' | 'ask_accepted' | 'ask_declined';
@@ -46,6 +56,21 @@ const ROLE: Record<string, TrailRole> = { admin: 'owner', checker: 'approver', m
 const ACTOR_ROLE: Record<string, PaymentTrail['startedBy']['role']> = { OWNER: 'owner', APPROVER: 'approver', MAKER: 'staff' };
 
 const orNull = (v: string | null | undefined) => (v && v.trim() ? v : null);
+
+/**
+ * A person's name and job title exactly as they are stored. The sealed record is encrypted evidence, not a screen: it keeps what was stored
+ * (a digit, a symbol or an emoji in a name stays), whereas the display cleaning of lib/team/declined-by.ts belongs on screens. The user id is
+ * kept beside it, so the person is identified whatever their name was. Null when nothing is stored.
+ */
+export async function rawPerson(db: Pick<DrizzleDb, 'select'>, orgId: string, userId: string): Promise<{ name: string | null; title: string | null }> {
+  const [row] = await db
+    .select({ name: users.name, title: memberships.title })
+    .from(users)
+    .leftJoin(memberships, and(eq(memberships.userId, users.id), eq(memberships.orgId, orgId)))
+    .where(eq(users.id, userId))
+    .limit(1);
+  return { name: orNull(row?.name), title: orNull(row?.title) };
+}
 
 /**
  * The trail for a payment that is being built: from what the server holds (the person, their role and their name and title as they are
@@ -62,13 +87,13 @@ export async function buildPaymentTrail(
     at: Date;
   },
 ): Promise<PaymentTrail> {
-  const who = await declineSnapshot(db, input.orgId, input.actor.userId);
+  const who = await rawPerson(db, input.orgId, input.actor.userId);
   const owners = await db
     .select({ userId: memberships.userId })
     .from(memberships)
     .where(and(eq(memberships.orgId, input.orgId), eq(memberships.role, 'admin')));
   return {
-    startedBy: { userId: input.actor.userId, role: ACTOR_ROLE[input.actor.role] ?? 'staff', name: orNull(who.name), title: orNull(who.title) },
+    startedBy: { userId: input.actor.userId, role: ACTOR_ROLE[input.actor.role] ?? 'staff', name: who.name, title: who.title },
     startedAt: input.at.toISOString(),
     route: input.route,
     rule: input.rule
@@ -109,16 +134,20 @@ async function transferOf(db: DrizzleDb, input: Pick<DecisionInput, 'orgId' | 's
   return null;
 }
 
-/** The plain decision record. Keys in a fixed order; names are here, inside the encrypted record, and nowhere stored in plain text. */
+/**
+ * The plain decision record. Keys in a fixed order; names are here, inside the encrypted record, and nowhere stored in plain text. The
+ * name and title are read when the record is sealed: normally the moment of the decision, later only if sealing had to wait for the
+ * services, and then the person's id (always in the record) is what identifies them, whatever they were called by then.
+ */
 async function plainDecision(db: DrizzleDb, row: Pick<TrailRow, 'orgId' | 'transferId' | 'baseHash' | 'kind' | 'userId' | 'role' | 'decidedAt'>): Promise<string> {
-  const who = await declineSnapshot(db, row.orgId, row.userId);
+  const who = await rawPerson(db, row.orgId, row.userId);
   return JSON.stringify({
     schema: 'splash.payment-decision.v1',
     org: row.orgId,
     transfer: row.transferId,
     base: row.baseHash,
     event: row.kind,
-    by: { userId: row.userId, role: row.role, name: orNull(who.name), title: orNull(who.title) },
+    by: { userId: row.userId, role: row.role, name: who.name, title: who.title },
     at: row.decidedAt.toISOString(),
   });
 }
@@ -200,4 +229,94 @@ export async function sealPendingDecisions(deps: Required<Pick<DecisionDeps, 'db
     else tally.failed += 1;
   }
   return tally;
+}
+
+type Missing = { orgId: string; transferId: string; userId: string; kind: DecisionKind; at: Date; signingRequestId: string | null; askId: string | null };
+
+/**
+ * Decisions that happened but are not on record: every signature and decline of a payment's signing request, and every owner's answer to
+ * an ask, for a payment whose own record carries a trail (it has a record hash), that has no row yet. Read straight from the signing layer
+ * and the asks, per business (a signer's row joins only the payment of its own business). An ask is an answer only when it is declined, or
+ * accepted with its signing request opened: a claim still being made is not one.
+ */
+async function missingDecisions(db: DrizzleDb, limit: number): Promise<Missing[]> {
+  const out: Missing[] = [];
+  const noRow = (kind: DecisionKind, userId: unknown) =>
+    notExists(
+      db
+        .select({ id: paymentTrailEvents.id })
+        .from(paymentTrailEvents)
+        .where(and(eq(paymentTrailEvents.transferId, walletTransfers.id), eq(paymentTrailEvents.userId, userId as never), eq(paymentTrailEvents.kind, kind))),
+    );
+  for (const kind of ['signed', 'declined'] as const) {
+    const when = kind === 'signed' ? walletSigningSigners.signedAt : walletSigningSigners.declinedAt;
+    const rows = await db
+      .select({ orgId: walletSigningSigners.orgId, requestId: walletSigningSigners.requestId, userId: walletSigningSigners.userId, at: when, transferId: walletTransfers.id })
+      .from(walletSigningSigners)
+      .innerJoin(walletTransfers, and(eq(walletTransfers.orgId, walletSigningSigners.orgId), eq(walletTransfers.signingRequestId, walletSigningSigners.requestId)))
+      .where(and(isNotNull(when), isNotNull(walletTransfers.recordHash), noRow(kind, walletSigningSigners.userId)))
+      .orderBy(asc(when))
+      .limit(limit);
+    for (const r of rows as Array<{ orgId: string; requestId: string; userId: string; at: Date | null; transferId: string }>) {
+      if (r.at) out.push({ orgId: r.orgId, transferId: r.transferId, userId: r.userId, kind, at: r.at, signingRequestId: r.requestId, askId: null });
+    }
+  }
+  for (const kind of ['ask_declined', 'ask_accepted'] as const) {
+    const answered = kind === 'ask_declined' ? eq(walletApprovalAsks.status, 'declined') : and(inArray(walletApprovalAsks.status, ['signing', 'approved']), isNotNull(walletApprovalAsks.signingRequestId));
+    const rows = await db
+      .select({ orgId: walletApprovalAsks.orgId, askId: walletApprovalAsks.id, userId: walletApprovalAsks.decidedBy, at: walletApprovalAsks.decidedAt, transferId: walletTransfers.id })
+      .from(walletApprovalAsks)
+      .innerJoin(walletTransfers, and(eq(walletTransfers.orgId, walletApprovalAsks.orgId), eq(walletTransfers.askId, walletApprovalAsks.id)))
+      .where(and(answered, isNotNull(walletApprovalAsks.decidedBy), isNotNull(walletApprovalAsks.decidedAt), isNotNull(walletTransfers.recordHash), noRow(kind, walletApprovalAsks.decidedBy)))
+      .orderBy(asc(walletApprovalAsks.decidedAt))
+      .limit(limit);
+    for (const r of rows as Array<{ orgId: string; askId: string; userId: string | null; at: Date | null; transferId: string }>) {
+      if (r.userId && r.at) out.push({ orgId: r.orgId, transferId: r.transferId, userId: r.userId, kind, at: r.at, signingRequestId: null, askId: r.askId });
+    }
+  }
+  return out;
+}
+
+/**
+ * Write the decision rows that are missing (see `missingDecisions`), each with the time it was made and bound to the payment's own record.
+ * A person who is no longer a member of the business has no role to record, and none is invented: it is counted as skipped.
+ */
+export async function recoverMissingDecisions(deps: Pick<DecisionDeps, 'db'>, limit = 100): Promise<{ derived: number; skipped: number }> {
+  const tally = { derived: 0, skipped: 0 };
+  for (const m of await missingDecisions(deps.db, limit)) {
+    const role = ROLE[(await memberRole(deps.db, m.orgId, m.userId)) ?? ''];
+    if (!role) {
+      tally.skipped += 1;
+      continue;
+    }
+    const [transfer] = await deps.db.select({ recordHash: walletTransfers.recordHash }).from(walletTransfers).where(and(eq(walletTransfers.orgId, m.orgId), eq(walletTransfers.id, m.transferId))).limit(1);
+    const made = await deps.db
+      .insert(paymentTrailEvents)
+      .values({
+        id: `pte_${randomUUID()}`,
+        orgId: m.orgId,
+        transferId: m.transferId,
+        signingRequestId: m.signingRequestId,
+        askId: m.askId,
+        userId: m.userId,
+        role,
+        kind: m.kind,
+        decidedAt: m.at,
+        baseHash: transfer?.recordHash ?? null,
+      })
+      .onConflictDoNothing()
+      .returning({ id: paymentTrailEvents.id });
+    tally.derived += made.length;
+  }
+  return tally;
+}
+
+/**
+ * The cron's pass over the audit trail: bring back any decision whose write failed, then seal everything that is waiting. Neither step
+ * throws for a bad row; a failure to seal leaves the row on record for the next run.
+ */
+export async function sweepPaymentTrail(deps: Required<Pick<DecisionDeps, 'db' | 'seal'>> & Pick<DecisionDeps, 'now'>, limit = 50): Promise<{ derived: number; skipped: number; sealed: number; failed: number }> {
+  const recovered = await recoverMissingDecisions(deps, limit * 2);
+  const sealed = await sealPendingDecisions(deps, limit);
+  return { ...recovered, ...sealed };
 }

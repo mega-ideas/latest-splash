@@ -140,7 +140,8 @@ export type SigningDeps = {
   sponsorDailyBudgetMist?: bigint;
   /**
    * Called after a signer's signature or decline is recorded, so the audit proof of the payment says who approved it and who
-   * declined (lib/server/payment-trail.ts). It never stops a signature: a failure here is swallowed and the decision is still on record.
+   * declined (lib/server/payment-trail.ts). It never stops a signature: a failure here is swallowed. The signature itself stands (the
+   * signer row holds signed_at or declined_at), and the cron's `sweepPaymentTrail` derives the missing trail row from it.
    */
   onDecision?: (decision: { orgId: string; signingRequestId: string; userId: string; kind: 'signed' | 'declined'; at: Date }) => Promise<unknown>;
 };
@@ -151,7 +152,7 @@ async function decided(deps: Pick<SigningDeps, 'onDecision'>, decision: { orgId:
   try {
     await deps.onDecision(decision);
   } catch {
-    // The signature or the decline stands; the trail is brought up to date by the next sweep.
+    // The signature or the decline stands; the sweep (sweepPaymentTrail) derives the missing trail row from the signer's own row.
   }
 }
 

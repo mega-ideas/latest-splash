@@ -448,7 +448,7 @@ async function tellTrail(hook: AskDecisionHook | undefined, decision: Parameters
   try {
     await hook(decision);
   } catch {
-    // The answer stands; the trail is brought up to date by the next sweep.
+    // The answer stands; the sweep (sweepPaymentTrail) derives the missing trail row from the ask's own row.
   }
 }
 
