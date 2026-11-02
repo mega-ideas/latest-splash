@@ -31,11 +31,14 @@ export async function POST(request: Request, { params }: { params: Promise<{ id:
   const { orgId, authority, ctx, db } = route;
   const { id } = await params;
   const body = await readJsonBody(request);
+  // The audit proof of the payment says who approved it and who declined (v2 Phase 3).
+  const { liveDecisionHook } = await import('@/lib/server/payment-trail-deps');
+  const onDecision = liveDecisionHook(db);
   const action = String(body.action ?? '');
 
   if (action === 'withdraw') return asResponse(await cancelApprovalAsk(db, { orgId, userId: authority.userId, askId: id }));
   if (action === 'decline') {
-    return asResponse(await declineApprovalAsk(db, { orgId, userId: authority.userId, askId: id, reason: typeof body.reason === 'string' ? body.reason : null }));
+    return asResponse(await declineApprovalAsk(db, { orgId, userId: authority.userId, askId: id, reason: typeof body.reason === 'string' ? body.reason : null }, { onDecision }));
   }
   if (action !== 'accept') return refusal(400, 'Say whether you accept, decline or withdraw this.');
 
@@ -55,7 +58,7 @@ export async function POST(request: Request, { params }: { params: Promise<{ id:
   }
   const { spendSecondApprovalOpener } = await import('@/lib/server/spend-rules-deps');
   const result = await acceptApprovalAsk(
-    { db, ctx, secondApproval: mode === 'second_approval' ? await spendSecondApprovalOpener(route) : undefined },
+    { db, ctx, secondApproval: mode === 'second_approval' ? await spendSecondApprovalOpener(route) : undefined, onDecision },
     { orgId, userId: authority.userId, askId: id, mode, wallet, maxFeeMinor, confirmFeeChange: body.confirmFeeChange === true, settleByMs },
   );
   return asResponse(result, result.ok ? { ask: result.ask, request: result.request } : undefined);

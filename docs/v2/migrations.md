@@ -128,3 +128,25 @@ again **with every value `0079` listed plus the new one** (a shorter list would
 refuse lines already written; `tests/member-title.test.mjs` compares the two
 lists). Safe to run again; nothing is dropped but those two constraints, by name
 and `IF EXISTS`.
+
+## `0084_exchange_name_sharing`
+
+`0084` adds two boolean columns, both `NOT NULL DEFAULT true`: `organizations.share_names_with_exchange`
+(the business's choice, owners only) and `memberships.share_name_with_exchange` (the person's own). Every
+business and every member starts with sharing **on**, which is what the Travel Rule message did before (it
+named the person), and no row is rewritten. If either is off, the message to the exchange reads "Sent by
+COMPANY NAME" and carries no person's name or title.
+
+It also adds `exchange_name_sharing_changed` to the audit trail's allowed actions. A CHECK cannot be
+extended, so `wallet_authority_events_action_check` is dropped and added again **with every value `0083`
+listed plus the new one** (`tests/exchange-names.test.mjs` compares the two lists). Safe to run again;
+nothing is dropped but that constraint, by name and `IF EXISTS`.
+
+## `0085_payment_trail`
+
+`0085` adds two nullable text columns to `wallet_transfers` (`record_hash`, `record_blob_id`: the hash and
+the Walrus blob id of the payment's own sealed record, kept so decision records can name it; existing rows
+stay empty) and a new table, `payment_trail_events`: one row per signature, decline or owner's answer to an
+ask, holding internal ids, roles, times and hashes only (no name in plain text), unique per payment, person
+and kind, with a trigger that refuses any rewrite except sealing a row once. It inserts nothing. Safe to run
+again (`IF NOT EXISTS`, `OR REPLACE`).

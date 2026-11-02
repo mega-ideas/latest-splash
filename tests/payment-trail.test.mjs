@@ -48,7 +48,8 @@ const EXCHANGE = normalizeSuiAddress(`0x${'79'.repeat(32)}`);
 const NAME = 'Maya Rahman-Okafor';
 const TITLE = 'Head of Buying';
 const BASE_HASH = '04'.repeat(32);
-const noNames = (value) => assert.doesNotMatch(typeof value === 'string' ? value : JSON.stringify(value), /Maya|Rahman|Okafor|Head of Buying|Founder Person/);
+const appendOnly = (e) => /append-only/.test(String(e.cause?.message ?? e.message));
+const noNames = (value) => assert.doesNotMatch(typeof value === 'string' ? value : JSON.stringify(value, (_k, v) => (typeof v === 'bigint' ? v.toString() : v)), /Maya|Rahman|Okafor|Head of Buying|Founder Person/);
 
 /** A Seal and a Walrus that remember what they were given. The plain text is only ever in `plains`; `stored` is what Walrus holds. */
 function sealing(over = {}) {
@@ -114,7 +115,7 @@ test('the record gains who, when, the route and the rule, and a record without t
     startedAt: '2026-11-02T09:00:00.000Z',
     route: 'staff_rule',
     rule: { perPaymentMaxMinor: '2000000000', spendableNowMinor: '15000000000', status: 'active', startsAtMs: null, expiresAtMs: null },
-    mayApprove: ['u-founder'],
+    mayApprove: ['u-founder', 'u-three', 'u-two'],
   };
   const withTrail = JSON.parse(canonicalRecord({ ...plain, trail }));
   assert.equal(withTrail.schema, 'splash.payment-record.v2');
@@ -144,16 +145,16 @@ test('with BOTH switches off the sealed record still holds who started the payme
   assert.equal(record.trail.startedBy.role, 'staff');
   assert.equal(record.trail.startedBy.name, NAME, 'the name is inside the encrypted record');
   assert.equal(record.trail.startedBy.title, TITLE);
-  assert.equal(record.trail.startedAt, paid.transfer.createdAt instanceof Date ? paid.transfer.createdAt.toISOString() : new Date(paid.transfer.createdAt).toISOString());
+  const [row] = await t.db.select().from(schema.walletTransfers);
+  assert.equal(record.trail.startedAt, row.createdAt.toISOString(), 'the time the payment was built');
   assert.equal(record.trail.route, 'staff_rule');
   assert.equal(record.trail.rule.perPaymentMaxMinor, U(2_000).toString());
-  assert.deepEqual(record.trail.mayApprove, ['u-founder']);
+  assert.deepEqual(record.trail.mayApprove, ['u-founder', 'u-three', 'u-two'], 'the owners who could approve it');
   assert.deepEqual(s.plains[0].allowlist, ['acme', 'auditor']);
   // What is stored in plain text: ciphertext only. What the chain would hold: the hash of the plain record.
   assert.equal(s.stored.length, 1);
   noNames(s.stored);
   assert.ok(!s.stored[0].includes('u-staff'));
-  const [row] = await t.db.select().from(schema.walletTransfers);
   assert.equal(row.recordHash, createHash('sha256').update(s.plains[0].raw).digest('hex'), 'the hash kept with the payment is the hash of the plain record');
   assert.match(row.recordHash, /^[0-9a-f]{64}$/);
   assert.equal(row.recordBlobId, Buffer.from('blob1').toString('hex'));
@@ -236,7 +237,7 @@ test('an owner\'s answer to a staff member\'s ask is recorded, declined or accep
   const asked = await T.createTransfer(d, STAFF, amountInput(t.recipientId, 5_000, { clientKey: 'tx_key_000777' }));
   assert.equal(asked.ok, true, JSON.stringify(asked));
   assert.equal(asked.transfer.route, 'asked_owners');
-  const declined = await declineApprovalAsk(t.db, { orgId: 'acme', userId: 'u-founder', askId: asked.ask.id, reason: 'not now' }, { onDecision: hook });
+  const declined = await declineApprovalAsk(t.db, { orgId: 'acme', userId: 'u-founder', askId: asked.ask.id, reason: 'not now', now: () => t.w.signing.now() }, { onDecision: hook });
   assert.equal(declined.ok, true, JSON.stringify(declined));
   const rows = await decisionsOf(t.db, 'acme', asked.transfer.id);
   assert.deepEqual(rows.map((r) => [r.userId, r.kind]), [['u-founder', 'ask_declined']]);
@@ -282,14 +283,14 @@ test('a record that cannot be sealed never stops the decision: it waits, unseale
   assert.equal(row.walrusBlobId, null);
   assert.equal(row.userId, 'u-staff', 'the decision itself is on record');
   // A sealed record cannot be rewritten to say something else.
-  await assert.rejects(() => t.db.update(schema.paymentTrailEvents).set({ userId: 'u-other' }).where(eq(schema.paymentTrailEvents.id, row.id)), /append-only/);
+  await assert.rejects(() => t.db.update(schema.paymentTrailEvents).set({ userId: 'u-other' }).where(eq(schema.paymentTrailEvents.id, row.id)), appendOnly);
   const up = sealing();
   const swept = await sealPendingDecisions({ db: t.db, seal: up.sealer, now: () => new Date() });
   assert.deepEqual(swept, { sealed: 1, failed: 0 });
   [row] = await decisionsOf(t.db, 'acme', paid.transfer.id);
   assert.match(row.contentHash, /^[0-9a-f]{64}$/);
   assert.equal((await sealPendingDecisions({ db: t.db, seal: up.sealer, now: () => new Date() })).sealed, 0, 'sealed once');
-  await assert.rejects(() => t.db.update(schema.paymentTrailEvents).set({ walrusBlobId: 'ff' }).where(eq(schema.paymentTrailEvents.id, row.id)), /append-only/);
+  await assert.rejects(() => t.db.update(schema.paymentTrailEvents).set({ walrusBlobId: 'ff' }).where(eq(schema.paymentTrailEvents.id, row.id)), appendOnly);
   // Fail closed in production.
   const demo = makeRecordSealer({ seal: { encrypt: async () => ({ ciphertext: 'ct', policy: { policyId: 'DEMO', mode: 'demo' } }) }, store: async () => ({ blobId: 'DEMO_blob', mode: 'demo' }), env: { NODE_ENV: 'production' } });
   assert.deepEqual(await demo('{}'), { ok: false });

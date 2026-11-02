@@ -89,7 +89,7 @@ async function world() {
 
 const rows = (shown) => Object.fromEntries(shown.text.rows.map((r) => [r.label, r.value]));
 const nobody = (value) => {
-  const text = typeof value === 'string' ? value : JSON.stringify(value);
+  const text = typeof value === 'string' ? value : JSON.stringify(value, (_k, v) => (typeof v === 'bigint' ? v.toString() : v));
   assert.doesNotMatch(text, /Maya|Rahman|Okafor|Head of Buying/);
 };
 

@@ -589,6 +589,20 @@
       "when": 1795737600000,
       "tag": "0083_member_title",
       "breakpoints": true
+    },
+    {
+      "idx": 84,
+      "version": "7",
+      "when": 1795824000000,
+      "tag": "0084_exchange_name_sharing",
+      "breakpoints": true
+    },
+    {
+      "idx": 85,
+      "version": "7",
+      "when": 1795910400000,
+      "tag": "0085_payment_trail",
+      "breakpoints": true
     }
   ]
 }

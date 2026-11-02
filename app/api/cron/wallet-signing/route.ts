@@ -11,6 +11,8 @@
  *      failed, since those bytes can never land; otherwise it stays unknown
  *      and keeps its dedupe key.
  *
+ * 3. the decision records (who signed, who declined, v2 Phase 3) that could not be sealed when they were made are sealed now.
+ *
  * Health: it answers 502 if any partial signature is still held for a
  * request that is no longer open, or any request is still submitting past
  * the lease after reconciling. Run it every few minutes; an expired request
@@ -59,6 +61,9 @@ async function handle(request: Request) {
       if (live.ok && live.ctx.signing.onExecuted) await live.ctx.signing.onExecuted(executed);
     },
   });
+  // A failure to seal never fails the sweep: the decisions are on record, and the next run tries again.
+  const { sweepDecisionRecords } = await import('@/lib/server/payment-trail-deps');
+  const decisions = await sweepDecisionRecords(db).catch(() => ({ sealed: 0, failed: 0 }));
   const lingering = await countLingeringSignaturesForStaff(db);
   const stuck = await countStuckSubmissionsForStaff(db, new Date(now.getTime() - SUBMISSION_LEASE_MS));
   if (lingering > 0 || stuck > 0 || reconciled.errors > 0) {
@@ -67,7 +72,7 @@ async function handle(request: Request) {
       { status: 502 },
     );
   }
-  return NextResponse.json({ success: true, expired, reconciled });
+  return NextResponse.json({ success: true, expired, reconciled, decisions });
 }
 
 export async function GET(request: Request) {

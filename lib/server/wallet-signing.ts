@@ -138,7 +138,22 @@ export type SigningDeps = {
   now?: () => Date;
   /** Override of WALLET_SPONSOR_DAILY_BUDGET_MIST (tests). */
   sponsorDailyBudgetMist?: bigint;
+  /**
+   * Called after a signer's signature or decline is recorded, so the audit proof of the payment says who approved it and who
+   * declined (lib/server/payment-trail.ts). It never stops a signature: a failure here is swallowed and the decision is still on record.
+   */
+  onDecision?: (decision: { orgId: string; signingRequestId: string; userId: string; kind: 'signed' | 'declined'; at: Date }) => Promise<unknown>;
 };
+
+/** Tell the audit proof about a decision. Never throws, never waits on a failure to change the decision. */
+async function decided(deps: Pick<SigningDeps, 'onDecision'>, decision: { orgId: string; signingRequestId: string; userId: string; kind: 'signed' | 'declined'; at: Date }): Promise<void> {
+  if (!deps.onDecision) return;
+  try {
+    await deps.onDecision(decision);
+  } catch {
+    // The signature or the decline stands; the trail is brought up to date by the next sweep.
+  }
+}
 
 export type SignerSpec =
   | { kind: 'single'; userId: string; publicKey: string }
@@ -844,6 +859,7 @@ export async function submitPartialSignature(
 
   const recorded = await recordPartialSignature(deps.db, { orgId: input.orgId, requestId: request.id, userId: input.userId, signature: input.signature, now });
   if (!recorded) return fail(409, 'already_signed', 'this signature was not accepted: the request changed, or you have already signed');
+  await decided(deps, { orgId: input.orgId, signingRequestId: request.id, userId: input.userId, kind: 'signed', at: now });
 
   const updated = (await readSigningRequest(deps.db, input.orgId, request.id)) as StoredRequest;
   if (signedWeight(updated) >= updated.threshold) {
@@ -1043,7 +1059,7 @@ export async function cancelSigningRequest(
  * longer reach the threshold.
  */
 export async function declineSigningRequest(
-  deps: Pick<SigningDeps, 'db' | 'now'>,
+  deps: Pick<SigningDeps, 'db' | 'now' | 'onDecision'>,
   input: { orgId: string; userId: string; id: string },
 ): Promise<{ ok: true; closed: boolean } | SigningFailure> {
   const now = (deps.now ?? (() => new Date()))();
@@ -1055,6 +1071,7 @@ export async function declineSigningRequest(
   if (request.status !== 'collecting') return fail(409, 'closed', `this request is ${request.status}`);
   const recorded = await recordDecline(deps.db, { orgId: input.orgId, requestId: input.id, userId: input.userId, now });
   if (!recorded) return fail(409, 'already_answered', 'you have already signed or declined this request');
+  await decided(deps, { orgId: input.orgId, signingRequestId: input.id, userId: input.userId, kind: 'declined', at: now });
   const updated = (await readSigningRequest(deps.db, input.orgId, input.id)) as StoredRequest;
   if (reachableWeight(updated) < updated.threshold) {
     const closed = await closeSigningRequest(deps.db, {

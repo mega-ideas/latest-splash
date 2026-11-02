@@ -107,6 +107,12 @@ export const organizations = pgTable('organizations', {
   /** Wallet spec §2.3 — the org's on-chain BusinessAccount object id. Null
    *  until the AdminCap-gated business_account::verify_business has run. */
   suiBusinessAccountId: text('sui_business_account_id'),
+  /**
+   * The business's choice (owners only; migration 0084): may a person's name go to an exchange in the details of a payment they
+   * sent? On by default. Off: the exchange is told "Sent by COMPANY NAME" and no name or title. Changes only what the exchange is told
+   * and what the confirmation shows; the audit proof is not affected (lib/server/exchange-names.ts).
+   */
+  shareNamesWithExchange: boolean('share_names_with_exchange').notNull().default(true),
   ...timestamps,
 });
 
@@ -214,6 +220,8 @@ export const memberships = pgTable('memberships', {
    * person for themselves (lib/server/team-admin.ts setMemberTitle); read through lib/team/member-title.ts.
    */
   title: text('title'),
+  /** The person's own choice (migration 0084): may their name and title go to an exchange in the details of a payment they sent? On by default; only the person changes it. Either this or the business's switch off means no name is sent. */
+  shareNameWithExchange: boolean('share_name_with_exchange').notNull().default(true),
   /** Who granted it. Null for the first membership in a new organisation,
    *  which has no prior member to do the granting. */
   grantedBy: text('granted_by'),
@@ -2587,6 +2595,9 @@ export const walletTransfers = pgTable('wallet_transfers', {
   signingRequestId: text('signing_request_id').references(() => walletSigningRequests.id),
   askId: text('ask_id').references(() => walletApprovalAsks.id),
   requestedBy: text('requested_by').notNull(),
+  /** The hash of the sealed record made for this payment (hex, sha256 of the plain record) and its Walrus blob id (hex): what the chain anchors, kept so later decision records can name it (migration 0085). */
+  recordHash: text('record_hash'),
+  recordBlobId: text('record_blob_id'),
   ...timestamps,
 }, (table) => [
   uniqueIndex('wallet_transfers_org_key_unique').on(table.orgId, table.clientKey),
@@ -2594,6 +2605,33 @@ export const walletTransfers = pgTable('wallet_transfers', {
   index('wallet_transfers_org_created_idx').on(table.orgId, table.createdAt),
   index('wallet_transfers_request_idx').on(table.signingRequestId),
   index('wallet_transfers_org_requester_idx').on(table.orgId, table.requestedBy),
+]);
+
+/**
+ * One decision about a payment (migration 0085): a signature, a decline, or an owner's answer to a staff member's ask. Internal ids,
+ * times and hashes ONLY: no name is stored here. The name and title are inside the sealed decision record (Seal, on Walrus), which
+ * `content_hash` is the hash of and `walrus_blob_id` points at. Never rewritten: the one allowed change is sealing it, once.
+ */
+export const paymentTrailEvents = pgTable('payment_trail_events', {
+  id: text('id').primaryKey(),
+  orgId: text('org_id').notNull().references(() => organizations.id),
+  transferId: text('transfer_id').notNull().references(() => walletTransfers.id, { onDelete: 'cascade' }),
+  signingRequestId: text('signing_request_id'),
+  askId: text('ask_id'),
+  userId: text('user_id').notNull(),
+  /** The person's role in the business when they decided: owner, approver, staff or viewer. */
+  role: text('role').notNull(),
+  kind: text('kind').notNull(),
+  decidedAt: timestamp('decided_at', { withTimezone: true }).notNull(),
+  /** The payment's own record hash (hex) this decision is bound to; null for a payment made before records were kept with it. */
+  baseHash: text('base_hash'),
+  contentHash: text('content_hash'),
+  walrusBlobId: text('walrus_blob_id'),
+  sealedAt: timestamp('sealed_at', { withTimezone: true }),
+  createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+}, (table) => [
+  uniqueIndex('payment_trail_events_decision_unique').on(table.transferId, table.userId, table.kind),
+  index('payment_trail_events_org_transfer_idx').on(table.orgId, table.transferId),
 ]);
 
 /**

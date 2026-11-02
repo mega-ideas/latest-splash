@@ -4,6 +4,7 @@ import { useState } from 'react';
 import { Fingerprint, Landmark, UserRound } from 'lucide-react';
 
 import AddPersonForm from '@/components/team/AddPersonForm';
+import ExchangeNames from '@/components/team/ExchangeNames';
 import FinanceLeadNote from '@/components/team/FinanceLeadNote';
 import LeaveRequests from '@/components/team/LeaveRequests';
 import LeaveSection from '@/components/team/LeaveSection';
@@ -76,6 +77,7 @@ export default function TeamCard({
           </p>
           {charge.data && charge.data.personsInCharge.length > 0 ? <p className="text-[13px] text-[#326273]">In charge: {charge.data.personsInCharge.map((p) => p.title ? `${p.name} (${p.title})` : p.name).join(', ')}.</p> : null}
           <OwnTitle userId={you.userId} title={you.title} role={you.role} financeLead={false} onChanged={refresh} />
+          <ExchangeNames userId={you.userId} owner={false} />
           <LeaveSection leave={leave} onChanged={refresh} />
         </div>
       </Card>
@@ -104,6 +106,7 @@ export default function TeamCard({
         {manager === 'owner' ? <p className="text-[13px] leading-5 text-[#326273]">{EXISTING_MEMBERS_FUNDS_NOTE}</p> : null}
 
         <OwnTitle userId={you.userId} title={you.title} role={you.role} financeLead={manager === 'finance_lead'} onChanged={refresh} />
+        <ExchangeNames userId={you.userId} owner={manager === 'owner'} />
 
         <ul className="space-y-2" aria-label="Team">
           {members.map((m) => {

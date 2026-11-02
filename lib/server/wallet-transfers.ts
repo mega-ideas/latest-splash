@@ -46,7 +46,7 @@ import { normalizeSuiAddress } from '@mysten/sui/utils';
 import { suppliers, walletApprovalAsks, walletSigningRequests, walletTransferDisclosures, walletTransfers } from '../db/schema.ts';
 import { disclosureText, exchangePurpose, type DisclosureText } from '../compliance/exchange-disclosure.ts';
 import type { TravelRuleProvider } from '../compliance/sumsub.ts';
-import { parseSignedPartners, type PartnerId } from '../partners/signed-partners.ts';
+import type { PartnerId } from '../partners/signed-partners.ts';
 import { validClientKey } from '../funding/wallet-funding.ts';
 import { moveDeliveryOf, MOVE_KIND, type DeliveryKind } from '../recipients/wallet-recipients.ts';
 import { FEE_CEILING_BPS, BPS_DENOM } from '../fees/schedule.ts';
@@ -67,6 +67,7 @@ import {
 } from './exchange-disclosure.ts';
 import { recipientPayable, requestWalletPayment, type WalletContext, type WalletMembers } from './business-wallet.ts';
 import type { PaymentRecorder } from './payment-record.ts';
+import { buildPaymentTrail } from './payment-trail.ts';
 import { cancelSigningRequest, readRequestForSigner, type RequestView } from './wallet-signing.ts';
 import { exchangeAloneOf } from './exchange-alone.ts';
 import { askDeclinerOf, declinersOfRequests, endedByPeople, type DrizzleDb } from './wallet-signing-store.ts';
@@ -116,7 +117,7 @@ export type TransferDeps = {
   payExchangeAlone?: (userId: string) => Promise<boolean>;
   /** The Travel Rule provider. Absent: the environment's, which in production without Sumsub's Travel Rule configured refuses. */
   travelRule?: () => TravelRuleProvider;
-  /** The partners whose agreement is signed, so the message names an exchange only when it may. Absent: the environment's SIGNED_PARTNERS. */
+  /** Kept for callers that still pass it. The confirmation no longer names the exchange's company at all (it names the payment network, lib/compliance/payment-networks.ts), so it is not read. */
   signedPartners?: ReadonlySet<PartnerId>;
 };
 
@@ -585,11 +586,16 @@ export async function createTransfer(deps: TransferDeps, actor: { userId: string
   const release = () => deps.db.delete(walletTransfers).where(eq(walletTransfers.id, id)).then(() => undefined);
   try {
     const payer = await payerName(deps);
-    const record = await deps.paymentRecord({ orgId: deps.orgId, transferId: id, payer, payee: resolved.name, amountMinor: amount.toString(), maxFeeMinor: maxFee.toString(), reference });
+    // The sealed record always says who started the payment, when, by which route and under which rule, and which owners could approve it,
+    // whatever the name-sharing switches say (those change only what an exchange is told). Each later decision is its own record (payment-trail.ts).
+    const trail = await buildPaymentTrail(deps.db, { orgId: deps.orgId, actor, route, rule: underRule ? underRule.read.facts.rule : null, spender: underRule ? underRule.read.spender : null, at: now });
+    const record = await deps.paymentRecord({ orgId: deps.orgId, transferId: id, payer, payee: resolved.name, amountMinor: amount.toString(), maxFeeMinor: maxFee.toString(), reference, trail });
     if (!record.ok) {
       await release();
       return fail(record.status, record.code, record.error);
     }
+    // What the chain will anchor, kept with the payment so each decision record can name it.
+    await deps.db.update(walletTransfers).set({ recordHash: Buffer.from(record.contentHash).toString('hex'), recordBlobId: Buffer.from(record.walrusBlobId).toString('hex') }).where(eq(walletTransfers.id, id));
     const commitment = Buffer.from(transferCommitmentHex({ orgId: deps.orgId, transferId: id, address, amountMinor: amount, maxFeeMinor: maxFee, kind: resolved.kind }), 'hex');
     const railCommitment = sha(`splash-transfer-rail|${resolved.kind}`);
     const expiresAtMs = BigInt(now.getTime()) + BigInt(TRANSFER_INTENT_LIFETIME_MS);
@@ -844,8 +850,6 @@ async function exchangeAloneNow(deps: TransferDeps, userId: string): Promise<boo
   return deps.payExchangeAlone ? (await deps.payExchangeAlone(userId)) === true : false;
 }
 
-const signedOf = (deps: TransferDeps): ReadonlySet<PartnerId> => deps.signedPartners ?? parseSignedPartners((deps.env ?? process.env).SIGNED_PARTNERS);
-
 /** The message for a payment from what the server holds, for this business and this saved recipient only. */
 async function buildDisclosureFor(
   deps: TransferDeps,
@@ -892,7 +896,7 @@ async function confirmedDisclosure(
   const built = await buildDisclosureFor(deps, actor, { resolved: c.resolved, address: c.address, amount: c.amount, clientKey: c.clientKey, purpose: given.purpose });
   if (!built.ok) return built;
   if (built.hash !== given.confirmedHash) {
-    return fail(409, 'exchange_disclosure_changed', 'What will be shared with the exchange changed since you read it. Read it again and confirm. Nothing was sent.', { disclosure: { hash: built.hash, text: disclosureText(built.disclosure, signedOf(deps)) } });
+    return fail(409, 'exchange_disclosure_changed', 'What will be shared with the exchange changed since you read it. Read it again and confirm. Nothing was sent.', { disclosure: { hash: built.hash, text: disclosureText(built.disclosure) } });
   }
   return built;
 }
@@ -923,7 +927,7 @@ export async function previewExchangeDisclosure(
   if (resolved.payeeKind !== 'exchange') return fail(409, 'not_an_exchange_recipient', 'This recipient is not saved as an exchange account, so there is no Travel Rule message to confirm.');
   const built = await buildDisclosureFor(deps, actor, { resolved, address: normalizeSuiAddress(resolved.address), amount, clientKey, purpose: input.purpose });
   if (!built.ok) return built;
-  return { ok: true, disclosure: built.disclosure, text: disclosureText(built.disclosure, signedOf(deps)), hash: built.hash };
+  return { ok: true, disclosure: built.disclosure, text: disclosureText(built.disclosure), hash: built.hash };
 }
 
 /**

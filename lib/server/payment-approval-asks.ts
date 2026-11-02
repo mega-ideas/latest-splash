@@ -441,6 +441,17 @@ export async function listApprovalAsks(db: DrizzleDb, input: { orgId: string; us
 
 export type AcceptMode = 'wallet_pays' | 'second_approval';
 
+/** Tell the audit proof an owner answered an ask (lib/server/payment-trail.ts). Never stops the answer: a failure is swallowed. */
+export type AskDecisionHook = (decision: { orgId: string; askId: string; userId: string; kind: 'ask_accepted' | 'ask_declined'; at: Date }) => Promise<unknown>;
+async function tellTrail(hook: AskDecisionHook | undefined, decision: Parameters<AskDecisionHook>[0]): Promise<void> {
+  if (!hook) return;
+  try {
+    await hook(decision);
+  } catch {
+    // The answer stands; the trail is brought up to date by the next sweep.
+  }
+}
+
 /**
  * Hooks the second-approval path in (lib/server/spend-rules.ts), so this
  * module does not import the spending-rule builders.
@@ -456,7 +467,7 @@ export type SecondApprovalOpener = (input: {
 
 /** An owner turns an open ask into the signing request that approves it. */
 export async function acceptApprovalAsk(
-  deps: { db: DrizzleDb; ctx: WalletContext; now?: Clock; secondApproval?: SecondApprovalOpener },
+  deps: { db: DrizzleDb; ctx: WalletContext; now?: Clock; secondApproval?: SecondApprovalOpener; onDecision?: AskDecisionHook },
   input: {
     orgId: string;
     userId: string;
@@ -548,6 +559,7 @@ export async function acceptApprovalAsk(
     detail: { mode: input.mode, signingRequestId: opened.request.id },
     now: () => now,
   });
+  await tellTrail(deps.onDecision, { orgId: input.orgId, askId: row.id, userId: input.userId, kind: 'ask_accepted', at: now });
   const after = (await readAsk(deps.db, input.orgId, row.id)) as AskRow;
   return { ok: true, ask: await viewOne(deps.db, after, now), request: opened.request };
 }
@@ -610,6 +622,7 @@ async function openFor(
 export async function declineApprovalAsk(
   db: DrizzleDb,
   input: { orgId: string; userId: string; askId: string; reason?: string | null; now?: Clock },
+  hooks: { onDecision?: AskDecisionHook } = {},
 ): Promise<{ ok: true } | AskFailure> {
   const now = (input.now ?? (() => new Date()))();
   const row = await readAsk(db, input.orgId, input.askId);
@@ -625,6 +638,7 @@ export async function declineApprovalAsk(
     .set({ status: 'declined', decidedBy: input.userId, decidedAt: now, decidedName: snapshot.name, decidedTitle: snapshot.title, decisionNote: reason, updatedAt: now })
     .where(and(eq(walletApprovalAsks.orgId, input.orgId), eq(walletApprovalAsks.id, row.id)));
   await recordAuthorityEvent(db, { orgId: input.orgId, actorUserId: input.userId, action: 'approval_declined', subjectUserId: row.requestedBy, ref: row.id, detail: reason ? { reason } : {}, now: () => now });
+  await tellTrail(hooks.onDecision, { orgId: input.orgId, askId: row.id, userId: input.userId, kind: 'ask_declined', at: now });
   return { ok: true };
 }
 

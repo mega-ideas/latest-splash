@@ -340,6 +340,7 @@ export const TEAM_ACTIONS = [
   'member_access_granted',
   'member_access_revoked',
   'member_title_changed',
+  'exchange_name_sharing_changed',
   'person_in_charge_appointed',
   'person_in_charge_revoked',
   'team_invitation_sent',
@@ -379,6 +380,10 @@ export function activitySummary(e: { action: string; detail: unknown; actorName:
       if (d.by === 'self') return to ? `${e.actorName} set their own title to ${to}.` : `${e.actorName} cleared their own title.`;
       return to ? `${e.actorName} set ${who}’s title to ${to}.` : `${e.actorName} cleared ${who}’s title.`;
     }
+    case 'exchange_name_sharing_changed':
+      return d.to === false
+        ? `${e.actorName} stopped sharing people’s names with exchanges. The exchange is told the business sent the payment.`
+        : `${e.actorName} started sharing people’s names and job titles with exchanges again, for people who also allow it.`;
     case 'person_in_charge_appointed':
       return `${e.actorName} put ${who} in charge of signing off moves.`;
     case 'person_in_charge_revoked':

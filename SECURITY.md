@@ -2677,12 +2677,12 @@ Design: `docs/v2/phase3-team-roles.md` ("Can pay exchange accounts alone") and
   reference is invented; a business that is not verified, or a recipient missing
   what the exchange needs, is refused in words.
 - **What the person is shown is what is sent.** The confirmation lists every
-  field of the message, the exchange as Recipients names it (its role until its
-  agreement is signed, its name after), and the payment details exactly as the
-  provider receives them ("Sent by NAME: purpose", the name cut at 40
-  characters). The provider is told the exchange by its id; the words on screen
-  map one for one to that id. The staff member's name is shared with the exchange
-  in those payment details: this wants Sky's confirmation. Nothing in the send
+  field of the message, the payment network the money goes over (not the
+  exchange's company: see "Whose name the exchange is told" below), and the
+  payment details exactly as the provider receives them ("Sent by NAME (Title):
+  purpose", or "Sent by COMPANY NAME: purpose" when the business or the person
+  chose not to share a name). The provider is told the exchange by its id. Sky
+  confirmed the name switches (see below). Nothing in the send
   path (`lib/server/exchange-disclosure.ts`, `lib/server/travel-rule-transfers.ts`,
   `lib/compliance/sumsub.ts`) logs it or sends it to analytics. A message that did not go is read from the
   provider's own row each time the payment is shown (GET
@@ -2731,3 +2731,52 @@ Spec: `docs/v2/phase3-limits.md`. No Move change.
   the 24 hour notice. Trail action `limit_restored`.
 - **Not covered**: the 50,000 / 500,000 ceilings need Sebastian and Sky's review;
   a network-held daily cap still needs a `splash_spend` change.
+
+## v2 Phase 3 - Whose name the exchange is told, which partner the screen names, and what the audit proof always holds - 2026-11-02
+
+Design: `docs/v2/phase3-team-roles.md` ("Names sent to exchanges, the network on the screen, and the audit trail"). Tests:
+`tests/exchange-names.test.mjs`, `tests/exchange-names-payment.test.mjs`, `tests/payment-networks.test.mjs`,
+`tests/payment-trail.test.mjs`. No Move change.
+
+- **Two switches, both on by default, read on the server.** The business's (`organizations.share_names_with_exchange`,
+  owners only) and the person's own (`memberships.share_name_with_exchange`, that person only; an owner cannot change
+  another's). If either is off, the details read "Sent by COMPANY NAME: purpose" and no person's name or title is in the
+  message, in the confirmation, or in the stored copy of the message (only the internal user id is kept). The setting is read
+  from the database when the message is built, again when the payment is confirmed (a changed switch changes the message, so the
+  person reads it again and confirms again), and again when the message is finally sent: a person who stops sharing after
+  confirming is not named, and a switch turned on afterwards never adds a name that was not confirmed. The page cannot choose
+  it. A person's name or title is cleaned (control, hidden and direction-changing characters, and brackets, so a name cannot dress
+  itself as a title). An owner's change is instant with one append-only trail line; a person's own change writes none.
+- **The switches change only what the exchange is told and what the confirmation shows.** The audit proof is built by
+  `lib/server/payment-trail.ts` and never reads them.
+- **What the audit proof holds (added here, additive).** The sealed evidence record of a wallet payment held the payer, the payee,
+  the amount, the fee bound and the reference, and neither the actor nor any approver or decliner. It now carries, inside the
+  encrypted record, who started the payment (internal id, role, and the name and title as they were), when, the route
+  (owners sign, asked the owners, within a staff rule), the rule it was paid under, and the owners who could approve it
+  (`splash.payment-record.v2`; a record without a trail is byte for byte what it was). The record is made before anyone approves, so
+  each later signature, decline and owner's answer to an ask is one more sealed record (`splash.payment-decision.v1`) naming the
+  first by its hash (`payment_trail_events`, migration 0085; `wallet_transfers.record_hash`). The rows hold internal ids, times
+  and hashes only; the name and title are inside the sealed record. A decision is never stopped by a sealing failure: it is on
+  record, unsealed, until the cron sweep seals it. In production a demo Seal policy or Walrus blob seals nothing.
+- **Names in evidence records are only as private as the key policy.** Sebastian: A-13 above (one operator key can decrypt every
+  sealed blob) applies to every name now inside an evidence record. Nothing is stored or anchored in plain text with a name.
+  Not covered: the decision records are sealed and stored on Walrus, but only the payment's own record is anchored on Sui (in the
+  payment transaction). Anchoring each decision record needs an operator-sent `audit_anchor::anchor_audit_hash` per decision or per
+  day (an existing AnchorCap function, no Move change), which is not built. If a payment falls back from a staff rule to the
+  owners after its record was made, the record says the route it was built under; the ask and its answer are in the decision records.
+- **Which partner the confirmation names: the network, never the processor.** The words say the payment network the person
+  knows (`DuitNow` for Malaysia, `InstaPay or PESONet` for the Philippines, `BI-FAST`, `PromptPay`, and so on), never the
+  exchange's company or a processor ("Fiuu"), even after an agreement is signed, and still say plainly that the details are shared
+  with a payout partner in that country and what exactly is shared. The corridor to network map is one module,
+  `lib/compliance/payment-networks.ts`. The Travel Rule message to the provider is unchanged: it carries the real counterparty
+  data.
+- **The exception: `mustNameReceivingInstitution`.** Per corridor, false by default, changed only in code by Splash compliance
+  (not an owner's setting, not a user switch, not read from the database, the environment or a request). Where it is true the
+  confirmation names the real institution next to the network ("DuitNow, received by Hata"), and the ban on naming partners has a
+  recorded, tested exception for exactly those corridors (`INSTITUTION_NAMING_EXCEPTIONS`; empty as shipped).
+- **For Sebastian and compliance, before launch: confirm the wording satisfies data-protection and Travel Rule disclosure.** That
+  is: the "Sent by" line and the sentence that says which details are shared, and with whom, in the Malaysia (DuitNow) and
+  other corridors; and whether any corridor needs `mustNameReceivingInstitution` set.
+- **Other confirmation screens.** Withdrawals and bank payouts still name their partners through `partnerLabel` (the role until
+  an agreement is signed, the name after). That is a separate screen and was not changed here; Sky to say whether it should
+  follow the same network-name rule.

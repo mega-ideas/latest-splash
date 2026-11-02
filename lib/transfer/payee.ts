@@ -21,6 +21,7 @@
 import { FEE_KIND, type FeeKind } from '../fees/schedule.ts';
 import { CORRIDOR_RULES } from '../compliance/travel-rule.ts';
 import { PARTNERS } from '../partners/signed-partners.ts';
+import { networkNameOf } from '../compliance/payment-networks.ts';
 
 export const PAYEE_KINDS = ['bank', 'splash_business', 'wallet'] as const;
 export type PayeeKind = (typeof PAYEE_KINDS)[number];
@@ -58,12 +59,12 @@ export type BankCountry = { country: string; name: string; currency: string; acc
 
 /** Where a business bank account can be paid. PH and ID are live; the rest are under Pilot access. */
 export const BANK_COUNTRIES: BankCountry[] = [
-  { country: 'PH', name: 'Philippines', currency: 'PHP', access: 'live', rails: 'InstaPay or PESONet' },
-  { country: 'ID', name: 'Indonesia', currency: 'IDR', access: 'live', rails: 'BI-FAST' },
-  { country: 'MY', name: 'Malaysia', currency: 'MYR', access: 'pilot', rails: 'DuitNow' },
-  { country: 'VN', name: 'Vietnam', currency: 'VND', access: 'pilot', rails: 'Napas' },
-  { country: 'TH', name: 'Thailand', currency: 'THB', access: 'pilot', rails: 'PromptPay' },
-  { country: 'SG', name: 'Singapore', currency: 'SGD', access: 'pilot', rails: 'FAST' },
+  { country: 'PH', name: 'Philippines', currency: 'PHP', access: 'live', rails: networkNameOf('PH') ?? '' },
+  { country: 'ID', name: 'Indonesia', currency: 'IDR', access: 'live', rails: networkNameOf('ID') ?? '' },
+  { country: 'MY', name: 'Malaysia', currency: 'MYR', access: 'pilot', rails: networkNameOf('MY') ?? '' },
+  { country: 'VN', name: 'Vietnam', currency: 'VND', access: 'pilot', rails: networkNameOf('VN') ?? '' },
+  { country: 'TH', name: 'Thailand', currency: 'THB', access: 'pilot', rails: networkNameOf('TH') ?? '' },
+  { country: 'SG', name: 'Singapore', currency: 'SGD', access: 'pilot', rails: networkNameOf('SG') ?? '' },
 ];
 
 export function corridorAccess(country: string): CorridorAccess {

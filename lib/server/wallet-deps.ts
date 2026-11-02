@@ -286,6 +286,9 @@ export async function liveWalletContext(orgId: string): Promise<{ ok: true; ctx:
     const { withdrawalBeforeSign } = await import('@/lib/server/withdrawals');
     return withdrawalBeforeSign({ db }, request);
   };
+  // The audit proof of a payment says who approved it and who declined: every signature and decline is recorded and sealed (v2 Phase 3).
+  const { liveDecisionHook } = await import('@/lib/server/payment-trail-deps');
+  signing.onDecision = liveDecisionHook(db);
   signing.onExecuted = async (request) => {
     await settleApprovalAsks(db, request);
     await continueWalletSteps(ctx, request);

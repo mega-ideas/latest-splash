@@ -82,7 +82,8 @@ export type AuthorityAction =
   | 'limit_request_cancelled'
   | 'limit_change_applied'
   | 'limit_restored'
-  | 'member_title_changed';
+  | 'member_title_changed'
+  | 'exchange_name_sharing_changed';
 
 export type AuthorityFailure = { ok: false; status: number; code: string; error: string };
 const fail = (status: number, code: string, error: string): AuthorityFailure => ({ ok: false, status, code, error });

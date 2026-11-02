@@ -118,7 +118,8 @@ export default function ExchangeDisclosure({
               </div>
             ))}
           </dl>
-          {text.lines.slice(-2).map((line) => (
+          {/* Whose name goes, where the details go and exactly what is shared, then what Splash does with them. All of it is text the server wrote. */}
+          {[...text.notes, text.sharing, ...text.lines.slice(-2)].map((line) => (
             <p key={line} className="text-[13px] leading-5 text-[#326273]">{line}</p>
           ))}
           <label htmlFor={checkId} className="flex items-start gap-3 rounded-xl border border-[var(--warn)] bg-[var(--warn-bg)] p-3.5 text-sm leading-6 text-[#1F4452]">

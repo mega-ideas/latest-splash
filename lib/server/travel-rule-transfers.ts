@@ -153,6 +153,16 @@ export async function sendTravelRule(
     row = replaced ?? (await readTravelRuleTransfer(deps.db, deps.orgId, input.intentId));
     if (!row) throw new Error('the Travel Rule transfer could not be stored');
   }
+  if (row.requestHash !== requestHash && row.provider === deps.provider.id && !row.providerRef && row.status === 'preparing') {
+    // A message that has not gone anywhere yet may be made again in a more private form (a person stopped sharing their name before it
+    // was sent). Only a row still waiting to be sent is replaced, and only its hash: once a send is claimed or answered it never is.
+    const [again] = await deps.db
+      .update(travelRuleTransfers)
+      .set({ requestHash, updatedAt: deps.now() })
+      .where(and(eq(travelRuleTransfers.orgId, deps.orgId), eq(travelRuleTransfers.id, row.id), eq(travelRuleTransfers.status, 'preparing'), isNull(travelRuleTransfers.providerRef)))
+      .returning();
+    row = again ?? (await readTravelRuleTransfer(deps.db, deps.orgId, input.intentId)) ?? row;
+  }
   if (row.requestHash !== requestHash || row.provider !== deps.provider.id) {
     return refuse(409, 'travel_rule_conflict', 'A different Travel Rule message was already sent for this payment.');
   }

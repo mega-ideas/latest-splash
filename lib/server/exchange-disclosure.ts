@@ -39,6 +39,7 @@ import {
   type TravelRuleTransferInput,
 } from '../compliance/sumsub.ts';
 import { canonicalDisclosure, exchangePurpose, purposeTextOf, type ExchangeDisclosure } from '../compliance/exchange-disclosure.ts';
+import { nameSharingOf } from './exchange-names.ts';
 import { KYB_VERIFIED, payerOf } from './exchange-payment-compliance.ts';
 import { readTravelRuleTransfer, sendTravelRule } from './travel-rule-transfers.ts';
 import type { DrizzleDb } from './wallet-signing-store.ts';
@@ -130,9 +131,16 @@ export async function buildExchangeDisclosure(
     return refuse(409, 'recipient_incomplete', "This recipient's details are incomplete: the exchange needs its registered name, its country and the exchange it is held at. Open it in Recipients and finish them.");
   }
 
-  const [person] = await db.select({ name: users.name }).from(users).where(eq(users.id, facts.actor.userId)).limit(1);
-  const senderName = text(person?.name);
-  if (!senderName) return refuse(409, 'sender_unknown', 'Your name is not on file, so the exchange cannot be told who is sending this. Add your name to your profile first.');
+  // Whose name goes: read now, here on the server, from the business's switch and the person's own (never from the page). If either is off the
+  // exchange is told the business sent the payment, no name or title is in the message, and only the person's internal id is kept.
+  const sharing = await nameSharingOf(db, facts.orgId, facts.actor.userId);
+  let sender: ExchangeDisclosure['sender'] = { userId: facts.actor.userId, name: null };
+  if (sharing.shared) {
+    const [person] = await db.select({ name: users.name }).from(users).where(eq(users.id, facts.actor.userId)).limit(1);
+    const senderName = text(person?.name);
+    if (!senderName) return refuse(409, 'sender_unknown', 'Your name is not on file, so the exchange cannot be told who is sending this. Add your name to your profile first, or turn off sharing your name in Settings.');
+    sender = { userId: facts.actor.userId, name: senderName, ...(sharing.title ? { title: sharing.title } : {}) };
+  }
 
   const disclosure: ExchangeDisclosure = {
     version: 1,
@@ -140,7 +148,7 @@ export async function buildExchangeDisclosure(
     paymentRef: normalizeSuiAddress(paymentRefHex(facts.orgId, facts.clientKey)),
     amountMinor: facts.amountMinor.toString(),
     asset: 'USDC',
-    sender: { userId: facts.actor.userId, name: senderName },
+    sender,
     business: {
       // The business the provider verified, not the editable profile.
       legalName: kyb.businessName,
@@ -261,8 +269,9 @@ export function disclosureMismatch(
 /** The Travel Rule message, made from the stored payload and nothing else. `intentId` is the key it is kept under (the signing request's id). */
 export function travelRuleInputFromDisclosure(
   d: ExchangeDisclosure,
-  extra: { orgId: string; applicantId: string; intentId: string; at: Date },
+  extra: { orgId: string; applicantId: string; intentId: string; at: Date; /** The switches as they are when the message is made: false drops a name the message was confirmed with. A name is never added. */ nameAllowedNow?: boolean },
 ): TravelRuleTransferInput {
+  const said: ExchangeDisclosure = extra.nameAllowedNow === false ? { ...d, sender: { userId: d.sender.userId, name: null } } : d;
   return {
     intentId: extra.intentId,
     orgId: extra.orgId,
@@ -288,7 +297,7 @@ export function travelRuleInputFromDisclosure(
       exchange: d.beneficiary.exchange as TravelRuleTransferInput['beneficiary']['exchange'],
       depositAddress: d.beneficiary.accountReference,
     },
-    purpose: purposeTextOf(d),
+    purpose: purposeTextOf(said),
   };
 }
 
@@ -327,7 +336,9 @@ export async function sendStoredExchangeMessage(
   if (!kyb?.applicant) return { state: 'not_sent', text: 'The Travel Rule message has not been sent: the business has no verification on file with the provider yet.' };
   let message: TravelRuleTransferInput;
   try {
-    message = travelRuleInputFromDisclosure(disclosure, { orgId: deps.orgId, applicantId: kyb.applicant, intentId: input.signingRequestId, at: deps.now() });
+    // The switches are read again now, as the message is made: a person who stopped sharing their name after confirming is not named.
+    const sharing = await nameSharingOf(deps.db, deps.orgId, disclosure.sender.userId);
+    message = travelRuleInputFromDisclosure(disclosure, { orgId: deps.orgId, applicantId: kyb.applicant, intentId: input.signingRequestId, at: deps.now(), nameAllowedNow: sharing.shared });
   } catch {
     return { state: 'not_sent', text: 'The Travel Rule message could not be made from what was confirmed, so it has not been sent.' };
   }
