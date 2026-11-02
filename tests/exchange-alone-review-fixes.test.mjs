@@ -34,7 +34,6 @@ import { normalizeSuiAddress } from '@mysten/sui/utils';
 import * as schema from '../lib/db/schema.ts';
 import { ComplianceProviderUnavailable } from '../lib/compliance/sumsub.ts';
 import { disclosureText, purposeTextOf } from '../lib/compliance/exchange-disclosure.ts';
-import { EXCHANGE_OPTIONS } from '../lib/transfer/payee.ts';
 import { exchangeAloneOf } from '../lib/server/exchange-alone.ts';
 import { setMemberAccess } from '../lib/server/team-admin.ts';
 import { paymentBeforeSign } from '../lib/server/payment-compliance-gate.ts';
@@ -367,17 +366,15 @@ const message = (over = {}) => ({
   ...over,
 });
 
-test('the exchange is shown as the recipient picker shows it (the exchange the person saved the account at), and its real name once its agreement is signed', () => {
-  const picked = EXCHANGE_OPTIONS.find((o) => o.id === 'pdax').label;
+test('the place the money goes is the payment network the person knows, not the exchange’s company (Sky’s decision of 2 Nov, replacing the recipient picker’s words)', () => {
   const rows = disclosureText(message()).rows;
-  const row = rows.find((r) => /saved this account at/i.test(r.label));
+  const row = rows.find((r) => r.label === 'Payment network');
   assert.ok(row, JSON.stringify(rows.map((r) => r.label)));
-  assert.equal(row.value, picked, 'the same words the person chose it by');
-  const signed = disclosureText(message(), new Set(['pdax'])).rows.find((r) => /saved this account at/i.test(r.label));
-  assert.equal(signed.value, 'PDAX');
+  assert.equal(row.value, 'InstaPay or PESONet');
+  assert.ok(!rows.some((r) => /saved this account at/i.test(r.label)), 'the exchange is no longer named by its company');
   // A different exchange reads differently: the words are not one fixed phrase.
-  const other = disclosureText(message({ beneficiary: { ...message().beneficiary, exchange: 'bitkub' } })).rows.find((r) => /saved this account at/i.test(r.label));
-  assert.notEqual(other.value, picked);
+  const other = disclosureText(message({ beneficiary: { ...message().beneficiary, exchange: 'bitkub' } })).rows.find((r) => r.label === 'Payment network');
+  assert.equal(other.value, 'PromptPay');
 });
 
 test('the payment details are shown exactly as they are sent, the person’s name cut to what travels', () => {

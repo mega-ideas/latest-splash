@@ -42,10 +42,8 @@ test('the purposes a person can pick are a short, fixed list in plain words', ()
 test('the message says, in plain words, what is shared with the exchange, and what is not', () => {
   const text = disclosureText(disclosure());
   const all = [text.headline, ...text.lines].join('\n');
-  for (const must of [/Mei Tan/, /Acme Trading Sdn Bhd/, /201901234567/, /our Philippines payout partner/, /Dela Cruz Trading Corp/, /0x79/, /1,250(\.00)? USDC/, /invoice/i]) assert.match(all, must);
-  assert.doesNotMatch(all, /PDAX/, 'a partner is named only once its agreement is signed');
-  const signed = disclosureText(disclosure(), new Set(['pdax']));
-  assert.match([signed.headline, ...signed.lines].join('\n'), /PDAX/);
+  for (const must of [/Mei Tan/, /Acme Trading Sdn Bhd/, /201901234567/, /payout partner in the Philippines/, /InstaPay or PESONet/, /Dela Cruz Trading Corp/, /0x79/, /1,250(\.00)? USDC/, /invoice/i]) assert.match(all, must);
+  assert.doesNotMatch(all, /PDAX/, 'the network is named, never the company behind it (Sky’s decision of 2 Nov)');
   assert.match(text.headline, /share/i);
   assert.match(all, /exchange/i);
   assert.match(all, /Splash/);

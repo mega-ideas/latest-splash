@@ -330,8 +330,9 @@ test('what the person is shown: who sends, which business, the exchange and the 
   assert.match(text, /u-staff/, 'who is sending');
   assert.match(text, /Acme Trading Sdn Bhd/, 'which business');
   assert.match(text, /201901234567/, 'its registration number');
-  assert.match(text, /our Philippines payout partner/i, 'the exchange, in the words Recipients uses');
-  assert.doesNotMatch(text, /PDAX/, 'a partner is named only once its agreement is signed');
+  assert.match(text, /payout partner in the Philippines/i, 'where the details go');
+  assert.match(text, /InstaPay or PESONet/, 'over the payment network the person knows');
+  assert.doesNotMatch(text, /PDAX/, 'the network is named, never the company behind it (Sky’s decision of 2 Nov)');
   assert.ok(text.includes(EXCHANGE), 'the account at the exchange, in full');
   assert.match(text, /contractor/i, 'the purpose they picked');
   assert.match(text, /1,250(\.00)? USDC/);
