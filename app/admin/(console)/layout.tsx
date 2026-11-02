@@ -35,7 +35,7 @@ export default async function AdminConsoleLayout({ children }: { children: React
 
   return (
     <div className="fintech-admin-shell min-h-screen bg-[linear-gradient(rgba(31,67,80,0.055),rgba(31,67,80,0.055)),#EEF4F5] text-[#1f4350]">
-      <aside className="fintech-admin-sidebar fixed left-0 top-0 hidden h-screen w-64 flex-col bg-[#1f4350] p-6 text-white lg:flex">
+      <aside className="fintech-admin-sidebar fixed left-0 top-0 hidden h-screen w-64 flex-col overflow-y-auto bg-[#1f4350] p-6 text-white lg:flex">
         <Link href={adminConsolePath('/', hostname)} className="flex items-center gap-3">
           <Image src="/splash-main-icon.png" alt="Splash" width={48} height={47} className="h-auto w-9" loading="eager" />
           <div>
@@ -61,7 +61,7 @@ export default async function AdminConsoleLayout({ children }: { children: React
           </span>
         </div>
 
-        <div className="rounded-2xl border border-white/10 bg-white/10 p-4 text-xs text-white/90">
+        <div className="shrink-0 rounded-2xl border border-white/10 bg-white/10 p-4 text-xs text-white/90">
           <div className="font-bold text-white">{session.name}</div>
           <div className="mt-1 break-all">{session.email}</div>
           <div className="mt-2 uppercase tracking-[0.16em] text-[#d8fff4]">{session.role}</div>

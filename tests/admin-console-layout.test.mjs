@@ -52,6 +52,5 @@ test('the desktop sidebar scrolls inside itself and keeps its posture and accoun
   assert.match(aside, /overflow-y-auto/, 'the sidebar scrolls inside itself when its content is taller than the screen');
   const trust = css.slice(css.lastIndexOf('.fintech-admin-trust {'));
   assert.match(trust.slice(0, trust.indexOf('}')), /flex-shrink:\s*0/, 'the posture block is never squeezed');
-  const account = layout.slice(layout.indexOf('rounded-2xl border border-white/10 bg-white/10 p-4'), layout.indexOf('<AdminLogoutButton />'));
-  assert.match(account, /shrink-0/, 'the account block is never squeezed');
+  assert.match(layout, /<div className="[^"]*\bshrink-0\b[^"]*rounded-2xl border border-white\/10 bg-white\/10 p-4/, 'the account block is never squeezed');
 });

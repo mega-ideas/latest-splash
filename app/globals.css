@@ -5584,6 +5584,8 @@ th.money { text-align: right; }
 .fintech-admin-trust {
   grid-template-columns: 54px 1fr;
   margin-bottom: 16px;
+  /* The sidebar is a fixed-height column: on a short screen this block keeps its height and the sidebar scrolls. */
+  flex-shrink: 0;
 }
 
 .fintech-admin-trust img {
