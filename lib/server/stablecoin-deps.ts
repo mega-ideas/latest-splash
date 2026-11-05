@@ -11,6 +11,7 @@ import {
   simulateTransfer,
 } from '@/lib/server/stablecoin-chain';
 import type { SendDeps } from '@/lib/server/stablecoin-send';
+import { laneWalletFee } from '@/lib/server/stablecoin-fee';
 import { consumeStepUp, releaseStepUp } from '@/lib/server/step-up';
 
 /**
@@ -32,7 +33,11 @@ export async function liveSendDeps(): Promise<SendDeps | null> {
       release: ({ orgId, subjectId }) => releaseStepUp(db, { orgId, purpose: 'STABLECOIN_TRANSFER', subjectId }),
     },
     readRecipient,
-    feeAddress: () => process.env.SPLASH_FEE_ADDRESS_MAINNET,
+    // Splash's fee, its schedule and its recipient: the mainnet FeeConfig's,
+    // one read per transfer (lib/server/stablecoin-fee.ts).
+    feeAddress: async () => (await laneWalletFee()).recipient ?? undefined,
+    anchorFeeOn: async () => (await laneWalletFee()).on,
+    feeSchedule: async () => (await laneWalletFee()).schedule,
     isSplashWallet: (address) => isSplashWallet(db, address),
     chain: {
       build: (input) => buildTransferBytes(laneClient(), input),

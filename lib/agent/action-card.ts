@@ -1,4 +1,5 @@
 import { confidencePercent as formatConfidencePercent } from '../confidence.ts';
+import { formatUsdc } from '../fees/copy.ts';
 import type { DataStatus, EvidenceItem, EvidenceQuality, ProposalFxRate, ProposalKind, ProposalStatus, RiskBand, SimulationResult, UserRole } from './types';
 
 type AmountLike = bigint | number | string | undefined;
@@ -8,7 +9,7 @@ export type ClientFinancialImpact = {
   amountOut?: AmountLike;
   currencyIn?: string;
   currencyOut?: string;
-  feeBps?: number;
+  splashFeeMinor?: AmountLike;
   fxRate?: ProposalFxRate;
   yieldDeltaBps?: number;
   nettingSaved?: AmountLike;
@@ -56,6 +57,8 @@ export type ActionCardEvidence = EvidenceItem & {
   tone: 'trusted' | 'untrusted';
   /** WS2 truth chip: LIVE renders default; STALE/MODELED/DEMO use caution. */
   statusLabel: DataStatus;
+  /** The words on that chip: Live, Stale, Modeled or Sample. */
+  statusText: string;
   statusTone: 'live' | 'caution';
 };
 
@@ -97,6 +100,17 @@ function bps(value?: number) {
   return typeof value === 'number' ? `${(value / 100).toFixed(2)}%` : '-';
 }
 
+/** Splash's fee in USDC minor units, exactly: "2.00 USDC". */
+function splashFee(value: AmountLike) {
+  if (value === undefined || value === null || value === '') return '-';
+  try {
+    const minor = BigInt(String(value));
+    return minor < 0n ? '-' : `${formatUsdc(minor)} USDC`;
+  } catch {
+    return '-';
+  }
+}
+
 function row(label: string, value: string): ActionCardRow {
   return { label, value, status: value === '-' ? 'empty' : 'ok' };
 }
@@ -112,6 +126,8 @@ function fxSourceLabel(fxRate: ProposalFxRate): string {
   if (ref.startsWith('par:')) return 'at par';
   return ref;
 }
+
+const STATUS_TEXT: Record<DataStatus, string> = { LIVE: 'Live', STALE: 'Stale', MODELED: 'Modeled', DEMO: 'Sample' };
 
 export function buildActionCardModel(proposal: ActionCardProposal): ActionCardModel {
   const impact = proposal.explain.financialImpact;
@@ -129,6 +145,9 @@ export function buildActionCardModel(proposal: ActionCardProposal): ActionCardMo
       trustLabel: item.trusted ? 'Trusted' as const : 'Untrusted' as const,
       tone: item.trusted ? 'trusted' as const : 'untrusted' as const,
       statusLabel,
+      // What the chip says. The envelope's DEMO stays an internal status; a
+      // person reads "Sample" (v2 D14: no "Demo" text in the UI).
+      statusText: STATUS_TEXT[statusLabel],
       statusTone: statusLabel === 'LIVE' ? 'live' as const : 'caution' as const,
     };
   });
@@ -142,7 +161,7 @@ export function buildActionCardModel(proposal: ActionCardProposal): ActionCardMo
     impactRows: [
       row('Amount in', money(impact.amountIn, impact.currencyIn)),
       row('Amount out', money(impact.amountOut, impact.currencyOut)),
-      row('Fee', bps(impact.feeBps)),
+      row('Splash fee', splashFee(impact.splashFeeMinor)),
       row('FX', impact.fxRate ? `${impact.fxRate.value} (${fxSourceLabel(impact.fxRate)})` : '-'),
       row('Yield delta', bps(impact.yieldDeltaBps)),
       row('Netting saved', money(impact.nettingSaved, impact.currencyIn ?? impact.currencyOut ?? 'USD')),

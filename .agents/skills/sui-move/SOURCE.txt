@@ -1,0 +1,3 @@
+Vendored from https://github.com/MystenLabs/skills at commit e31b38016723e2dcee36161d59c50e028e13b52a
+(2026-10-15), Apache-2.0 (LICENSE). Markdown guidance only; the evals/ folder is not
+copied. Refresh deliberately, after reading the new commit.

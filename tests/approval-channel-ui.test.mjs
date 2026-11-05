@@ -14,15 +14,18 @@ import test from 'node:test';
 
 const card = () =>
   readFile(new URL('../components/settings/ApprovalChannelCard.tsx', import.meta.url), 'utf8');
+// Settings (v2 brief 5.9) keeps the settings object in OperatingControls and mounts the card in SettingsPage.
+const controls = () =>
+  readFile(new URL('../components/settings/OperatingControls.tsx', import.meta.url), 'utf8');
 const page = () =>
-  readFile(new URL('../app/dashboard/settings/page.tsx', import.meta.url), 'utf8');
+  readFile(new URL('../components/settings/SettingsPage.tsx', import.meta.url), 'utf8');
 
 test('the settings page carries the two dials it saves', async () => {
-  const source = await page();
+  const source = await controls();
   // Present in the type, or a save round-trip drops them from the payload.
   assert.match(source, /approvalChannel: 'code' \| 'reply';/);
   assert.match(source, /whatsappEnabled: boolean;/);
-  assert.match(source, /<ApprovalChannelCard/);
+  assert.match(await page(), /<ApprovalChannelCard/);
 });
 
 test('the choice between modes states what each one actually authenticates', async () => {

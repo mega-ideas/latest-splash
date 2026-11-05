@@ -1,4 +1,4 @@
-import { desc, eq } from 'drizzle-orm';
+import { and, desc, eq } from 'drizzle-orm';
 import type { PgDatabase } from 'drizzle-orm/pg-core';
 
 import { memberships, organizations, users } from '../db/schema.ts';
@@ -148,8 +148,9 @@ export async function grantRole(
   // The same function the fail-closed tests assert against. One grant path.
   // It re-checks verification itself; a refusal from it is surfaced in the
   // console's own vocabulary rather than leaking as a 500.
+  let granted: { created: boolean; userId: string };
   try {
-    await grantMembership(db, {
+    granted = await grantMembership(db, {
       email,
       orgId: input.orgId,
       role: input.role,
@@ -158,6 +159,12 @@ export async function grantRole(
   } catch (error) {
     if (error instanceof GrantRefusedError) throw new MembershipAdminError(error.message, error.code);
     throw error;
+  }
+  // On the business's own trail, under the operator's name: the owners see that Splash support added someone.
+  if (granted.created) {
+    const { recordAuthorityEvent } = await import('./wallet-authority.ts');
+    const by = input.grantedBy.startsWith('operator:') ? input.grantedBy : `operator:${input.grantedBy}`;
+    await recordAuthorityEvent(db as never, { orgId: input.orgId, actorUserId: by, action: 'member_added', subjectUserId: granted.userId, detail: { role: input.role } });
   }
 }
 
@@ -169,11 +176,52 @@ export async function grantRole(
  * approver's address and its own record, and it does not depend on this row
  * still existing. Leaving a tombstone here would mean a revoked member still
  * appears in the org's member list.
+ *
+ * Removing a membership offboards the member from the business wallet's
+ * authority (lib/server/wallet-authority.ts offboardMember): an appointment
+ * as person in charge is revoked, their usable migration sign-offs are
+ * voided, and their passkey addresses are recorded so a spending rule they
+ * still hold on chain shows as orphaned until the owners take it back. A
+ * role change is a removal and a new grant, so it offboards too. `by` is who
+ * removed it, for the audit trail (`operator:<email>` from the console).
  */
-export async function revokeRole(db: DrizzleDb, input: { email: string }): Promise<void> {
+export async function revokeRole(
+  db: DrizzleDb,
+  input: { email: string; by?: string; now?: () => Date },
+): Promise<{ offboarded: Array<{ orgId: string; addresses: string[] }> }> {
   const email = input.email.trim().toLowerCase();
   const rows = await db.select({ id: users.id }).from(users).where(eq(users.email, email)).limit(1);
   if (rows.length === 0) throw new MembershipAdminError(`no account exists for ${email}`, 'no_account');
+  const userId = rows[0].id;
+  const { offboardMember, passkeyAddressesOf } = await import('./wallet-authority.ts');
 
-  await db.delete(memberships).where(eq(memberships.userId, rows[0].id));
+  // One transaction: the removal and the offboarding are kept together or not at all, and a business never loses its last owner.
+  return db.transaction(async (txn) => {
+    const tx = txn as unknown as DrizzleDb;
+    const held = await tx.select({ orgId: memberships.orgId, role: memberships.role }).from(memberships).where(eq(memberships.userId, userId));
+    for (const m of held) {
+      if (m.role !== 'admin') continue;
+      // Lock the business's owners, as the team change does, so a removal here and an owner's change there cannot both leave none.
+      const owners = await tx
+        .select({ userId: memberships.userId })
+        .from(memberships)
+        .where(and(eq(memberships.orgId, m.orgId), eq(memberships.role, 'admin')))
+        .orderBy(memberships.id)
+        .for('update');
+      if (!owners.some((o) => o.userId !== userId)) {
+        throw new MembershipAdminError(
+          `${email} is the only owner of ${m.orgId}. Make someone else an owner first, then remove this person.`,
+          'last_owner',
+        );
+      }
+    }
+    await tx.delete(memberships).where(eq(memberships.userId, userId));
+    const addresses = await passkeyAddressesOf(tx as never, userId);
+    const offboarded: Array<{ orgId: string; addresses: string[] }> = [];
+    for (const m of held) {
+      const done = await offboardMember(tx as never, { orgId: m.orgId, userId, by: input.by ?? 'operator:unknown', addresses, now: input.now });
+      offboarded.push({ orgId: m.orgId, addresses: done.addresses });
+    }
+    return { offboarded };
+  });
 }

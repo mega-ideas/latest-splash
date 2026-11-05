@@ -460,8 +460,11 @@ test('after a restart, a payment whose proposal was rejected can be proposed aga
 test('Zeke drafting after a restart finds the draft in Postgres instead of making a second', async () => {
   const { client, db } = await migratedDb();
   await withDatabase(db, async () => {
-    const { proposePayment } = await import('../lib/agent/oxwal.ts');
-    const input = { orgId: 'acme', counterpartyId: 'cp_acme_ph', amountUsd: 2500, currency: 'USDC' };
+    const { proposePayment, upsertOxwalCounterpartyFixture } = await import('../lib/agent/oxwal.ts');
+    // The org's own verified supplier: drafts never name another org's record,
+    // the sample workspace's included.
+    upsertOxwalCounterpartyFixture({ id: 'cp_acme_own_ph', orgId: 'acme', name: 'Acme Manufacturing PH', kybStatus: 'VERIFIED' });
+    const input = { orgId: 'acme', counterpartyId: 'cp_acme_own_ph', amountUsd: 2500, currency: 'USDC' };
     const writer = (p) => upsertProposal(db, p);
 
     globalThis.oxwalProposalStore = new InMemoryProposalStore(writer);
@@ -644,19 +647,19 @@ test('hydration is per store: a second store is not taken as hydrated because th
 
 // ── Carrying approvals out ──────────────────────────────────────────────────
 
-test('an idempotent replay of an earlier run is not reported as this approval carried out', async () => {
+test('an idempotent replay of an earlier payment is not reported as this approval carried out', async () => {
   globalThis.oxwalProposalStore = new InMemoryProposalStore();
   const replay = (body) => replayThroughRoute(
     async () => Response.json(body),
-    '/api/batches/authorize',
+    '/api/transfers/authorize',
     { orgId: 'acme', approvedProposalId: 'prop_repeat', body: {}, cookie: '', origin: 'http://splash.test' },
   );
 
-  const swallowed = await replay({ id: 'batch_last_month', idempotentReplay: true });
+  const swallowed = await replay({ id: 'transfer_last_month', idempotentReplay: true });
   assert.equal(swallowed.ok, false);
-  assert.match(swallowed.error, /already been carried out as batch_last_month; nothing new was paid/);
+  assert.match(swallowed.error, /already been carried out as transfer_last_month; nothing new was paid/);
 
-  assert.deepEqual(await replay({ id: 'batch_new', state: 'QUEUED' }), { ok: true, ref: 'batch_new' });
+  assert.deepEqual(await replay({ id: 'transfer_new', state: 'QUEUED' }), { ok: true, ref: 'transfer_new' });
 });
 
 test('a late ballot on a lapsed payment is answered as closed, without reading a ballot or moving anything', async () => {

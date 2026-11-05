@@ -1,158 +1,301 @@
 'use client';
 
-import { suiVisionTxUrl } from '@/lib/explorer';
-import { useEffect, useRef, useState } from 'react';
-import { useReactToPrint } from 'react-to-print';
-import { FileText, Link2, Loader2 } from 'lucide-react';
-import { toast } from 'sonner';
+import { useCallback, useEffect, useState } from 'react';
+import { BadgeCheck, Check, Copy, Download, ExternalLink, FileText, Loader2, Mail, MessageCircle, Send } from 'lucide-react';
 
-import Receipt from '@/components/Receipt';
-import SettlementProofDrawer from '@/components/SettlementProofDrawer';
-import { receiptNetworkLine } from '@/lib/network-label';
-import type { TransferState } from '@/app/dashboard/transfer/page';
+import { MY_STATE_CODES, SELF_BILLED_CLASSIFICATIONS } from '@/lib/myinvois/self-billed';
+import { EINVOICE_GUIDELINE, isEmail, mailtoUrl, receiptShareText, whatsappUrl } from '@/lib/transfer/receipt';
+import { call, errorText, type ReceiptAnswer } from './api';
+import { Field, PrimaryButton, QuietButton, SelectInput, TextInput } from './ui';
 
-export default function StepReceipt({ state, reset }: { state: TransferState; reset: () => void }) {
-  const ref = useRef<HTMLDivElement>(null);
-  const [issuedAt, setIssuedAt] = useState('');
-  const [reference, setReference] = useState('');
-  const [operatorName, setOperatorName] = useState<string | null>(null);
-  const [sharing, setSharing] = useState(false);
+/** Step 5, "Receipt": the card, the ways to share it, the accountant, and the self-billed e-invoice. */
+export default function StepReceipt({ refId, onNew }: { refId: string; onNew: () => void }) {
+  const base = `/api/wallet/transfers/${encodeURIComponent(refId)}`;
+  const [data, setData] = useState<ReceiptAnswer | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const [link, setLink] = useState<string | null>(null);
+  const [note, setNote] = useState<string | null>(null);
+  const [accountant, setAccountant] = useState('');
+  const [busy, setBusy] = useState<string | null>(null);
+  const [shares, setShares] = useState<{ live: number; canRevoke: boolean }>({ live: 0, canRevoke: false });
 
-  useEffect(() => {
-    // Initial values are set on mount to avoid SSR hydration mismatch.
-    // eslint-disable-next-line react-hooks/set-state-in-effect
-    setIssuedAt(new Date().toISOString());
-    setReference(`SPL-${Date.now().toString(36).toUpperCase()}`);
-  }, []);
-
-  // "Approved by" renders the signed-in operator (maker-checker note beside it).
-  useEffect(() => {
-    let active = true;
-    void fetch('/api/auth/session')
-      .then((response) => (response.ok ? response.json() : null))
-      .then((body: { name?: string; organization?: string } | null) => {
-        if (active && body?.name) setOperatorName(body.organization ? `${body.name} · ${body.organization}` : body.name);
-      })
-      .catch(() => {});
-    return () => { active = false; };
-  }, []);
-
-  const print = useReactToPrint({
-    contentRef: ref,
-    documentTitle: `splash-receipt-${state.txDigest?.slice(0, 8) ?? 'draft'}`,
-    // Clean A4 for the accountant: the business face fills the sheet; the
-    // proof layer stays collapsed (verification is an online act).
-    pageStyle: '@page { size: A4; margin: 14mm } body { background: #FFFFFF }',
-  });
-
-  const digest = state.txDigest ?? null;
-  const explorerUrl = digest ? suiVisionTxUrl(digest) : null;
-
-  async function shareWithSupplier() {
-    if (!state.transferIntentId) {
-      toast.error('The share link is available once the payment is authorized.');
+  const load = useCallback(async () => {
+    const answer = await call<ReceiptAnswer>(`${base}/receipt`);
+    if (!answer.ok || !answer.body) {
+      setError(errorText(answer, 'The receipt could not be loaded.'));
       return;
     }
-    setSharing(true);
-    try {
-      const response = await fetch('/api/receipts/share', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          transferIntentId: state.transferIntentId,
-          fee: state.quote?.fee,
-          reference,
-          issuedAt,
-        }),
-      });
-      const body = (await response.json().catch(() => null)) as { url?: string; error?: string } | null;
-      if (!response.ok || !body?.url) throw new Error(body?.error ?? "Couldn't create the share link. Retry.");
-      const url = `${window.location.origin}${body.url}`;
-      await navigator.clipboard.writeText(url);
-      toast.success('Read-only receipt link copied', { description: 'Your supplier can open it without a login.' });
-    } catch (error) {
-      toast.error(error instanceof Error ? error.message : "Couldn't create the share link. Retry.");
-    } finally {
-      setSharing(false);
+    setError(null);
+    setData(answer.body);
+  }, [base]);
+
+  useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- fetch the receipt on mount; state is set when it answers
+    void load();
+  }, [load]);
+
+  useEffect(() => {
+    if (!data || data.receipt.final) return;
+    // Ask again while it has not settled, but never from a hidden tab.
+    const timer = window.setInterval(() => {
+      if (document.visibilityState === 'visible') void load();
+    }, 5000);
+    return () => window.clearInterval(timer);
+  }, [data, load]);
+
+  const final = data?.receipt.final === true;
+  useEffect(() => {
+    if (!final) return;
+    let live = true;
+    void call<{ live?: number; canRevoke?: boolean }>(`${base}/share`).then((answer) => {
+      if (live && answer.ok && answer.body) setShares({ live: answer.body.live ?? 0, canRevoke: answer.body.canRevoke === true });
+    });
+    return () => {
+      live = false;
+    };
+  }, [final, base, link]);
+
+  async function stopSharing() {
+    setBusy('stop');
+    const answer = await call(`${base}/share`, { method: 'DELETE' });
+    setBusy(null);
+    if (!answer.ok) {
+      setNote(errorText(answer, 'Sharing could not be stopped. Try again.'));
+      return;
     }
+    setLink(null);
+    setShares((s) => ({ ...s, live: 0 }));
+    setNote('Sharing stopped. Links you sent no longer open this receipt.');
   }
 
+  async function makeLink(): Promise<string | null> {
+    if (link) return link;
+    setBusy('link');
+    const answer = await call<{ url?: string }>(`${base}/share`, { body: { via: 'link' } });
+    setBusy(null);
+    if (!answer.ok || !answer.body?.url) {
+      setNote(errorText(answer, 'The link could not be made.'));
+      return null;
+    }
+    setLink(answer.body.url);
+    return answer.body.url;
+  }
+
+  if (error && !data) {
+    return (
+      <div className="space-y-3">
+        <p role="alert" className="rounded-xl border border-[var(--error)]/40 bg-[var(--error-bg)] p-4 text-sm font-medium text-[var(--error)]">{error}</p>
+        <QuietButton type="button" onClick={() => void load()}>Try again</QuietButton>
+      </div>
+    );
+  }
+  if (!data) return <p role="status" className="flex items-center gap-2 text-sm text-[#326273]"><Loader2 className="h-4 w-4 animate-spin" aria-hidden="true" />Loading the receipt…</p>;
+  const { receipt, rows } = data;
+
   return (
-    <div className="space-y-5">
-      <Receipt
-        ref={ref}
-        txDigest={digest ?? state.receiptObjectId ?? 'Pending'}
-        sender="Splash operator"
-        recipient={state.recipient.bank?.account ?? state.recipient.name}
-        recipientName={state.recipient.name}
-        amount={state.amount.value}
-        currency="USD"
-        fee={state.quote?.fee ?? '0.00'}
-        feeTier={state.funding.selection.feeTier}
-        fundingSource={selectionLabel(state.funding.selection)}
-        status={digest ? 'Settled' : 'Pending'}
-        timestamp={issuedAt}
-        reference={reference}
-        explorerUrl={explorerUrl}
-        amountToPayee={state.quote?.netReceived ? `${state.quote.netReceived} ${state.amount.targetCurrency}` : undefined}
-        fxRate={state.quote?.fxRate}
-        targetCurrency={state.amount.targetCurrency}
-        invoiceRef={state.invoiceId}
-        invoiceClosedOnDelivery={Boolean(state.invoiceId && digest)}
-        approvedBy={operatorName ?? undefined}
-        sentAt={issuedAt}
-        deliveredAt={digest ? issuedAt : undefined}
-        walrusBlobId={state.walrusBlobId}
-        sealedState={state.walrusBlobId ? 'Sealed · access-controlled' : undefined}
-        networkLine={receiptNetworkLine()}
-      />
-      <SettlementProofDrawer
-        transferIntentId={state.transferIntentId}
-        fallback={{
-          digest,
-          walrusBlobId: state.walrusBlobId,
-          auditAnchorId: state.auditAnchorId,
-        }}
-      />
-      {state.composedActions?.length ? (
-        <section className="rounded-2xl border border-[#5C9EAD]/30 bg-[#5C9EAD]/10 p-5">
-          <div className="text-xs font-semibold uppercase tracking-[0.15em] text-[#326273]/90">Composed actions in this digest</div>
-          <div className="mt-3 grid gap-3 md:grid-cols-3">
-            {state.composedActions.map((action) => (
-              <div key={`${action.kind}-${action.eventType}`} className="rounded-xl bg-white p-3">
-                <div className="text-sm font-semibold text-[#326273]">{action.label}</div>
-                <pre className="mt-2 max-h-28 overflow-auto whitespace-pre-wrap break-all text-[13px] text-[#326273]/90">{JSON.stringify(action.data, null, 2)}</pre>
-              </div>
-            ))}
+    <div className="space-y-6">
+      <div>
+        <h2 className="text-[22px] font-extrabold text-[#0c3e48]">{receipt.final ? 'Paid' : 'On its way'}</h2>
+        <p className="mt-1 text-sm text-[#326273]">{receipt.final ? 'Keep this receipt, or hand it to your supplier or accountant.' : 'The payment has not settled yet. This page updates when it has; the receipt is final then.'}</p>
+      </div>
+
+      <article aria-label="Payment receipt" className="overflow-hidden rounded-2xl border border-[#326273]/15 bg-white">
+        <header className="flex items-center justify-between gap-3 border-b border-[#326273]/10 bg-[#0c3e48] px-4 py-3 text-white">
+          <span className="text-sm font-bold">Payment receipt</span>
+          {receipt.final ? (
+            <span className="inline-flex items-center gap-1.5 rounded-full bg-[var(--ok-bg)] px-2.5 py-1 text-[12px] font-bold text-[#145d6a]"><BadgeCheck className="h-3.5 w-3.5" aria-hidden="true" />Verified on Sui</span>
+          ) : (
+            <span className="rounded-full bg-[var(--gold-tint)] px-2.5 py-1 text-[12px] font-bold text-[#0c3e48]">Not final</span>
+          )}
+        </header>
+        <dl className="divide-y divide-[#326273]/10 text-sm">
+          {rows.map((row) => (
+            <div key={row.label} className="flex flex-col gap-0.5 px-4 py-3 sm:flex-row sm:items-baseline sm:justify-between sm:gap-6">
+              <dt className="text-[#326273]">{row.label}</dt>
+              <dd className="min-w-0 break-words font-mono font-bold tabular-nums text-[#0c3e48] sm:text-right">{row.value}</dd>
+            </div>
+          ))}
+        </dl>
+        {receipt.verifyUrl ? (
+          <a href={receipt.verifyUrl} target="_blank" rel="noopener noreferrer" className="flex min-h-11 items-center justify-between gap-3 border-t border-[#326273]/10 px-4 py-3 text-sm font-bold text-[#0d6370] hover:bg-[#f4f8fa] focus-visible:outline-2 focus-visible:outline-offset-[-2px] focus-visible:outline-[#0d6370]">
+            Check this payment on Sui
+            <ExternalLink className="h-4 w-4" aria-hidden="true" />
+          </a>
+        ) : null}
+      </article>
+
+      {receipt.final ? (
+        <section aria-labelledby="share-h" className="space-y-3">
+          <h3 id="share-h" className="text-base font-extrabold text-[#0c3e48]">Share</h3>
+          <div className="flex flex-wrap gap-2">
+            <QuietButton
+              type="button"
+              disabled={busy === 'link'}
+              onClick={async () => {
+                const url = await makeLink();
+                if (url) window.open(whatsappUrl(receiptShareText(receipt, url)), '_blank', 'noopener,noreferrer');
+              }}
+            >
+              <MessageCircle className="h-4 w-4" aria-hidden="true" />WhatsApp
+            </QuietButton>
+            <QuietButton
+              type="button"
+              disabled={busy === 'link'}
+              onClick={async () => {
+                const url = await makeLink();
+                if (url) window.location.href = mailtoUrl({ subject: `Receipt ${receipt.receiptNo}`, body: receiptShareText(receipt, url) });
+              }}
+            >
+              <Mail className="h-4 w-4" aria-hidden="true" />Email
+            </QuietButton>
+            <QuietButton
+              type="button"
+              disabled={busy === 'link'}
+              onClick={async () => {
+                const url = await makeLink();
+                if (!url) return;
+                try {
+                  await navigator.clipboard.writeText(url);
+                  setNote('Link copied. Anyone with it can check this receipt against Sui, without signing in. It works for 30 days.');
+                } catch {
+                  setNote(url);
+                }
+              }}
+            >
+              {link ? <Check className="h-4 w-4" aria-hidden="true" /> : <Copy className="h-4 w-4" aria-hidden="true" />}Copy link
+            </QuietButton>
+            <a href={`${base}/receipt?format=pdf`} className="inline-flex h-11 items-center justify-center gap-2 rounded-xl border border-[#326273]/25 bg-white px-4 text-sm font-semibold text-[#1F4452] transition-colors hover:border-[#0d6370] focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[#0d6370]">
+              <FileText className="h-4 w-4" aria-hidden="true" />PDF
+            </a>
           </div>
-          <div className="mt-3 grid gap-2 text-[13px] text-[#326273]/90 md:grid-cols-3">
-            <div className="break-all"><strong>Intent:</strong> {state.paymentIntentId}</div>
-            <div className="break-all"><strong>Walrus:</strong> {state.walrusBlobId}</div>
-            <div className="break-all"><strong>Anchor:</strong> {state.auditAnchorId}</div>
-          </div>
+          {shares.live > 0 ? (
+            <div className="flex flex-col gap-2 rounded-xl border border-[#326273]/15 bg-[#f4f8fa] p-3 text-sm text-[#1F4452] sm:flex-row sm:items-center sm:justify-between">
+              <p>{shares.live === 1 ? '1 link to this receipt is live.' : `${shares.live} links to this receipt are live.`} Anyone who has one can open it without signing in.</p>
+              {shares.canRevoke ? (
+                <QuietButton type="button" disabled={busy === 'stop'} onClick={() => void stopSharing()}>
+                  Stop sharing
+                </QuietButton>
+              ) : null}
+            </div>
+          ) : null}
+          <form
+            className="flex flex-col gap-2 sm:flex-row"
+            onSubmit={async (e) => {
+              e.preventDefault();
+              if (!isEmail(accountant.trim())) {
+                setNote('Enter your accountant’s email address.');
+                return;
+              }
+              setBusy('accountant');
+              const answer = await call(`${base}/share`, { body: { via: 'accountant', to: accountant.trim() } });
+              setBusy(null);
+              setNote(answer.ok ? `Sent to ${accountant.trim()}.` : errorText(answer, 'The email could not be sent.'));
+            }}
+          >
+            <div className="flex-1">
+              <TextInput type="email" icon={Mail} aria-label="Your accountant's email" placeholder="accountant@firm.com" value={accountant} onChange={(e) => setAccountant(e.target.value)} autoComplete="off" />
+            </div>
+            <PrimaryButton type="submit" disabled={busy === 'accountant'}>
+              <Send className="h-4 w-4" aria-hidden="true" />
+              {busy === 'accountant' ? 'Sending…' : 'Send to accountant'}
+            </PrimaryButton>
+          </form>
+          {note ? <p role="status" className="break-words text-sm text-[#1F4452]">{note}</p> : null}
         </section>
       ) : null}
-      <div className="flex flex-wrap gap-3">
-        <button onClick={() => print()} className="flex-1 min-w-[170px] inline-flex items-center justify-center gap-2 rounded-lg bg-[#326273] py-3 font-semibold text-white shadow-sm transition-colors hover:bg-[#264e5b]">
-          <FileText className="h-4 w-4" aria-hidden="true" />
-          PDF for your accountant
-        </button>
-        <button
-          onClick={() => void shareWithSupplier()}
-          disabled={sharing}
-          className="flex-1 min-w-[170px] inline-flex items-center justify-center gap-2 rounded-lg border border-[#5C9EAD] bg-white py-3 font-semibold text-[#326273] transition-colors hover:bg-[#5C9EAD]/10 disabled:cursor-not-allowed disabled:opacity-50"
-        >
-          {sharing ? <Loader2 className="h-4 w-4 animate-spin" aria-hidden="true" /> : <Link2 className="h-4 w-4" aria-hidden="true" />}
-          Share with supplier
-        </button>
-        <button onClick={reset} className="flex-1 min-w-[140px] rounded-lg border border-[#326273]/20 py-3 font-medium text-[#326273] hover:border-[#5C9EAD]">New transfer</button>
+
+      <EInvoice base={base} data={data} onChange={load} />
+
+      <div className="flex justify-end border-t border-[#326273]/10 pt-4">
+        <PrimaryButton type="button" onClick={onNew}>Make another payment</PrimaryButton>
       </div>
     </div>
   );
 }
 
-function selectionLabel(selection: TransferState['funding']['selection']) {
-  if (selection.type === 'held') return 'Splash balance';
-  if (selection.type === 'fiat') return `Bank USD via ${selection.provider}`;
-  return `${selection.asset} via ${selection.rail}${selection.sourceChain ? ` / ${selection.sourceChain}` : ''}`;
+function EInvoice({ base, data, onChange }: { base: string; data: ReceiptAnswer; onChange: () => Promise<void> }) {
+  const { offer, made } = data.eInvoice;
+  const [open, setOpen] = useState(false);
+  const [form, setForm] = useState({ buyerTin: '', phone: '', stateCode: '14', description: '', classification: '034', exchangeRateToMyr: '' });
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const set = (key: keyof typeof form, value: string) => setForm((f) => ({ ...f, [key]: value }));
+  if (!offer.offered && offer.why !== 'supplier_country_unknown') return null;
+
+  async function make() {
+    setBusy(true);
+    setError(null);
+    const answer = await call(`${base}/e-invoice`, { body: { ...form, refresh: Boolean(made) } });
+    setBusy(false);
+    if (!answer.ok) {
+      const problems = (answer.body as { problems?: string[] } | null)?.problems;
+      setError(problems?.length ? problems.join(' ') : errorText(answer, 'The e-invoice could not be made.'));
+      return;
+    }
+    await onChange();
+  }
+
+  return (
+    <section aria-labelledby="einv-h" className="space-y-3 rounded-2xl border border-[#326273]/15 bg-white p-4 sm:p-5">
+      <h3 id="einv-h" className="text-base font-extrabold text-[#0c3e48]">Self-billed e-invoice (MyInvois)</h3>
+      {!offer.offered ? (
+        <p className="text-sm leading-6 text-[#1F4452]">Splash does not have this supplier&rsquo;s country on file, so it cannot tell whether a self-billed e-invoice applies. Ask Splash support to add it.</p>
+      ) : made && !open ? (
+        <div className="space-y-3">
+          <p className="text-sm leading-6 text-[#1F4452]">Your file is ready ({made.fileName}). Download it, then upload it in MyInvois. Splash does not submit it for you.</p>
+          <div className="flex flex-wrap gap-2">
+            <a href={`${base}/e-invoice?download=1`} className="inline-flex h-11 items-center justify-center gap-2 rounded-xl border border-[#326273]/25 bg-white px-4 text-sm font-semibold text-[#1F4452] hover:border-[#0d6370] focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[#0d6370]">
+              <Download className="h-4 w-4" aria-hidden="true" />Download the file
+            </a>
+            <a href={EINVOICE_GUIDELINE.portal} target="_blank" rel="noopener noreferrer" className="inline-flex h-11 items-center justify-center gap-2 rounded-xl bg-[#0d6370] px-5 text-sm font-bold text-white hover:bg-[#073d49] focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[#0d6370]">
+              <ExternalLink className="h-4 w-4" aria-hidden="true" />Open MyInvois
+            </a>
+            <QuietButton type="button" onClick={() => setOpen(true)}>Correct the details</QuietButton>
+          </div>
+          <p className="text-[13px] leading-5 text-[#326273]">A corrected file replaces this one. If you already filed this one in MyInvois, cancel it there first.</p>
+        </div>
+      ) : !open ? (
+        <>
+          <p className="text-sm leading-6 text-[#1F4452]">For a Malaysian business paying a supplier outside Malaysia, LHDN asks you to issue the e-invoice yourself. Splash makes the file; you upload it in MyInvois.</p>
+          <QuietButton type="button" onClick={() => setOpen(true)}>Make the e-invoice file</QuietButton>
+        </>
+      ) : (
+        <form
+          noValidate
+          onSubmit={(e) => {
+            e.preventDefault();
+            void make();
+          }}
+          className="space-y-4"
+        >
+          <div className="grid gap-4 sm:grid-cols-2">
+            <Field label="Your business's TIN" hint="As LHDN issued it" htmlFor="e-tin"><TextInput id="e-tin" mono value={form.buyerTin} onChange={(e) => set('buyerTin', e.target.value.toUpperCase())} autoComplete="off" /></Field>
+            <Field label="Contact number" htmlFor="e-phone"><TextInput id="e-phone" inputMode="tel" value={form.phone} onChange={(e) => set('phone', e.target.value)} autoComplete="tel" /></Field>
+            <Field label="Your state" htmlFor="e-state">
+              <SelectInput id="e-state" value={form.stateCode} onChange={(e) => set('stateCode', e.target.value)}>
+                {Object.entries(MY_STATE_CODES).map(([code, name]) => (
+                  <option key={code} value={code}>{name}</option>
+                ))}
+              </SelectInput>
+            </Field>
+            <Field label="This paid for" htmlFor="e-class">
+              <SelectInput id="e-class" value={form.classification} onChange={(e) => set('classification', e.target.value)}>
+                {Object.entries(SELF_BILLED_CLASSIFICATIONS).map(([code, name]) => (
+                  <option key={code} value={code}>{name.replace('Self-billed - ', '')}</option>
+                ))}
+              </SelectInput>
+            </Field>
+            <Field label="What was bought" htmlFor="e-desc" className="sm:col-span-2"><TextInput id="e-desc" value={form.description} onChange={(e) => set('description', e.target.value)} autoComplete="off" /></Field>
+            <Field label="Exchange rate, MYR per USD" hint="For the payment date" htmlFor="e-rate"><TextInput id="e-rate" mono inputMode="decimal" value={form.exchangeRateToMyr} onChange={(e) => set('exchangeRateToMyr', e.target.value)} autoComplete="off" /></Field>
+          </div>
+          {error ? <p role="alert" className="text-sm font-medium text-[var(--error)]">{error}</p> : null}
+          <div className="flex flex-wrap gap-2">
+            <PrimaryButton type="submit" disabled={busy}>{busy ? 'Making the file…' : 'Make the file'}</PrimaryButton>
+            <QuietButton type="button" onClick={() => setOpen(false)}>Cancel</QuietButton>
+          </div>
+          <p className="text-[13px] leading-5 text-[#326273]">Splash fills in none of these for you. The file follows {EINVOICE_GUIDELINE.version}, checked {EINVOICE_GUIDELINE.checkedOn}.</p>
+        </form>
+      )}
+    </section>
+  );
 }

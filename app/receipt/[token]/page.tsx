@@ -5,9 +5,14 @@ import Link from 'next/link';
 
 import Receipt from '@/components/Receipt';
 import { receiptNetworkLine } from '@/lib/network-label';
+import SharedReceiptCard from '@/components/transfer/SharedReceiptCard';
 import { findReceiptShare } from '@/lib/server/receipt-share';
+import { sharedReceiptFor } from '@/lib/server/shared-receipt';
 
 export const dynamic = 'force-dynamic';
+
+/** A shared receipt is for the people it was sent to: search engines do not index it, and following a link out of it sends no referrer. */
+export const metadata = { robots: { index: false, follow: false }, referrer: 'no-referrer' as const };
 
 /**
  * W9.2 — public, read-only receipt (the "Share with supplier" link).
@@ -18,6 +23,25 @@ export const dynamic = 'force-dynamic';
  */
 export default async function SharedReceiptPage({ params }: { params: Promise<{ token: string }> }) {
   const { token } = await params;
+  // A link made from Transfer (v2 brief 5.4): a settled payment's receipt from this business's own records.
+  const payment = await sharedReceiptFor(token);
+  if (payment) {
+    return (
+      <main className="min-h-screen bg-[#F6F0ED] px-4 py-10">
+        <div className="mx-auto max-w-xl space-y-5">
+          <header className="flex items-center justify-between gap-3">
+            <Link href="/" className="inline-flex items-center gap-2 text-[#1F4452]">
+              <Image src="/splash-main-icon.png" alt="Splash" width={32} height={31} className="h-8 w-8 object-contain" />
+              <strong className="text-lg font-semibold">Splash<span className="text-[#5C9EAD]">.</span></strong>
+            </Link>
+            <span className="text-[13px] font-medium text-[#326273]">Read-only receipt</span>
+          </header>
+          <SharedReceiptCard receipt={payment} />
+          <p className="text-center text-[13px] font-medium text-[#326273]">Shared by the payer. This link shows this receipt only.</p>
+        </div>
+      </main>
+    );
+  }
   const share = await findReceiptShare(token);
   if (!share) notFound();
 
@@ -48,6 +72,7 @@ export default async function SharedReceiptPage({ params }: { params: Promise<{ 
           recipientName={intent.recipientName}
           amount={intent.sourceAmountUsd}
           currency="USD"
+          fees={intent.fees}
           fee={display.fee ?? '—'}
           fundingSource={intent.fundingMethod === 'BANK_USD' ? 'Bank USD' : intent.fundingMethod === 'HELD_BALANCE' ? 'Splash balance' : undefined}
           status={settled ? 'Settled' : 'Pending'}

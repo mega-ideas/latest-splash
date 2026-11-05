@@ -22,7 +22,7 @@ export type PolicyContext = {
   now?: string;
 };
 
-const OUTBOUND_KINDS = new Set<ProposalKind>(['PAYMENT', 'BATCH_PAYOUT', 'NETTING_SETTLE']);
+const OUTBOUND_KINDS = new Set<ProposalKind>(['PAYMENT', 'NETTING_SETTLE']);
 const APPROVAL_ROLES = new Set<UserRole>(['OWNER', 'FINANCE_ADMIN', 'APPROVER']);
 const AUTO_INTERNAL_ROLES = new Set<UserRole>(['OWNER', 'FINANCE_ADMIN', 'APPROVER', 'MAKER']);
 
@@ -158,10 +158,7 @@ export function evaluatePolicy(ctx: PolicyContext): PolicyDecision {
   // so a sub-minimum proposal can never be approved by any route.
   if (OUTBOUND_KINDS.has(proposal.kind)) {
     const amountUsd = Number(amount) / USD_MICRO;
-    const minimum = checkMinimumSettlement(
-      amountUsd,
-      proposal.kind === 'BATCH_PAYOUT' ? 'batch' : 'transfer',
-    );
+    const minimum = checkMinimumSettlement(amountUsd, 'transfer');
     if (!minimum.ok) {
       return { outcome: 'BLOCK', reason: `below minimum (${formatUsd(minimum.minimumUsd)})` };
     }

@@ -1,24 +1,20 @@
 'use client';
 
-import { suiScanBaseUrl } from '@/lib/explorer';
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
+import Link from 'next/link';
 import {
   AlertCircle,
-  ArrowDownLeft,
   ArrowLeft,
   ArrowRight,
-  ArrowUpRight,
-  CalendarDays,
   CheckCircle2,
   ChevronRight,
-  Clock,
-  CreditCard,
   Info,
+  KeyRound,
   Landmark,
-  Lock,
-  PiggyBank,
+  Loader2,
+  PenLine,
+  RefreshCw,
   ShieldCheck,
-  Sparkles,
   Sprout,
   TrendingUp,
   Wallet,
@@ -27,67 +23,106 @@ import {
 import { cn } from '../../../lib/utils';
 import MoneyPathPanel from '@/components/compliance/MoneyPathPanel';
 import LocalTime from '@/components/LocalTime';
+import FundReferralPanel from '@/components/treasury/FundReferralPanel';
+import { FEES_OFF_NOTICE } from '@/lib/fees/copy';
+import { buildFeeQuote } from '@/lib/fees/quote';
+import { BANK_DESTINATION, destinationKind } from '@/lib/fees/destination';
+import { usePublishedFees } from '@/lib/fees/use-published-pricing';
+import { formatMinor } from '@/lib/money';
+import { suiScanAccountUrlOn } from '@/lib/explorer';
+import { formatUsdc, STABLECOIN_NETWORK } from '@/lib/payments/stablecoin-lane';
+import { projectValue, usdcValueOfUsdy } from '@/lib/payments/treasury-usdy';
+
+/*
+ * Treasury (v2 D9, brief 5.7). USDY sits in the business's own Splash
+ * Wallet: the business swaps USDC for it, and redeems it back, from there,
+ * and the wallet's owners sign every swap. Splash holds nothing and signs
+ * nothing, so nothing here waits on custody.
+ *
+ * The concept of the earlier page is kept: two vessels (operating cash and
+ * treasury) joined by a direction-aware channel that holds the control, a
+ * single-series projection, the netting simulator, activity, how it works,
+ * and the risk card. What changed is where the money is and what the numbers
+ * are: balances are the wallet's, read from Sui; a swap is quoted at the
+ * redemption rate and on the Sui market, side by side; and nothing is shown
+ * that did not come from the chain, the quote or this business's records.
+ */
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
-type TxType = 'deposit' | 'withdraw' | 'yield';
-type HistoryEntry = {
+type Direction = 'swap' | 'redeem';
+type Role = 'OWNER' | 'FINANCE_ADMIN' | 'APPROVER' | 'MAKER' | 'VIEWER' | string;
+
+type Order = {
   id: string;
-  type: TxType;
-  desc: string;
-  amount: string;
-  amountNum: number;
-  at: string; // ISO 8601, shown with LocalTime
-  status: 'confirmed' | 'pending';
+  intentId: string;
+  direction: Direction;
+  amountInMinor: string;
+  minOutMinor: string;
+  quotedOutMinor: string;
+  status: 'awaiting_signatures' | 'executed' | 'failed' | 'expired' | 'cancelled';
+  sandbox: boolean;
+  txDigest: string | null;
+  createdAt: string;
 };
 
-type WithdrawalNotice = {
-  id: string;
-  amount: number;
-  availableAt: string;
+type Overview = {
+  flags: { fundReferral: boolean; tokenizedStocks: boolean };
+  /**
+   * Whether an order would reach a swap route on this server, and which kind:
+   * the server's own resolver, the one the order uses. The page follows this,
+   * never the raw switch.
+   */
+  swapRoute: { ok: true; kind: 'sandbox' | 'live' } | { ok: false; reason: string };
+  issuerConfirmed: boolean;
+  issuer: string;
+  fundManager: string;
+  role: Role;
+  /** Whether this member may hand a swap to the signers: the server's role list, not the page's. */
+  canOrder: boolean;
+  /** The business wallet as the server resolved it from the org's own account. */
+  wallet: 'address' | 'none' | 'off' | 'network' | 'error';
+  price: { status: 'LIVE' | 'STALE' | 'UNAVAILABLE'; priceMicros: string | null; asOf: string | null };
+  apyPct: number;
+  address: string | null;
+  balances: { usdcMinor: string; usdyMinor: string } | { error: string } | null;
+  orders: Order[] | null;
 };
 
-type TreasurySnapshot = {
-  available: number;
-  treasuryPrincipal: number;
-  treasuryYield: number;
-  executionEnabled: boolean;
-  rate: { apy: number; label: string; introductory: boolean };
-  withdrawalWindowLabel?: string;
-  notices: Array<{ id: string; amount: number; availableAt: string }>;
+type Quote = {
+  direction: Direction;
+  allowed: boolean;
+  mode: 'SANDBOX' | 'LIVE';
+  reasons: string[];
+  orderable: boolean;
+  inMinor: string;
+  outMinor: string | null;
+  minOutMinor: string | null;
+  atRedemptionMinor: string | null;
+  shortfallBps: number | null;
+  providers: string[];
+  error?: string;
 };
 
-type TreasuryRateView = { apy: number; label: string; introductory: boolean };
-
-// ─── Seed data ──────────────────────────────────────────────────────────────
-
-const DAILY_BARS_7D = [
-  { day: 'Mon', label: 'Mon · 19 May', amount: 3.18 },
-  { day: 'Tue', label: 'Tue · 20 May', amount: 3.21 },
-  { day: 'Wed', label: 'Wed · 21 May', amount: 3.19 },
-  { day: 'Thu', label: 'Thu · 22 May', amount: 3.24 },
-  { day: 'Fri', label: 'Fri · 23 May', amount: 3.22 },
-  { day: 'Sat', label: 'Sat · 24 May', amount: 3.25 },
-  { day: 'Sun', label: 'Sun · 25 May', amount: 3.28 },
-];
-
-const DAILY_BARS_30D = Array.from({ length: 30 }, (_, i) => {
-  const base = 3.05 + (i / 30) * 0.3;
-  const noise = Math.sin(i * 1.3) * 0.04 + Math.cos(i * 0.7) * 0.03;
-  return { day: `D${i + 1}`, label: `Day ${i + 1} · ${i + 1} Apr 2026`, amount: +(base + noise).toFixed(2) };
-});
-
-const RISK_ITEMS = [
-  { label: 'Instrument',     value: 'Ondo USDY · US Treasury bills',  icon: Landmark    },
-  { label: 'Smart contract', value: 'Sui-native USDY',                icon: ShieldCheck },
-  { label: 'Custody',        value: 'Segregated from operating cash', icon: Lock        },
-  { label: 'Liquidity',      value: 'USD ↔ USDY conversion on Sui',   icon: Zap         },
-];
+type WalletSource = 'loading' | 'address' | 'none' | 'pending' | 'off' | 'network' | 'no_access' | 'error';
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
-function fmtUsd(n: number) {
-  return n.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+const MINOR = /^\d{1,30}$/;
+const minor = (s: string | null | undefined): bigint | null => (s && MINOR.test(s) ? BigInt(s) : null);
+
+/** Six-decimal amounts, as a person types them. */
+function parseAmountMinor(input: string): bigint | null {
+  const m = /^(\d{1,12})(?:\.(\d{0,6}))?$/.exec(input.trim());
+  if (!m) return null;
+  const value = BigInt(m[1]) * 1_000_000n + BigInt(((m[2] ?? '') + '000000').slice(0, 6));
+  return value > 0n ? value : null;
+}
+
+function shortfallLabel(bps: number): string {
+  if (bps <= 0) return 'no loss against the redemption value';
+  const pct = bps / 100;
+  return `${pct >= 10 ? pct.toFixed(0) : pct.toFixed(1)}% below the redemption value`;
 }
 
 /** Catmull-Rom → cubic bézier: a smooth line through every data point. */
@@ -111,216 +146,232 @@ function smoothPath(pts: Array<[number, number]>) {
 /** Chart geometry (viewBox units). */
 const CH = { W: 560, H: 160, PL: 10, PR: 10, PT: 16, PB: 10 };
 
-function HistIcon({ type }: { type: TxType }) {
-  if (type === 'deposit')  return <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-[#D9A441]/15"><ArrowUpRight size={14} className="text-[#8b6418]" /></div>;
-  if (type === 'withdraw') return <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-[#5C9EAD]/10"><ArrowDownLeft size={14} className="text-[var(--info)]" /></div>;
-  return <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-[#6FB4A0]/18"><Sparkles size={14} className="text-[var(--ok)]" /></div>;
-}
+const ORDER_STATUS: Record<Order['status'], { label: string; className: string }> = {
+  awaiting_signatures: { label: 'Waiting for signatures', className: 'bg-[var(--gold-tint)] text-[var(--gold-ink)]' },
+  executed: { label: 'Done', className: 'bg-[var(--ok-bg)] text-[#1F4452]' },
+  failed: { label: 'Failed', className: 'bg-[var(--error-bg)] text-[var(--error)]' },
+  expired: { label: 'Expired', className: 'bg-[#326273]/8 text-[#326273]' },
+  cancelled: { label: 'Cancelled', className: 'bg-[#326273]/8 text-[#326273]' },
+};
+
+const WALLET_NOTE: Record<Exclude<WalletSource, 'address' | 'loading'>, string> = {
+  none: 'Your business has no Splash Wallet yet. Set it up in Wallet, then hold USDY in it here.',
+  pending: 'Your business wallet is being set up. Its balances appear here once its owners confirm it.',
+  off: 'Business wallets are not available on this server, so no balance is shown. Quotes still work.',
+  network: 'Treasury reads USDY on the Sui network it is issued on, and this server keeps business wallets on another one, so no balance is shown.',
+  no_access: 'Your membership does not include the business wallet, so its balances are not shown.',
+  error: 'The wallet balance could not be read just now.',
+};
 
 // ─── Page ────────────────────────────────────────────────────────────────────
 
 export default function TreasuryPage() {
-  // Nothing is shown until the ledger answers. This page used to render
-  // $11,140 / $24,500 / $98.72 and six "confirmed" transactions from
-  // constants before its first fetch returned — a demo presented as a balance.
-  const [phase, setPhase]             = useState<'loading' | 'gated' | 'live'>('loading');
-  const [available, setAvailable]     = useState(0); // USD · 0% · instant
-  const [balance, setBalance]         = useState(0); // USDY · Smart Treasury
-  const [yield30d, setYield30d]       = useState(0);
-  const [rate, setRate]               = useState<TreasuryRateView>({ apy: 0, label: 'Variable rate loading...', introductory: false });
-  const [executionEnabled, setExecutionEnabled] = useState(false);
-  const [history, setHistory]         = useState<HistoryEntry[]>([]);
-  const [notices, setNotices]         = useState<WithdrawalNotice[]>([]);
-  const [tab, setTab]                 = useState<'toTreasury' | 'toAvailable'>('toTreasury');
-  const [amount, setAmount]           = useState('');
-  const [toast, setToast]             = useState('');
-  const [loading, setLoading]         = useState(false);
-  const [chartRange, setChartRange]   = useState<'7d' | '30d'>('7d');
-  const [hoveredBar, setHoveredBar]   = useState<number | null>(null);
+  // Nothing is shown as a figure until the chain or the business's records
+  // answer: the earlier page rendered a seeded yield series and constant
+  // balances as if they were the business's.
+  const [overview, setOverview] = useState<Overview | null>(null);
+  const [overviewError, setOverviewError] = useState<string | null>(null);
+  const [walletSource, setWalletSource] = useState<WalletSource>('loading');
+  const [direction, setDirection] = useState<Direction>('swap');
+  const [amount, setAmount] = useState('');
+  const [quote, setQuote] = useState<Quote | null>(null);
+  const [intentId, setIntentId] = useState<string | null>(null);
+  const [quoting, setQuoting] = useState(false);
+  const [sending, setSending] = useState(false);
+  const [sendError, setSendError] = useState<string | null>(null);
+  const [toast, setToast] = useState('');
+  const [chartRange, setChartRange] = useState<'30d' | '1y'>('30d');
+  const [hovered, setHovered] = useState<number | null>(null);
   const [nettingRatio, setNettingRatio] = useState(60);
-  const [windowLabel, setWindowLabel] = useState('1–2 business days');
-  const [confirmCancelId, setConfirmCancelId] = useState<string | null>(null);
-  const [cancelingId, setCancelingId] = useState<string | null>(null);
-  const counterRef                    = useRef(9);
 
-  // Server-backed ledger: real two-bucket balances, floating rate, and notices.
-  function applySnapshot(d: TreasurySnapshot) {
-    setAvailable(d.available);
-    setBalance(d.treasuryPrincipal);
-    setYield30d(d.treasuryYield);
-    setExecutionEnabled(d.executionEnabled === true);
-    if (d.rate?.apy) setRate({ apy: d.rate.apy, label: d.rate.label, introductory: d.rate.introductory });
-    if (d.withdrawalWindowLabel) setWindowLabel(d.withdrawalWindowLabel);
-    setNotices((d.notices ?? []).map((n) => ({ id: n.id, amount: n.amount, availableAt: n.availableAt })));
-  }
-
-  useEffect(() => {
-    let active = true;
-    const load = () => {
-      fetch('/api/treasury')
-        .then(async (r) => {
-          if (!active) return;
-          if (r.ok) {
-            applySnapshot((await r.json()) as TreasurySnapshot);
-            setPhase('live');
-            return;
-          }
-          // Phase 0: the treasury is not a feature yet, and the page says so
-          // instead of showing a projection as if it were a balance.
-          const body = (await r.json().catch(() => ({}))) as { code?: string };
-          if (r.status === 403 && body.code === 'custody_not_licensed') setPhase('gated');
-        })
-        .catch(() => {});
-    };
-    load();
-    // Refetch when the tab regains focus so a dev-server restart (env flags
-    // like TREASURY_EXECUTION_ENABLED load at boot) reflects without a manual
-    // reload — the "buttons stuck on Execution disabled" trap.
-    const onFocus = () => load();
-    window.addEventListener('focus', onFocus);
-    document.addEventListener('visibilitychange', onFocus);
-    return () => {
-      active = false;
-      window.removeEventListener('focus', onFocus);
-      document.removeEventListener('visibilitychange', onFocus);
-    };
+  const load = useCallback(async () => {
+    setOverviewError(null);
+    // The server resolves the business wallet from the org's own account; the
+    // page names no address, so what it shows is always the business's.
+    try {
+      const res = await fetch('/api/treasury/wallet', { cache: 'no-store' });
+      const body = await res.json().catch(() => null);
+      if (!res.ok || !body) {
+        setWalletSource(res.status === 403 ? 'no_access' : 'error');
+        setOverviewError((body as { error?: string } | null)?.error ?? 'Treasury could not be loaded.');
+        return;
+      }
+      setOverview(body as Overview);
+      setWalletSource((body as Overview).wallet);
+    } catch {
+      setWalletSource('error');
+      setOverviewError('Treasury could not be loaded.');
+    }
   }, []);
 
-  const dailyYield  = balance * (rate.apy / 100) / 365;
-  const projAnnual  = balance * (rate.apy / 100);
-  const totalPosition = available + balance + yield30d;
+  useEffect(() => {
+    // The first read happens when the page opens; later reads follow actions.
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    void load();
+  }, [load]);
 
-  const bars        = chartRange === '7d' ? DAILY_BARS_7D : DAILY_BARS_30D;
-  const maxBar      = Math.max(...bars.map((d) => d.amount));
-  const minBar      = Math.min(...bars.map((d) => d.amount));
-  const totalRange  = bars.reduce((sum, d) => sum + d.amount, 0);
-  const avgBar      = totalRange / bars.length;
-  const focusBar    = hoveredBar !== null ? bars[hoveredBar] : null;
-
-  // Area-chart geometry. The y-domain is zoomed to the daily range (a zero
-  // baseline would flatten a ~$3 series into a block) — the high/low gridline
-  // labels state the scale explicitly so the zoom is never deceptive.
-  const chart = useMemo(() => {
-    const span = maxBar - minBar || 0.1;
-    const dMin = minBar - span * 0.35;
-    const dMax = maxBar + span * 0.2;
-    const cx = (i: number) => CH.PL + (bars.length > 1 ? (i / (bars.length - 1)) * (CH.W - CH.PL - CH.PR) : (CH.W - CH.PL - CH.PR) / 2);
-    const cy = (v: number) => CH.PT + (1 - (v - dMin) / (dMax - dMin)) * (CH.H - CH.PT - CH.PB);
-    const pts = bars.map((d, i) => [cx(i), cy(d.amount)] as [number, number]);
-    const line = smoothPath(pts);
-    const area = `${line} L ${cx(bars.length - 1).toFixed(1)},${CH.H - CH.PB} L ${cx(0).toFixed(1)},${CH.H - CH.PB} Z`;
-    return { pts, line, area, cy, maxIdx: bars.findIndex((b) => b.amount === maxBar) };
-  }, [bars, maxBar, minBar]);
-
-  const parsedAmount   = Number.parseFloat(amount);
-  const validAmount    = Number.isFinite(parsedAmount) && parsedAmount > 0;
-  const toTreasury     = tab === 'toTreasury';
-  const sourceBalance  = toTreasury ? available : balance + yield30d;
-
-  const treasuryShare = useMemo(() => {
-    const total = available + balance;
-    return total > 0 ? Math.round((balance / total) * 100) : 0;
-  }, [available, balance]);
+  const balances = overview?.balances && 'usdcMinor' in overview.balances ? overview.balances : null;
+  const balanceError = overview?.balances && 'error' in overview.balances ? overview.balances.error : null;
+  const usdcMinor = minor(balances?.usdcMinor);
+  const usdyMinor = minor(balances?.usdyMinor);
+  const priceMicros = minor(overview?.price.priceMicros);
+  const usdyValueMinor = usdyMinor !== null && priceMicros !== null ? usdcValueOfUsdy(usdyMinor, priceMicros) : null;
+  const totalMinor = usdcMinor !== null && usdyValueMinor !== null ? usdcMinor + usdyValueMinor : null;
+  const treasuryShare = totalMinor && totalMinor > 0n && usdyValueMinor !== null ? Number((usdyValueMinor * 100n) / totalMinor) : 0;
+  const apy = overview?.apyPct ?? 0;
+  const rateLabel = overview ? `Modeled at ${apy}% APY · variable` : overviewError ? 'Rate unavailable' : 'Rate loading…';
+  const toTreasury = direction === 'swap';
+  const amountMinor = parseAmountMinor(amount);
+  const sourceMinor = toTreasury ? usdcMinor : usdyMinor;
+  const overBalance = amountMinor !== null && sourceMinor !== null && amountMinor > sourceMinor;
+  const canOrder = overview?.canOrder === true;
 
   function showToast(msg: string) {
     setToast(msg);
     setTimeout(() => setToast(''), 3600);
   }
 
-  function handleSubmit(e: React.FormEvent) {
+  function changeDirection(next: Direction) {
+    setDirection(next);
+    setAmount('');
+    setQuote(null);
+    setIntentId(null);
+    setSendError(null);
+  }
+
+  async function getQuote(e: React.FormEvent) {
     e.preventDefault();
-    if (!executionEnabled) {
-      showToast('Projection only - execution disabled pending regulatory approval.');
-      return;
+    if (amountMinor === null) return;
+    setQuoting(true);
+    setSendError(null);
+    try {
+      const res = await fetch('/api/treasury/wallet/quote', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ direction, amount: amount.trim() }),
+      });
+      const body = (await res.json().catch(() => ({ error: 'The quote could not be read.' }))) as Quote;
+      setQuote(res.ok ? body : { ...body, error: body.error ?? 'The quote could not be made.' });
+      // One intent per quote: a retried or double-clicked send is the same order.
+      setIntentId(typeof crypto !== 'undefined' && 'randomUUID' in crypto ? crypto.randomUUID() : null);
+    } catch {
+      setQuote({ error: 'The quote could not be made.' } as Quote);
+    } finally {
+      setQuoting(false);
     }
-    if (!validAmount) return;
-    if (parsedAmount > sourceBalance) {
-      showToast(toTreasury ? 'Insufficient Available balance' : 'Insufficient Smart Treasury balance');
-      return;
+  }
+
+  async function sendToSigners() {
+    if (!quote?.orderable || !quote.minOutMinor || !intentId) return;
+    setSending(true);
+    setSendError(null);
+    try {
+      const res = await fetch('/api/treasury/wallet/orders', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ intentId, direction, amount: amount.trim(), minOutMinor: quote.minOutMinor }),
+      });
+      const body = (await res.json().catch(() => ({}))) as { error?: string; order?: { sandbox?: boolean } };
+      if (!res.ok) {
+        setSendError(body.error ?? 'It could not be sent to your signers.');
+        return;
+      }
+      // Said from the order the server made: a sandbox order reached no one.
+      showToast(body.order?.sandbox === false ? "Sent to your wallet's owners to sign" : 'Recorded in the sandbox. Nothing was sent to your owners.');
+      setAmount('');
+      setQuote(null);
+      setIntentId(null);
+      await load();
+    } catch {
+      setSendError('It could not be sent to your signers. Try again.');
+    } finally {
+      setSending(false);
     }
-    setLoading(true);
-    const action = toTreasury ? 'move' : 'withdraw';
-    const id = `tx_t${String(counterRef.current++).padStart(3, '0')}`;
-    fetch('/api/treasury', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ action, amountUsd: parsedAmount }),
-    })
-      .then(async (r) => {
-        const d = (await r.json()) as TreasurySnapshot & { error?: string };
-        if (!r.ok) throw new Error(d.error || 'Move failed');
-        applySnapshot(d);
-        if (action === 'move') {
-          setHistory((prev) => [{ id, type: 'deposit', desc: 'Available → Smart Treasury', amount: `+$${fmtUsd(parsedAmount)}`, amountNum: parsedAmount, at: new Date().toISOString(), status: 'confirmed' }, ...prev]);
-          showToast(`$${fmtUsd(parsedAmount)} allocated to Smart Treasury`);
-        } else {
-          setHistory((prev) => [{ id, type: 'withdraw', desc: 'Smart Treasury → Available (notice)', amount: `-$${fmtUsd(parsedAmount)}`, amountNum: -parsedAmount, at: new Date().toISOString(), status: 'pending' }, ...prev]);
-          showToast(`Withdrawal requested · funds in Available in ${windowLabel}`);
-        }
-        setAmount('');
-      })
-      .catch((err: unknown) => showToast(err instanceof Error ? err.message : 'Move failed'))
-      .finally(() => setLoading(false));
   }
 
-  function cancelWithdrawal(noticeId: string) {
-    setCancelingId(noticeId);
-    fetch('/api/treasury', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ action: 'cancel', noticeId }),
-    })
-      .then(async (r) => {
-        const d = (await r.json()) as TreasurySnapshot & { error?: string };
-        if (!r.ok) throw new Error(d.error || 'Cancel failed');
-        applySnapshot(d);
-        showToast('Withdrawal cancelled · funds returned to Smart Treasury');
-      })
-      .catch((err: unknown) => showToast(err instanceof Error ? err.message : 'Cancel failed'))
-      .finally(() => { setCancelingId(null); setConfirmCancelId(null); });
-  }
+  // ── Projection: one series, one hue. From the USDY held, or the amount
+  // being swapped in when nothing is held yet. A projection, labelled so.
+  const basisMinor = usdyValueMinor && usdyValueMinor > 0n ? usdyValueMinor : toTreasury && amountMinor ? amountMinor : null;
+  // Plain computations: the React Compiler memoizes them.
+  const projection = basisMinor === null || apy <= 0
+    ? null
+    : (chartRange === '30d' ? Array.from({ length: 31 }, (_, i) => i) : Array.from({ length: 13 }, (_, i) => Math.round((i * 365) / 12)))
+      .map((days, i) => ({
+        days,
+        label: chartRange === '30d' ? `Day ${days}` : `Month ${i}`,
+        valueMinor: projectValue(basisMinor, apy, days),
+      }));
 
-  const previewSource = validAmount ? Math.max(0, sourceBalance - parsedAmount) : null;
-  const simulationPrincipal = 5_000;
-  const simulationFee = simulationPrincipal * 0.014 + 4.5;
-  const feesDeleted = simulationFee * (nettingRatio / 100);
-  const feesRelocated = simulationFee - feesDeleted;
+  const chart = (() => {
+    if (!projection) return null;
+    const values = projection.map((p) => Number(p.valueMinor) / 1e6);
+    const lo = values[0];
+    const hi = values[values.length - 1];
+    const span = hi - lo || Math.max(lo * 0.001, 0.01);
+    const dMin = lo - span * 0.25;
+    const dMax = hi + span * 0.15;
+    const cx = (i: number) => CH.PL + (i / (values.length - 1)) * (CH.W - CH.PL - CH.PR);
+    const cy = (v: number) => CH.PT + (1 - (v - dMin) / (dMax - dMin)) * (CH.H - CH.PT - CH.PB);
+    const pts = values.map((v, i) => [cx(i), cy(v)] as [number, number]);
+    const line = smoothPath(pts);
+    const area = `${line} L ${cx(values.length - 1).toFixed(1)},${CH.H - CH.PB} L ${cx(0).toFixed(1)},${CH.H - CH.PB} Z`;
+    return { pts, line, area, cy, lo, hi };
+  })();
 
-  if (phase !== 'live') {
-    return (
-      <div className="mx-auto max-w-5xl space-y-6">
-        <header>
-          <span className="dash-kicker">Working capital</span>
-          <h1 className="dash-title mt-2">Smart Treasury</h1>
-        </header>
-        {phase === 'gated' ? (
-          <section className="dash-block p-6">
-            <h2 className="text-base font-semibold text-[#1F4452]">Treasury arrives with our licence</h2>
-            <p className="mt-2 max-w-2xl text-sm leading-relaxed text-[#326273]/90">
-              Holding your funds — a treasury balance, a stored balance, a sweep account — is a Phase 2 capability that
-              needs a money-broking licence Splash does not hold yet. Today Splash pays out only: what you send is
-              delivered to the recipient, and nothing is kept on your behalf.
-            </p>
-            <p className="mt-3 max-w-2xl text-sm leading-relaxed text-[#326273]/90">
-              Until then this page shows no balances and no projections. When the licence and the custody package are in
-              place, the treasury opens here — every move approval-gated, every withdrawal on a cancellable notice.
-            </p>
-          </section>
-        ) : (
-          <section className="dash-block p-6 text-sm text-[#326273]/90">Loading the ledger…</section>
-        )}
-        <MoneyPathPanel />
-      </div>
-    );
-  }
+  const focus = projection && hovered !== null ? projection[hovered] : null;
+  const endValue = projection ? projection[projection.length - 1].valueMinor : null;
+  const gain = projection && endValue !== null ? endValue - projection[0].valueMinor : null;
 
+  // The simulation's fee is Splash's fee on a 5,000 USDC payout to a bank,
+  // from the schedule in force and whether its fees are on: no flat rate and
+  // no fixed fee (A1 §2.8), and none while FeeConfig's fees are off. Nothing
+  // is shown until the schedule has loaded.
+  const publishedFees = usePublishedFees();
+  const simulationPrincipalMicro = 5_000_000_000n;
+  const simulationFee = publishedFees
+    ? Number(formatMinor(
+      buildFeeQuote({ kind: destinationKind(BANK_DESTINATION), principalMinor: simulationPrincipalMicro, state: { feesOn: publishedFees.feesOn, schedule: publishedFees.schedule } }).splashFee.minor,
+      6,
+    ))
+    : null;
+  const feesDeleted = simulationFee === null ? null : simulationFee * (nettingRatio / 100);
+  const feesRelocated = simulationFee === null || feesDeleted === null ? null : simulationFee - feesDeleted;
+
+  const issuer = overview?.issuer ?? 'the issuer';
+  const route = overview?.swapRoute ?? null;
+  const sandboxRoute = route?.ok === true && route.kind === 'sandbox';
+  const statusLine = !overview || !route
+    ? null
+    : !route.ok
+      ? { tone: 'quiet' as const, title: 'Quotes only on this server', detail: `${route.reason} Every quote below is live.` }
+      : !overview.issuerConfirmed
+        ? { tone: 'quiet' as const, title: 'Preview', detail: `Eligibility with ${issuer} is not confirmed for your business yet, so quotes are a preview and nothing is sent to your owners.` }
+        : route.kind === 'sandbox'
+          ? { tone: 'quiet' as const, title: 'Sandbox', detail: 'Orders on this server are recorded in the sandbox. Nothing is sent to your owners and nothing is swapped.' }
+          : { tone: 'ok' as const, title: "Swaps go to your wallet's owners to sign", detail: 'Splash signs nothing and holds nothing. The wallet threshold your owners set applies to every swap.' };
+
+  const unit = { in: toTreasury ? 'USDC' : 'USDY', out: toTreasury ? 'USDY' : 'USDC' };
+  const walletKnown = walletSource === 'address' && balances !== null;
+  const disabledReason = !overview || !route
+    ? null
+    : !route.ok
+      ? 'This server sends no swap to your signers.'
+      : !canOrder
+        ? 'Your role does not include asking the wallet to swap. An owner, finance admin, approver or maker can.'
+        : quote && !quote.error && quote.mode === 'SANDBOX'
+          ? 'Preview only: nothing is swapped until issuer eligibility is confirmed.'
+          : quote && !quote.error && !quote.orderable
+            ? 'This quote cannot be sent to your signers.'
+            : null;
+
+  // Bottom room at phone width, so the floating Zeke button never covers the last lines.
   return (
-    <div className="mx-auto max-w-5xl space-y-6">
+    <div className="mx-auto max-w-5xl space-y-6 pb-24 sm:pb-0">
 
       {/* Toast */}
       {toast && (
-        <div className="fixed bottom-6 right-6 z-50 flex items-center gap-2 rounded-xl bg-[#0c3e48] px-4 py-3 text-sm font-medium text-white shadow-xl">
-          <CheckCircle2 size={15} className="text-[#6FB4A0]" /> {toast}
+        <div role="status" className="fixed inset-x-4 bottom-24 z-50 flex items-center gap-2 rounded-xl sm:inset-x-auto sm:bottom-6 sm:right-6 bg-[#0c3e48] px-4 py-3 text-sm font-medium text-white shadow-xl">
+          <CheckCircle2 size={15} className="text-[#6FB4A0]" aria-hidden="true" /> {toast}
         </div>
       )}
 
@@ -328,199 +379,253 @@ export default function TreasuryPage() {
       <header className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
         <div>
           <span className="dash-kicker">Working capital</span>
-          <h1 className="dash-title mt-2">Smart Treasury</h1>
-          <p className="mt-1 text-[13px] font-medium text-[#326273]">
-            Operating cash stays instant. Idle balance can be allocated to Ondo USDY at a variable rate, shown here as a projection.
+          <h1 className="dash-title mt-2">Treasury</h1>
+          <p className="mt-1 max-w-2xl text-[13px] font-medium text-[#326273]">
+            Operating cash stays in USDC. Idle cash can be swapped for USDY in your own Splash Wallet, and redeemed from there.
           </p>
         </div>
         <div className="flex flex-wrap items-center gap-2">
-          <span className="rounded-full border border-[#D9A441]/40 bg-[#D9A441]/12 px-3 py-1.5 text-sm font-semibold text-[#1F4452]">{rate.label}</span>
-          {rate.introductory && (
-            <span className="rounded-full border border-[#E39774]/40 bg-[#E39774]/12 px-3 py-1.5 text-[13px] font-semibold text-[#1F4452]">Introductory rate</span>
-          )}
+          <span className="rounded-full border border-[#D9A441]/40 bg-[#D9A441]/12 px-3 py-1.5 text-sm font-semibold text-[#1F4452]">{rateLabel}</span>
+          <span className="rounded-full border border-[var(--gold-light)] bg-[var(--gold-tint)] px-3 py-1.5 text-[13px] font-semibold text-[var(--gold-ink)]">Not Shariah-compliant</span>
         </div>
       </header>
 
-      {/* Status strip — reflects the real execution state (never contradicts it) */}
-      {executionEnabled ? (
-        <div className="dash-block flex flex-wrap items-center gap-x-3 gap-y-1 border-[#6FB4A0]/30 bg-[#6FB4A0]/8 p-4 text-sm font-semibold text-[#1F4452]">
-          <span className="inline-flex items-center gap-1.5"><CheckCircle2 size={14} className="text-[var(--ok)]" /> Treasury execution enabled · sandbox</span>
-          <span className="text-[13px] font-medium text-[#326273]/90">
-            Moves settle against the Splash sandbox ledger · every action is approval-gated · withdrawals follow the notice window. Partners of record hold customer funds.
+      {/* Status strip: what this server will do with a swap */}
+      {statusLine && (
+        <div className={cn(
+          'dash-block flex flex-wrap items-center gap-x-3 gap-y-1 p-4 text-sm font-semibold text-[#1F4452]',
+          statusLine.tone === 'ok' ? 'border-[#6FB4A0]/30 bg-[#6FB4A0]/8' : 'border-[#D9A441]/30 bg-[var(--gold-tint)]/60',
+        )}>
+          <span className="inline-flex items-center gap-1.5">
+            {statusLine.tone === 'ok'
+              ? <CheckCircle2 size={14} className="text-[var(--ok)]" aria-hidden="true" />
+              : <Info size={14} className="text-[var(--gold-ink)]" aria-hidden="true" />}
+            {statusLine.title}
           </span>
+          <span className="text-[13px] font-medium text-[#326273]">{statusLine.detail}</span>
         </div>
-      ) : (
-        <div className="dash-block border-accent/30 bg-accent/10 p-4 text-sm font-semibold text-foreground">
-          Projection only — execution disabled pending regulatory approval.
-          <span className="mt-1 block text-[13px] font-medium text-foreground/90">
-            Partners of record hold customer funds; treasury figures stay projected until controls are live.
-          </span>
+      )}
+      {overviewError && (
+        <div role="alert" className="dash-block flex flex-wrap items-center gap-3 p-4 text-sm font-medium text-[var(--error)]">
+          {overviewError}
+          <button type="button" onClick={() => void load()} className="inline-flex min-h-11 items-center gap-1 font-semibold text-[#145d6a] underline decoration-1 underline-offset-2">
+            <RefreshCw size={13} aria-hidden="true" /> Try again
+          </button>
         </div>
       )}
 
-      {/* ── Signature: the Treasury Rail ─────────────────────────────────────
-          Two vessels joined by a direction-aware allocation channel. The move
-          control lives inside the flow, because allocation IS this page. */}
-      <section className="dash-surface dash-reveal overflow-hidden">
+      {/* ── Signature: the Treasury rail ─────────────────────────────────────
+          Two vessels in the business's own wallet, joined by a
+          direction-aware channel. The control lives inside the flow, because
+          moving between the two IS this page. */}
+      <section className="dash-surface dash-reveal overflow-hidden" aria-labelledby="rail-title">
         <div className="flex flex-wrap items-center justify-between gap-2 border-b border-[#326273]/8 px-5 py-3">
-          <div className="flex items-center gap-2">
-            <span className="dash-kicker">Treasury rail</span>
-          </div>
-          <div className="flex flex-wrap items-center gap-x-4 gap-y-1 text-[13px] font-medium text-[#326273]/90">
-            <span>Total position <span className="dash-num font-semibold text-[#0c3e48]">${fmtUsd(totalPosition)}</span></span>
-            <span className="text-[var(--ok)]">+${fmtUsd(yield30d)} yield accrued</span>
-            <span className="hidden sm:inline">{treasuryShare}% allocated to treasury</span>
+          <h2 id="rail-title" className="dash-kicker">Treasury rail · your Splash Wallet</h2>
+          <div className="flex flex-wrap items-center gap-x-4 gap-y-1 text-[13px] font-medium text-[#326273]">
+            {totalMinor !== null ? (
+              <>
+                <span>In the wallet <span className="dash-num font-semibold text-[#0c3e48]">${formatUsdc(totalMinor)}</span></span>
+                <span className="hidden sm:inline">{treasuryShare}% in USDY</span>
+              </>
+            ) : (
+              <span>{walletSource === 'loading' ? 'Reading the wallet…' : walletSource === 'address' ? (balanceError ?? 'Reading the wallet…') : WALLET_NOTE[walletSource]}</span>
+            )}
           </div>
         </div>
 
-        <div className="grid gap-4 p-5 lg:grid-cols-[1fr_250px_1fr] lg:items-stretch">
+        <div className="grid gap-4 p-5 lg:grid-cols-[1fr_270px_1fr] lg:items-stretch">
 
-          {/* Vessel · Operating cash */}
-          <div className={cn(
-            'dash-block flex flex-col justify-between p-5 transition-shadow',
-            !toTreasury && 'tr-vessel-dest-teal',
-          )}>
+          {/* Vessel · Operating cash (USDC) */}
+          <div className={cn('dash-block flex flex-col p-5 transition-shadow', !toTreasury && 'tr-vessel-dest-teal')}>
             <div className="flex items-center justify-between">
-              <span className="text-[12px] font-semibold uppercase tracking-[0.12em] text-[#326273]/90">Operating cash</span>
+              <span className="text-[12px] font-semibold uppercase tracking-[0.12em] text-[#326273]">Operating cash</span>
               <div className="flex items-center gap-1.5">
                 <span className={cn(
                   'rounded-full px-2 py-0.5 text-[12px] font-semibold uppercase tracking-[0.14em] transition-colors',
-                  toTreasury
-                    ? 'border border-[#326273]/20 bg-white text-[#326273]/90'
-                    : 'bg-[#237284] text-white shadow-sm',
+                  toTreasury ? 'border border-[#326273]/20 bg-white text-[#326273]' : 'bg-[#237284] text-white shadow-sm',
                 )}>
                   {toTreasury ? 'From' : 'To'}
                 </span>
-                <div className="rounded-lg bg-[#5C9EAD]/10 p-1.5"><Wallet size={14} className="text-[var(--info)]" /></div>
+                <div className="rounded-lg bg-[#5C9EAD]/10 p-1.5"><Wallet size={14} className="text-[var(--info)]" aria-hidden="true" /></div>
               </div>
             </div>
-            <div className="dash-num mt-2 text-3xl font-semibold text-[#0c3e48]">${fmtUsd(available)}</div>
+            <div className="dash-num mt-2 text-3xl font-semibold text-[#0c3e48]">{usdcMinor !== null ? `$${formatUsdc(usdcMinor)}` : '—'}</div>
             <div className="mt-1 flex items-center gap-2 text-[13px] font-medium">
-              <span className="rounded-full bg-[#326273]/8 px-2 py-0.5 text-[#326273]/90">USD</span>
-              <span className="text-[#326273]/90">Instant · funds every payout · 0%</span>
+              <span className="rounded-full bg-[#326273]/8 px-2 py-0.5 text-[#326273]">USDC</span>
+              <span className="text-[#326273]">Funds every payout · no yield</span>
             </div>
-            <div className="mt-3 h-1.5 overflow-hidden rounded-full bg-[#326273]/8">
-              <div className="h-full rounded-full bg-[#5C9EAD]/70 transition-all" style={{ width: `${100 - treasuryShare}%` }} />
+            <div className="min-h-3 flex-1" aria-hidden="true" />
+            <div className="h-1.5 overflow-hidden rounded-full bg-[#326273]/8">
+              <div className="h-full rounded-full bg-[#5C9EAD]/70 transition-all" style={{ width: `${walletKnown ? 100 - treasuryShare : 0}%` }} />
             </div>
           </div>
 
-          {/* Channel · allocation control inside the flow */}
+          {/* Channel · the quote and the hand-off to the signers */}
           <form
-            onSubmit={handleSubmit}
+            onSubmit={getQuote}
             className={cn(
               'flex flex-col gap-3 rounded-2xl border p-4 transition-colors',
               toTreasury ? 'border-[#D9A441]/35 bg-[#D9A441]/6' : 'border-[#5C9EAD]/30 bg-[#5C9EAD]/6',
             )}
           >
-            <div className="flex rounded-lg bg-white p-1 shadow-sm">
-              {([['toTreasury', 'Allocate', ArrowRight], ['toAvailable', 'Withdraw', ArrowLeft]] as const).map(([t, lbl, Icon]) => (
+            <div className="flex rounded-lg bg-white p-1 shadow-sm" role="group" aria-label="Direction">
+              {([['swap', 'Swap in', ArrowRight], ['redeem', 'Redeem', ArrowLeft]] as const).map(([d, lbl, Icon]) => (
                 <button
-                  key={t}
+                  key={d}
                   type="button"
-                  disabled={!executionEnabled}
-                  aria-pressed={tab === t}
-                  onClick={() => { setTab(t); setAmount(''); }}
+                  aria-pressed={direction === d}
+                  onClick={() => changeDirection(d)}
                   className={cn(
-                    'inline-flex flex-1 items-center justify-center gap-1.5 rounded-md py-2 text-[13px] font-semibold transition-all disabled:cursor-not-allowed disabled:opacity-50',
-                    tab === t
-                      ? (t === 'toTreasury' ? 'bg-[#C99A2E] text-[#073d49] shadow' : 'bg-[#237284] text-white shadow')
+                    'inline-flex min-h-10 flex-1 items-center justify-center gap-1.5 rounded-md text-[13px] font-semibold transition-all',
+                    direction === d
+                      ? (d === 'swap' ? 'bg-[#C99A2E] text-[#073d49] shadow' : 'bg-[#237284] text-white shadow')
                       // bg-transparent is load-bearing: the global button
-                      // normalizer paints any bg-less flex-1 button teal,
-                      // which made BOTH toggle tabs look pressed.
-                      : 'bg-transparent text-[#326273]/90 hover:text-[#326273]',
+                      // normalizer paints any bg-less flex-1 button teal.
+                      : 'bg-transparent text-[#326273] hover:text-[#0c3e48]',
                   )}
                 >
-                  <Icon size={12} />{lbl}
+                  <Icon size={12} aria-hidden="true" />{lbl}
                 </button>
               ))}
             </div>
 
-            {/* Explicit direction — sentence order matches the vessels' layout */}
+            {/* Explicit direction: sentence order matches the vessels' layout */}
             <div className={cn(
               'flex items-center justify-center gap-1.5 rounded-lg px-2 py-1.5 text-[13px] font-semibold',
-              toTreasury ? 'bg-[#D9A441]/14 text-[#1F4452]' : 'bg-[#5C9EAD]/14 text-[#326273]',
+              toTreasury ? 'bg-[#D9A441]/14 text-[#1F4452]' : 'bg-[#5C9EAD]/14 text-[#1F4452]',
             )}>
-              <span>Operating cash</span>
-              {toTreasury ? <ArrowRight size={12} className="shrink-0" /> : <ArrowLeft size={12} className="shrink-0" />}
-              <span>Smart Treasury</span>
+              <span>USDC</span>
+              {toTreasury ? <ArrowRight size={12} className="shrink-0" aria-label="to" /> : <ArrowLeft size={12} className="shrink-0" aria-label="from" />}
+              <span>USDY</span>
             </div>
 
-            {/* Direction-aware flow strip */}
             <div className={cn('tr-flow', !toTreasury && 'tr-flow-reverse')} aria-hidden="true">
               <span className="tr-flow-dot" /><span className="tr-flow-dot" /><span className="tr-flow-dot" />
             </div>
 
             <div>
-              <label className="text-[12px] font-medium uppercase tracking-wide text-[#326273]/90">Amount (USD)</label>
-              <div className="mt-1 flex items-center gap-2 rounded-lg border border-[#326273]/15 bg-white px-3 py-2.5 transition-all focus-within:border-[#D9A441] focus-within:ring-2 focus-within:ring-[#D9A441]/15">
-                <span className="text-sm font-medium text-[#326273]/90">$</span>
+              <label htmlFor="treasury-amount" className="text-[12px] font-semibold uppercase tracking-wide text-[#326273]">Amount ({unit.in})</label>
+              <div className="mt-1 flex items-center gap-2 rounded-lg border border-[#326273]/20 bg-white px-3 py-2.5 transition-all focus-within:border-[#C99A2E] focus-within:ring-2 focus-within:ring-[#D9A441]/25">
                 <input
+                  id="treasury-amount"
                   type="text"
                   inputMode="decimal"
+                  autoComplete="off"
                   value={amount}
-                  disabled={!executionEnabled}
-                  onChange={(e) => { const v = e.target.value; if (v === '' || /^\d*\.?\d{0,2}$/.test(v)) setAmount(v); }}
+                  onChange={(e) => {
+                    const v = e.target.value;
+                    if (v === '' || /^\d{0,12}(\.\d{0,6})?$/.test(v)) {
+                      setAmount(v);
+                      setQuote(null);
+                      setIntentId(null);
+                    }
+                  }}
                   placeholder="0.00"
-                  className="min-w-0 flex-1 bg-transparent text-sm font-semibold text-[#1F4452] placeholder-[#326273]/30 outline-none"
+                  aria-describedby="treasury-amount-help"
+                  className="min-w-0 flex-1 bg-transparent font-mono text-sm font-semibold text-[#1F4452] placeholder-[#326273]/60 outline-none"
                 />
-                <button type="button" disabled={!executionEnabled} onClick={() => setAmount(String(Math.floor(sourceBalance)))} className="shrink-0 rounded-md bg-[#326273]/10 px-2 py-0.5 text-[13px] font-semibold text-[#326273]/90 transition-colors hover:bg-[#326273]/20 hover:text-[#326273] disabled:cursor-not-allowed disabled:opacity-40">MAX</button>
+                {sourceMinor !== null && sourceMinor > 0n && (
+                  <button
+                    type="button"
+                    onClick={() => { setAmount(formatMinor(sourceMinor, 6)); setQuote(null); setIntentId(null); }}
+                    aria-label={`Use the full ${unit.in} balance`}
+                    className="-my-2 inline-flex min-h-11 min-w-11 shrink-0 items-center justify-center rounded-md bg-[#326273]/10 px-3 text-[13px] font-semibold text-[#326273] transition-colors hover:bg-[#326273]/20"
+                  >
+                    Max
+                  </button>
+                )}
               </div>
-            </div>
-
-            <div className="space-y-1.5 rounded-lg bg-white/70 p-3 text-[13px]">
-              <div className="flex justify-between"><span className="text-[#326273]/90">From {toTreasury ? 'Operating (USD)' : 'Treasury (USDY)'}</span><span className="dash-num font-medium text-[#1F4452]">${fmtUsd(sourceBalance)}</span></div>
-              {previewSource !== null && (
-                <div className="flex justify-between border-t border-[#326273]/10 pt-1.5"><span className="font-medium text-[#326273]/90">After</span><span className="dash-num font-semibold text-[#1F4452]">${fmtUsd(previewSource)}</span></div>
-              )}
-              {!toTreasury && (
-                <div className="flex items-center gap-1.5 text-[13px] text-[#9f5839]"><Clock size={10} /> Lands in Operating in {windowLabel}</div>
-              )}
+              <p id="treasury-amount-help" className={cn('mt-1 text-[12px]', overBalance ? 'font-semibold text-[var(--error)]' : 'text-[#326273]')}>
+                {overBalance
+                  ? `More than the ${unit.in} in the wallet.`
+                  : sourceMinor !== null
+                    ? `${formatUsdc(sourceMinor)} ${unit.in} in the wallet`
+                    : 'Quote any amount; balances show once the wallet is read.'}
+              </p>
             </div>
 
             <button
               type="submit"
-              disabled={!executionEnabled || loading || !validAmount}
+              disabled={quoting || amountMinor === null}
+              className="dash-btn-ghost inline-flex min-h-11 w-full items-center justify-center gap-1.5 !py-2 !text-[13px] disabled:opacity-50"
+            >
+              {quoting ? <Loader2 className="h-4 w-4 animate-spin" aria-hidden="true" /> : null} Get quote
+            </button>
+
+            {quote && (
+              <div className="space-y-1.5 rounded-lg bg-white/80 p-3 text-[13px] text-[#1F4452]" aria-live="polite">
+                {quote.error ? (
+                  <p role="alert" className="font-medium text-[var(--error)]">{quote.error}</p>
+                ) : (
+                  <>
+                    {quote.atRedemptionMinor && (
+                      <div className="flex justify-between gap-3"><span className="text-[#326273]">At the redemption rate</span><span className="dash-num font-mono">{formatUsdc(BigInt(quote.atRedemptionMinor))} {unit.out}</span></div>
+                    )}
+                    {quote.outMinor && (
+                      <div className={cn('rounded-md border px-2 py-1.5', quote.orderable ? 'border-[#326273]/12' : 'border-[var(--warn)] bg-[var(--warn-bg)]')}>
+                        <div className="flex justify-between gap-3 font-semibold"><span>On Sui right now</span><span className="dash-num font-mono">{formatUsdc(BigInt(quote.outMinor))} {unit.out}</span></div>
+                        {quote.shortfallBps !== null && <p className="mt-0.5 text-[12px] text-[#326273]">{shortfallLabel(quote.shortfallBps)}</p>}
+                      </div>
+                    )}
+                    {quote.minOutMinor && quote.orderable && (
+                      <div className="flex justify-between gap-3 border-t border-[#326273]/10 pt-1.5"><span className="font-medium text-[#326273]">At least</span><span className="dash-num font-mono font-semibold">{formatUsdc(BigInt(quote.minOutMinor))} {unit.out}</span></div>
+                    )}
+                    {quote.reasons.map((r) => <p key={r} className="text-[12px] leading-5 text-[var(--warn-ink)]">{r}</p>)}
+                    <p className="text-[12px] text-[#326273]">No Splash fee on a swap. The route&rsquo;s cost is in the market figure above.</p>
+                  </>
+                )}
+              </div>
+            )}
+
+            <button
+              type="button"
+              onClick={() => void sendToSigners()}
+              disabled={sending || !quote?.orderable || disabledReason !== null || overBalance || !intentId}
               className={cn(
-                'w-full rounded-lg py-2.5 text-sm font-semibold transition-all disabled:opacity-50',
-                // Gold takes ink words and lightens on hover; the teal is deep enough for white.
+                'inline-flex min-h-11 w-full items-center justify-center gap-1.5 rounded-lg text-sm font-semibold transition-all disabled:opacity-50',
+                // Gold takes ink words; the teal is deep enough for white.
                 toTreasury ? 'bg-[#C99A2E] text-[#073d49] hover:bg-[#C99A2E]/85' : 'bg-[#237284] text-white hover:bg-[#145d6a]',
               )}
             >
-              {!executionEnabled ? 'Execution disabled' : loading ? 'Processing…' : toTreasury
-                ? <span className="inline-flex items-center gap-1.5">Allocate to Treasury <ArrowRight size={14} /></span>
-                : <span className="inline-flex items-center gap-1.5"><ArrowLeft size={14} /> Withdraw to Operating</span>}
+              {sending ? <Loader2 className="h-4 w-4 animate-spin" aria-hidden="true" /> : <PenLine size={14} aria-hidden="true" />}
+              {sandboxRoute ? 'Record a sandbox order' : 'Send to owners to sign'}
             </button>
+            {(disabledReason || sendError) && (
+              <p role={sendError ? 'alert' : undefined} className={cn('text-[12px] leading-5', sendError ? 'font-medium text-[var(--error)]' : 'text-[#326273]')}>
+                {sendError ?? disabledReason}
+              </p>
+            )}
           </form>
 
-          {/* Vessel · Smart Treasury */}
-          <div className={cn(
-            'dash-block dash-block-accent flex flex-col justify-between p-5 transition-shadow',
-            toTreasury && 'tr-vessel-dest',
-          )}>
+          {/* Vessel · Treasury (USDY) */}
+          <div className={cn('dash-block dash-block-accent flex flex-col p-5 transition-shadow', toTreasury && 'tr-vessel-dest')}>
             <div className="flex items-center justify-between">
-              <span className="text-[12px] font-semibold uppercase tracking-[0.12em] text-[#8b6418]">Smart Treasury</span>
+              <span className="text-[12px] font-semibold uppercase tracking-[0.12em] text-[var(--gold-ink)]">Treasury</span>
               <div className="flex items-center gap-1.5">
                 <span className={cn(
                   'rounded-full px-2 py-0.5 text-[12px] font-semibold uppercase tracking-[0.14em] transition-colors',
-                  toTreasury
-                    ? 'bg-[#C99A2E] text-[#073d49] shadow-sm'
-                    : 'border border-[#326273]/20 bg-white text-[#326273]/90',
+                  toTreasury ? 'bg-[#C99A2E] text-[#073d49] shadow-sm' : 'border border-[#326273]/20 bg-white text-[#326273]',
                 )}>
                   {toTreasury ? 'To' : 'From'}
                 </span>
-                <div className="rounded-lg bg-[#D9A441]/18 p-1.5"><TrendingUp size={14} className="text-[#8b6418]" /></div>
+                <div className="rounded-lg bg-[#D9A441]/18 p-1.5"><TrendingUp size={14} className="text-[var(--gold-ink)]" aria-hidden="true" /></div>
               </div>
             </div>
-            <div className="dash-num mt-2 text-3xl font-semibold text-[#0c3e48]">${fmtUsd(balance)}</div>
+            <div className="dash-num mt-2 text-3xl font-semibold text-[#0c3e48]">{usdyMinor !== null ? formatUsdc(usdyMinor) : '—'}<span className="ml-1.5 text-base font-semibold text-[#326273]">USDY</span></div>
             <div className="mt-1 flex flex-wrap items-center gap-2 text-[13px] font-medium">
-              <span className="rounded-full bg-[#D9A441]/10 px-2 py-0.5 text-[#8b6418]">Ondo USDY</span>
-              <span className="text-[#326273]/90">{rate.label}</span>
+              <span className="rounded-full bg-[#D9A441]/10 px-2 py-0.5 text-[var(--gold-ink)]">US Treasury bills</span>
+              <span className="text-[#326273]">
+                {usdyValueMinor !== null ? `Worth $${formatUsdc(usdyValueMinor)} at the redemption rate` : rateLabel}
+              </span>
             </div>
-            <div className="mt-2 flex items-center gap-1.5 text-[13px] font-medium text-[var(--ok)]">
-              <Sparkles size={11} /> +${fmtUsd(yield30d)} accrued · ~${dailyYield.toFixed(2)}/day · accrues daily 00:00 UTC
-            </div>
-            <div className="mt-3 h-1.5 overflow-hidden rounded-full bg-[#326273]/8">
-              <div className="h-full rounded-full bg-[#C99A2E]/80 transition-all" style={{ width: `${treasuryShare}%` }} />
+            <p className="mt-2 text-[12px] leading-5 text-[#326273]">
+              {priceMicros !== null
+                ? <>USDY price ${formatUsdc(priceMicros)}{overview?.price.asOf ? <>, <LocalTime value={overview.price.asOf} /></> : null}{overview?.price.status === 'STALE' ? ' (stale)' : ''}</>
+                : overview ? 'The USDY price is unavailable, so nothing is valued.' : overviewError ? 'The USDY price could not be read.' : 'Reading the USDY price…'}
+            </p>
+            <div className="min-h-3 flex-1" aria-hidden="true" />
+            <div className="h-1.5 overflow-hidden rounded-full bg-[#326273]/8">
+              <div className="h-full rounded-full bg-[#C99A2E]/80 transition-all" style={{ width: `${walletKnown ? treasuryShare : 0}%` }} />
             </div>
           </div>
         </div>
@@ -530,146 +635,126 @@ export default function TreasuryPage() {
       <div className="grid gap-5 lg:grid-cols-[1fr_300px]">
 
         {/* ── Left ── */}
-        <div className="space-y-5">
+        <div className="min-w-0 space-y-5">
 
-          {/* Yield chart — one series, one hue */}
-          <div className="dash-surface p-5">
-            <div className="flex flex-wrap items-start justify-between gap-3">
+          {/* Projection: one series, one hue, labelled as a projection */}
+          <section className="dash-surface p-5" aria-labelledby="projection-title">
+            <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
               <div>
                 <div className="flex items-center gap-2">
-                  <h2 className="text-sm font-semibold text-[#1F4452]">USDY daily yield</h2>
-                  <span className="inline-flex items-center gap-1 rounded-full bg-[#D9A441]/15 px-1.5 py-0.5 text-[13px] font-semibold text-[#8b6418]">
-                    variable
-                  </span>
+                  <h2 id="projection-title" className="text-sm font-semibold text-[#1F4452]">Projected value</h2>
+                  <span className="rounded-full bg-[#D9A441]/15 px-1.5 py-0.5 text-[12px] font-semibold text-[var(--gold-ink)]">variable</span>
                 </div>
-                <p className="mt-0.5 text-[13px] text-[#326273]/90">
-                  {focusBar
-                    ? <>Hovering <span className="font-medium text-[#1F4452]">{focusBar.label}</span></>
-                    : 'Accrues daily via USDY redemption price · floating, not fixed'}
+                <p className="mt-0.5 text-[13px] text-[#326273]" aria-live="polite">
+                  {focus
+                    ? <>At <span className="font-medium text-[#1F4452]">{focus.label}</span></>
+                    : usdyValueMinor && usdyValueMinor > 0n
+                      ? `The USDY you hold, at the modeled ${apy}% a year. USDY's price moves; this is not a promise.`
+                      : overview ? `The amount you are swapping in, at the modeled ${apy}% a year. A projection, not a promise.` : 'A projection at the modeled rate, once it loads.'}
                 </p>
               </div>
               <div className="flex flex-col items-end gap-2">
-                <div className="text-right">
-                  <div className="text-lg font-semibold text-[#8b6418]">
-                    +${focusBar ? focusBar.amount.toFixed(3) : dailyYield.toFixed(3)}
+                {projection && (
+                  <div className="text-right">
+                    <div className="dash-num text-lg font-semibold text-[var(--gold-ink)]">
+                      ${formatUsdc(focus ? focus.valueMinor : (endValue as bigint))}
+                    </div>
+                    <div className="text-[13px] text-[#326273]">{focus ? 'projected' : gain !== null ? `+$${formatUsdc(gain)} over ${chartRange === '30d' ? '30 days' : 'a year'}` : ''}</div>
                   </div>
-                  <div className="text-[13px] text-[#326273]/90">{focusBar ? 'that day' : 'estimated today'}</div>
-                </div>
-                <div className="inline-flex rounded-md bg-[#F6F0ED] p-0.5">
-                  {(['7d', '30d'] as const).map((r) => (
+                )}
+                <div className="inline-flex rounded-md bg-[#F6F0ED] p-0.5" role="group" aria-label="Projection range">
+                  {(['30d', '1y'] as const).map((r) => (
                     <button
                       key={r}
                       type="button"
-                      onClick={() => { setChartRange(r); setHoveredBar(null); }}
-                      className={cn('rounded px-2.5 py-1 text-[13px] font-semibold transition-colors', chartRange === r ? 'bg-white text-[#1F4452] shadow-sm' : 'text-[#326273]/90 hover:text-[#326273]')}
+                      aria-pressed={chartRange === r}
+                      onClick={() => { setChartRange(r); setHovered(null); }}
+                      className={cn('min-h-9 rounded px-3 text-[13px] font-semibold transition-colors', chartRange === r ? 'bg-white text-[#1F4452] shadow-sm' : 'bg-transparent text-[#326273] hover:text-[#0c3e48]')}
                     >
-                      {r.toUpperCase()}
+                      {r === '30d' ? '30D' : '1Y'}
                     </button>
                   ))}
                 </div>
               </div>
             </div>
 
-            {/* Smooth accrual curve — gold area, dashed average, explicit high/low scale */}
-            <div
-              className="relative mt-4 cursor-crosshair select-none"
-              onMouseLeave={() => setHoveredBar(null)}
-              onMouseMove={(e) => {
-                const rect = e.currentTarget.getBoundingClientRect();
-                const frac = (e.clientX - rect.left) / rect.width;
-                const plotFrac = (frac * CH.W - CH.PL) / (CH.W - CH.PL - CH.PR);
-                const idx = Math.round(plotFrac * (bars.length - 1));
-                setHoveredBar(Math.max(0, Math.min(bars.length - 1, idx)));
-              }}
-            >
-              <svg viewBox={`0 0 ${CH.W} ${CH.H}`} preserveAspectRatio="none" className="h-40 w-full" role="img" aria-label={`Daily USDY yield, ${chartRange}: low $${minBar.toFixed(2)}, high $${maxBar.toFixed(2)}, average $${avgBar.toFixed(2)} per day`}>
-                <defs>
-                  <linearGradient id="usdyFill" x1="0" y1="0" x2="0" y2="1">
-                    <stop offset="0%" stopColor="#D9A441" stopOpacity="0.34" />
-                    <stop offset="100%" stopColor="#D9A441" stopOpacity="0.02" />
-                  </linearGradient>
-                </defs>
-
-                {/* Scale gridlines: high / low, plus dashed average */}
-                <line x1={CH.PL} x2={CH.W - CH.PR} y1={chart.cy(maxBar)} y2={chart.cy(maxBar)} stroke="#326273" strokeOpacity="0.1" vectorEffect="non-scaling-stroke" />
-                <line x1={CH.PL} x2={CH.W - CH.PR} y1={chart.cy(minBar)} y2={chart.cy(minBar)} stroke="#326273" strokeOpacity="0.1" vectorEffect="non-scaling-stroke" />
-                <line x1={CH.PL} x2={CH.W - CH.PR} y1={chart.cy(avgBar)} y2={chart.cy(avgBar)} stroke="#5C9EAD" strokeOpacity="0.5" strokeDasharray="5 5" vectorEffect="non-scaling-stroke" />
-
-                <path d={chart.area} fill="url(#usdyFill)" />
-                <path d={chart.line} fill="none" stroke="#C99A2E" strokeWidth="2" vectorEffect="non-scaling-stroke" />
-
-                {/* Best day, always marked */}
-                <circle cx={chart.pts[chart.maxIdx][0]} cy={chart.pts[chart.maxIdx][1]} r="3.5" fill="white" stroke="#C99A2E" strokeWidth="2" />
-
-                {/* Hover crosshair + point */}
-                {hoveredBar !== null && (
-                  <g>
-                    <line x1={chart.pts[hoveredBar][0]} x2={chart.pts[hoveredBar][0]} y1={CH.PT} y2={CH.H - CH.PB} stroke="#0c3e48" strokeOpacity="0.25" vectorEffect="non-scaling-stroke" />
-                    <circle cx={chart.pts[hoveredBar][0]} cy={chart.pts[hoveredBar][1]} r="4.5" fill="#C99A2E" stroke="white" strokeWidth="2" />
-                  </g>
-                )}
-              </svg>
-
-              {/* Scale labels pinned to their gridlines */}
-              <span className="dash-num pointer-events-none absolute right-1 -translate-y-1/2 rounded bg-white/80 px-1 font-mono text-[12px] font-semibold text-[#326273]/90" style={{ top: `${(chart.cy(maxBar) / CH.H) * 100}%` }}>high ${maxBar.toFixed(2)}</span>
-              <span className="dash-num pointer-events-none absolute right-1 -translate-y-1/2 rounded bg-white/80 px-1 font-mono text-[12px] font-semibold text-[#326273]/90" style={{ top: `${(chart.cy(minBar) / CH.H) * 100}%` }}>low ${minBar.toFixed(2)}</span>
-              <span className="dash-num pointer-events-none absolute left-1 -translate-y-1/2 rounded bg-white/80 px-1 font-mono text-[12px] font-semibold text-[var(--info)]" style={{ top: `${(chart.cy(avgBar) / CH.H) * 100}%` }}>avg ${avgBar.toFixed(2)}</span>
-
-              {/* Tooltip above the hovered point */}
-              {focusBar && hoveredBar !== null && (
+            {projection && chart ? (
+              <>
                 <div
-                  className="pointer-events-none absolute z-10 -translate-x-1/2 -translate-y-[130%] whitespace-nowrap rounded-lg bg-[#0c3e48] px-2.5 py-1.5 text-[13px] font-medium text-white shadow-xl"
-                  style={{
-                    left: `${Math.min(86, Math.max(14, (chart.pts[hoveredBar][0] / CH.W) * 100))}%`,
-                    top: `${(chart.pts[hoveredBar][1] / CH.H) * 100}%`,
+                  // Keyboard and touch reach every point: focus the plot, then step with the arrow keys.
+                  tabIndex={0}
+                  role="group"
+                  aria-label="Projected value chart. Use the left and right arrow keys to step through the points."
+                  className="relative mt-4 cursor-crosshair select-none rounded-md outline-none focus-visible:ring-2 focus-visible:ring-[#237284] focus-visible:ring-offset-2"
+                  onFocus={() => setHovered((h) => h ?? projection.length - 1)}
+                  onBlur={() => setHovered(null)}
+                  onKeyDown={(e) => {
+                    const last = projection.length - 1;
+                    const step: Record<string, (h: number) => number> = {
+                      ArrowRight: (h) => Math.min(last, h + 1),
+                      ArrowLeft: (h) => Math.max(0, h - 1),
+                      Home: () => 0,
+                      End: () => last,
+                    };
+                    const move = step[e.key];
+                    if (!move) return;
+                    e.preventDefault();
+                    setHovered((h) => move(h ?? last));
+                  }}
+                  onMouseLeave={() => setHovered(null)}
+                  onMouseMove={(e) => {
+                    const rect = e.currentTarget.getBoundingClientRect();
+                    const frac = (e.clientX - rect.left) / rect.width;
+                    const plotFrac = (frac * CH.W - CH.PL) / (CH.W - CH.PL - CH.PR);
+                    setHovered(Math.max(0, Math.min(projection.length - 1, Math.round(plotFrac * (projection.length - 1)))));
                   }}
                 >
-                  <div className="text-white/80">{focusBar.label}</div>
-                  <div className="font-mono text-[#E0B05A]">+${focusBar.amount.toFixed(3)}</div>
+                  <svg viewBox={`0 0 ${CH.W} ${CH.H}`} preserveAspectRatio="none" className="h-40 w-full" role="img" aria-label={`Projected value over ${chartRange === '30d' ? '30 days' : 'a year'} at ${apy}% a year: from $${formatUsdc(projection[0].valueMinor)} to $${formatUsdc(projection[projection.length - 1].valueMinor)}`}>
+                    <defs>
+                      <linearGradient id="usdyFill" x1="0" y1="0" x2="0" y2="1">
+                        <stop offset="0%" stopColor="#D9A441" stopOpacity="0.34" />
+                        <stop offset="100%" stopColor="#D9A441" stopOpacity="0.02" />
+                      </linearGradient>
+                    </defs>
+                    <line x1={CH.PL} x2={CH.W - CH.PR} y1={chart.cy(chart.hi)} y2={chart.cy(chart.hi)} stroke="#326273" strokeOpacity="0.1" vectorEffect="non-scaling-stroke" />
+                    <line x1={CH.PL} x2={CH.W - CH.PR} y1={chart.cy(chart.lo)} y2={chart.cy(chart.lo)} stroke="#326273" strokeOpacity="0.1" vectorEffect="non-scaling-stroke" />
+                    <path d={chart.area} fill="url(#usdyFill)" />
+                    <path d={chart.line} fill="none" stroke="#C99A2E" strokeWidth="2" vectorEffect="non-scaling-stroke" />
+                    {hovered !== null && (
+                      <g>
+                        <line x1={chart.pts[hovered][0]} x2={chart.pts[hovered][0]} y1={CH.PT} y2={CH.H - CH.PB} stroke="#0c3e48" strokeOpacity="0.25" vectorEffect="non-scaling-stroke" />
+                        <circle cx={chart.pts[hovered][0]} cy={chart.pts[hovered][1]} r="4.5" fill="#C99A2E" stroke="white" strokeWidth="2" />
+                      </g>
+                    )}
+                  </svg>
+                  <span className="dash-num pointer-events-none absolute right-1 -translate-y-1/2 rounded bg-white/85 px-1 font-mono text-[12px] font-semibold text-[#326273]" style={{ top: `${(chart.cy(chart.hi) / CH.H) * 100}%` }}>${formatUsdc(projection[projection.length - 1].valueMinor)}</span>
+                  <span className="dash-num pointer-events-none absolute left-1 -translate-y-1/2 rounded bg-white/85 px-1 font-mono text-[12px] font-semibold text-[#326273]" style={{ top: `${(chart.cy(chart.lo) / CH.H) * 100}%` }}>${formatUsdc(projection[0].valueMinor)}</span>
                 </div>
-              )}
-            </div>
-
-            {/* X-axis: every day on 7d, sparse markers on 30d */}
-            <div className="mt-1 flex justify-between px-1 text-[13px] text-[#326273]/90">
-              {(chartRange === '7d' ? bars : [bars[0], bars[9], bars[19], bars[29]]).map((d) => (
-                <span key={d.day} className={cn('transition-colors', focusBar?.day === d.day && 'font-semibold text-[#1F4452]')}>{d.day}</span>
-              ))}
-            </div>
-
-            <div className="mt-4 grid grid-cols-2 gap-2 sm:grid-cols-4">
-              <div className="rounded-lg border border-[#D9A441]/20 bg-[#D9A441]/8 p-3">
-                <div className="flex items-center gap-1 text-[12px] font-medium uppercase tracking-wide text-[#8b6418]"><Sparkles size={10} /> Daily yield</div>
-                <div className="dash-num mt-1 font-mono text-sm font-semibold text-[#8b6418]">+${dailyYield.toFixed(3)}</div>
-              </div>
-              <div className="rounded-lg bg-[#F6F0ED] p-3">
-                <div className="flex items-center gap-1 text-[12px] font-medium uppercase tracking-wide text-[#326273]/90"><CalendarDays size={10} /> Period total</div>
-                <div className="dash-num mt-1 font-mono text-sm font-semibold text-[#1F4452]">+${totalRange.toFixed(2)}</div>
-              </div>
-              <div className="rounded-lg bg-[#F6F0ED] p-3">
-                <div className="flex items-center gap-1 text-[12px] font-medium uppercase tracking-wide text-[#326273]/90"><TrendingUp size={10} /> Avg / day</div>
-                <div className="dash-num mt-1 font-mono text-sm font-semibold text-[#1F4452]">+${avgBar.toFixed(3)}</div>
-              </div>
-              <div className="rounded-lg bg-[#5C9EAD]/10 p-3">
-                <div className="flex items-center gap-1 text-[12px] font-medium uppercase tracking-wide text-[var(--info)]"><PiggyBank size={10} /> Est. annual</div>
-                <div className="dash-num mt-1 font-mono text-sm font-semibold text-[#326273]">+${projAnnual.toFixed(2)}</div>
-              </div>
-            </div>
-          </div>
+                <div className="mt-1 flex justify-between px-1 text-[13px] text-[#326273]">
+                  <span>Today</span>
+                  <span>{chartRange === '30d' ? '15 days' : '6 months'}</span>
+                  <span>{chartRange === '30d' ? '30 days' : '1 year'}</span>
+                </div>
+              </>
+            ) : (
+              <p className="mt-4 rounded-lg bg-[#F6F0ED] px-4 py-6 text-center text-[13px] text-[#326273]">
+                {overview && apy <= 0 ? 'No modeled rate is set, so nothing is projected.' : 'Hold USDY, or enter an amount to swap in, to see a projection.'}
+              </p>
+            )}
+          </section>
 
           {/* Loop economics simulator */}
-          <section className="dash-surface overflow-hidden">
+          <section className="dash-surface overflow-hidden" aria-labelledby="sim-title">
             <div className="grid gap-0 lg:grid-cols-[1.1fr_1fr]">
               <div className="border-b border-[#326273]/10 p-5 lg:border-b-0 lg:border-r">
-                <span className="dash-kicker">Loop economics simulator</span>
-                <h2 className="mt-2 text-xl font-semibold text-[#0c3e48]">Sweep vs hold</h2>
-                <p className="mt-2 max-w-xl text-[13px] leading-5 text-[#326273]/90">
+                <h2 id="sim-title" className="text-xl font-semibold text-[#0c3e48]">Sweep vs hold</h2>
+                <p className="mt-2 max-w-xl text-[13px] leading-5 text-[#326273]">
                   On a $5,000 payment, internal netting removes repeated payout work. The remainder is relocated to the point where funds eventually leave the Splash loop.
                 </p>
                 <label className="mt-6 block">
                   <span className="flex items-center justify-between text-[13px] font-semibold text-[#326273]">
                     <span>Netting ratio</span>
-                    <span className="font-mono text-[#9f5839]">{nettingRatio}%</span>
+                    <span className="font-mono text-[var(--gold-ink)]">{nettingRatio}%</span>
                   </span>
                   <input
                     type="range"
@@ -677,204 +762,179 @@ export default function TreasuryPage() {
                     max="100"
                     value={nettingRatio}
                     onChange={(event) => setNettingRatio(Number(event.target.value))}
-                    className="mt-3 h-2 w-full cursor-pointer accent-[#E39774]"
+                    className="mt-3 h-2 w-full cursor-pointer accent-[var(--gold-light)]"
                   />
-                  <span className="mt-2 flex justify-between text-[12px] font-semibold uppercase tracking-wide text-[#326273]/90"><span>Full sweep</span><span>Full hold</span></span>
+                  <span className="mt-2 flex justify-between text-[12px] font-semibold uppercase tracking-wide text-[#326273]"><span>Full sweep</span><span>Full hold</span></span>
                 </label>
               </div>
               <div className="bg-[#F6F0ED]/55 p-5">
                 <div className="grid grid-cols-2 gap-3">
                   <div className="rounded-2xl border border-[#5C9EAD]/20 bg-white p-4">
-                    <div className="text-[12px] font-semibold uppercase tracking-[0.14em] text-[var(--info)]">Fees deleted</div>
-                    <div className="dash-num mt-2 text-2xl font-semibold text-[#0c3e48]">${feesDeleted.toFixed(2)}</div>
-                    <p className="mt-1 text-[13px] leading-4 text-[#326273]/90">Avoided while value stays netted inside the operating loop.</p>
+                    <div className="text-[12px] font-semibold uppercase tracking-[0.14em] text-[#145d6a]">Fees deleted</div>
+                    <div className="dash-num mt-2 text-2xl font-semibold text-[#0c3e48]">{feesDeleted === null ? '—' : `$${feesDeleted.toFixed(2)}`}</div>
+                    <p className="mt-1 text-[13px] leading-4 text-[#326273]">Avoided while value stays netted inside the operating loop.</p>
                   </div>
-                  <div className="rounded-2xl border border-[#E39774]/20 bg-white p-4">
-                    <div className="text-[12px] font-semibold uppercase tracking-[0.14em] text-[#9f5839]">Fees relocated</div>
-                    <div className="dash-num mt-2 text-2xl font-semibold text-[#0c3e48]">${feesRelocated.toFixed(2)}</div>
-                    <p className="mt-1 text-[13px] leading-4 text-[#326273]/90">Still paid when the remaining value reaches a local cash-out rail.</p>
+                  <div className="rounded-2xl border border-[var(--gold-light)] bg-white p-4">
+                    <div className="text-[12px] font-semibold uppercase tracking-[0.14em] text-[var(--gold-ink)]">Fees relocated</div>
+                    <div className="dash-num mt-2 text-2xl font-semibold text-[#0c3e48]">{feesRelocated === null ? '—' : `$${feesRelocated.toFixed(2)}`}</div>
+                    <p className="mt-1 text-[13px] leading-4 text-[#326273]">Still paid when the remaining value reaches a local cash-out rail.</p>
                   </div>
                 </div>
-                <div className="mt-4 overflow-hidden rounded-full bg-[#E39774]/25">
+                <div className="mt-4 overflow-hidden rounded-full bg-[var(--gold-tint)]">
                   <div className="h-3 rounded-full bg-[#5C9EAD] transition-all" style={{ width: `${nettingRatio}%` }} />
                 </div>
-                <div className="mt-3 flex items-start gap-2 rounded-xl bg-white p-3 text-[13px] leading-4 text-[#326273]/90">
-                  <Info className="mt-0.5 h-3.5 w-3.5 shrink-0 text-[var(--info)]" />
+                <div className="mt-3 flex items-start gap-2 rounded-xl bg-white p-3 text-[13px] leading-4 text-[#326273]">
+                  <Info className="mt-0.5 h-3.5 w-3.5 shrink-0 text-[var(--info)]" aria-hidden="true" />
                   Simulation only. Netting reduces repeated payout costs; it does not remove the cost of the final external payout.
+                  {publishedFees && !publishedFees.feesOn ? ` ${FEES_OFF_NOTICE}` : null}
                 </div>
               </div>
             </div>
           </section>
 
-          {/* Activity */}
-          <div className="dash-surface overflow-hidden">
+          {/* Activity: this business's swaps and redemptions */}
+          <section className="dash-surface overflow-hidden" aria-labelledby="activity-title">
             <div className="flex items-center justify-between border-b border-[#326273]/8 px-4 py-3">
-              <h2 className="text-sm font-semibold text-[#1F4452]">Treasury activity</h2>
-              <span className="text-[13px] font-medium text-[#326273]/90">USD ↔ USDY · treasury ledger</span>
+              <h2 id="activity-title" className="text-sm font-semibold text-[#1F4452]">Treasury activity</h2>
+              <span className="text-[13px] font-medium text-[#326273]">USDC ↔ USDY · signed in your wallet</span>
             </div>
-            <div className="divide-y divide-[#326273]/5">
-              {history.slice(0, 10).map((tx) => (
-                <div key={tx.id} className="flex items-center gap-3 px-4 py-3 transition-colors hover:bg-[#F6F0ED]/50">
-                  <HistIcon type={tx.type} />
-                  <div className="min-w-0 flex-1">
-                    <div className="text-[13px] font-medium text-[#1F4452]">{tx.desc}</div>
-                    <div className="text-[13px] text-[#326273]/90">
-                      <LocalTime value={tx.at} locale="en-US" options={{ month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' }} /> · {tx.id}
-                    </div>
-                  </div>
-                  <div className="text-right">
-                    <div className={cn('dash-num text-sm font-semibold', tx.type === 'withdraw' ? 'text-[var(--info)]' : tx.type === 'yield' ? 'text-[var(--ok)]' : 'text-[#8b6418]')}>{tx.amount}</div>
-                    <div className={cn('text-[13px]', tx.status === 'confirmed' ? 'text-[var(--ok)]' : 'text-[#8b6418]')}>{tx.status}</div>
-                  </div>
-                </div>
-              ))}
-            </div>
-          </div>
+            {overview?.orders && overview.orders.length > 0 ? (
+              <ul className="divide-y divide-[#326273]/5">
+                {overview.orders.slice(0, 10).map((o) => {
+                  const swap = o.direction === 'swap';
+                  const style = ORDER_STATUS[o.status];
+                  // A sandbox order was never shown to the signers, so it is not "waiting" for them.
+                  const label = o.sandbox && o.status === 'awaiting_signatures' ? 'Sandbox, not sent' : style.label;
+                  return (
+                    <li key={o.id} className="flex items-center gap-3 px-4 py-3">
+                      <div className={cn('flex h-8 w-8 shrink-0 items-center justify-center rounded-full', swap ? 'bg-[#D9A441]/15' : 'bg-[#5C9EAD]/10')}>
+                        {swap ? <ArrowRight size={14} className="text-[var(--gold-ink)]" aria-hidden="true" /> : <ArrowLeft size={14} className="text-[var(--info)]" aria-hidden="true" />}
+                      </div>
+                      <div className="min-w-0 flex-1">
+                        <div className="text-[13px] font-medium text-[#1F4452]">
+                          {swap ? 'Swap in' : 'Redeem'} · {formatUsdc(BigInt(o.amountInMinor))} {swap ? 'USDC' : 'USDY'} for at least {formatUsdc(BigInt(o.minOutMinor))} {swap ? 'USDY' : 'USDC'}
+                        </div>
+                        <div className="text-[13px] text-[#326273]">
+                          <LocalTime value={o.createdAt} locale="en-US" options={{ month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' }} />
+                          {o.sandbox ? ' · sandbox' : ''}
+                        </div>
+                      </div>
+                      <span className={cn('shrink-0 rounded-full px-2.5 py-0.5 text-[12px] font-semibold', style.className)}>{label}</span>
+                    </li>
+                  );
+                })}
+              </ul>
+            ) : (
+              <p className="px-4 py-6 text-[13px] text-[#326273]">
+                {overview?.orders === null ? 'Activity needs the database, and this server has none.' : 'No swaps yet. A quote you send to your owners to sign appears here.'}
+              </p>
+            )}
+          </section>
 
-          {/* How it works */}
-          <div className="dash-surface overflow-hidden">
+          {/* How it works: a real sequence, so the steps are numbered */}
+          <section className="dash-surface overflow-hidden" aria-labelledby="how-title">
             <div className="flex items-center justify-between border-b border-[#326273]/8 px-5 py-3">
               <div className="flex items-center gap-2">
-                <Sprout size={14} className="text-[var(--ok)]" />
-                <h2 className="text-sm font-semibold text-[#1F4452]">How the treasury works</h2>
+                <Sprout size={14} className="text-[var(--ok)]" aria-hidden="true" />
+                <h2 id="how-title" className="text-sm font-semibold text-[#1F4452]">How the treasury works</h2>
               </div>
-              <span className="rounded-full bg-[#D9A441]/12 px-2 py-0.5 text-[12px] font-semibold uppercase tracking-wide text-[#8b6418]">T-bill yield</span>
+              <span className="rounded-full bg-[#D9A441]/12 px-2 py-0.5 text-[12px] font-semibold uppercase tracking-wide text-[var(--gold-ink)]">In your wallet</span>
             </div>
-            <div className="relative grid gap-0 sm:grid-cols-4">
-              <div className="pointer-events-none absolute left-5 right-5 top-[3.25rem] hidden h-px bg-gradient-to-r from-[#5C9EAD]/0 via-[#D9A441] to-[#E39774]/40 sm:block" />
+            <ol className="relative grid gap-0 sm:grid-cols-4">
+              <div className="pointer-events-none absolute left-5 right-5 top-[3.25rem] hidden h-px bg-gradient-to-r from-[#5C9EAD]/0 via-[#D9A441] to-[var(--gold-light)]/40 sm:block" aria-hidden="true" />
               {[
-                { step: '01', title: 'Prepare recommendation', desc: 'Zeke models an allocation from Operating cash. Your business must approve it.', icon: CreditCard, accent: '#5C9EAD', bg: 'bg-[#5C9EAD]/10', tag: 'Human approval' },
-                { step: '02', title: 'Ondo USDY (T-bills)', desc: 'USDY is backed by short-dated US Treasuries — real, off-chain yield.', icon: Landmark, accent: '#C99A2E', bg: 'bg-[#D9A441]/15', tag: 'T-bill backed' },
-                { step: '03', title: 'Yield accrues', desc: 'USDY redemption price rises daily. Floating net rate — never fixed.', icon: Sprout, accent: '#4F9C88', bg: 'bg-[#6FB4A0]/18', tag: rate.label.replace(' · variable', '') },
-                { step: '04', title: 'Withdraw on notice', desc: `Request a withdrawal; USDY converts back to USD and lands in Operating in ${windowLabel}.`, icon: PiggyBank, accent: '#E39774', bg: 'bg-[#E39774]/10', tag: 'Notice required' },
-              ].map(({ step, title, desc, icon: Icon, accent, bg, tag }, i, arr) => (
-                <div key={step} className={cn('relative px-5 py-4', i < arr.length - 1 && 'border-[#326273]/8 sm:border-r')}>
+                { step: '01', title: 'Quote', desc: 'Splash prices the swap at the redemption rate and on the Sui market, side by side.', icon: Zap, accent: '#145d6a', bg: 'bg-[#5C9EAD]/10' },
+                { step: '02', title: 'Owners sign', desc: "The swap goes to your wallet's owners. It runs only at your wallet's threshold.", icon: KeyRound, accent: 'var(--gold-ink)', bg: 'bg-[#D9A441]/15' },
+                { step: '03', title: 'USDY in your wallet', desc: 'Backed by short-dated US Treasury bills. Its price moves; the rate is variable.', icon: Landmark, accent: 'var(--ok)', bg: 'bg-[#6FB4A0]/18' },
+                { step: '04', title: 'Redeem any time', desc: 'Swap USDY back to USDC on Sui, at the price the market pays then.', icon: ArrowLeft, accent: '#145d6a', bg: 'bg-[#5C9EAD]/10' },
+              ].map(({ step, title, desc, icon: Icon, accent, bg }, i, arr) => (
+                <li key={step} className={cn('relative px-5 py-4', i < arr.length - 1 && 'border-[#326273]/8 sm:border-r')}>
                   <div className="flex items-center gap-3">
                     <div className={cn('flex h-9 w-9 shrink-0 items-center justify-center rounded-xl shadow-sm ring-2 ring-white', bg)} style={{ color: accent }}>
-                      <Icon size={16} />
+                      <Icon size={16} aria-hidden="true" />
                     </div>
-                    <span className="font-mono text-[12px] font-semibold uppercase tracking-widest text-[#326273]/90">{step}</span>
+                    <span className="font-mono text-[12px] font-semibold uppercase tracking-widest text-[#326273]">{step}</span>
                   </div>
                   <div className="mt-3 text-[13px] font-semibold text-[#1F4452]">{title}</div>
-                  <div className="mt-1 text-[13px] leading-[1.125rem] text-[#326273]/90">{desc}</div>
-                  <div className="mt-2.5 inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[12px] font-semibold uppercase tracking-wider" style={{ backgroundColor: `${accent}15`, color: accent }}>
-                    <CheckCircle2 size={9} />{tag}
-                  </div>
-                </div>
+                  <div className="mt-1 text-[13px] leading-[1.125rem] text-[#326273]">{desc}</div>
+                </li>
               ))}
+            </ol>
+            <div className="flex flex-wrap items-center gap-x-3 gap-y-1 border-t border-[#326273]/8 bg-gradient-to-r from-[#D9A441]/8 via-[#6FB4A0]/5 to-[#5C9EAD]/5 px-5 py-3 text-[13px]">
+              <span className="inline-flex items-center gap-1.5 font-medium text-[#1F4452]"><ShieldCheck size={12} className="text-[var(--ok)]" aria-hidden="true" /> Splash holds no key to your wallet</span>
+              <span className="text-[#326273]">No Splash fee on a swap</span>
             </div>
-            <div className="flex flex-wrap items-center gap-3 border-t border-[#326273]/8 bg-gradient-to-r from-[#D9A441]/8 via-[#6FB4A0]/5 to-[#5C9EAD]/5 px-5 py-3 text-[13px]">
-              <div className="flex items-center gap-1.5 font-medium text-[#1F4452]"><ShieldCheck size={12} className="text-[var(--ok)]" /> Funds segregated from operating</div>
-              <span className="text-[#326273]/90">•</span>
-              <div className="flex items-center gap-1.5 text-[#326273]/90"><Lock size={11} className="text-[var(--info)]" /> Daily reconciliation, audit-anchored on Sui</div>
-            </div>
-          </div>
+          </section>
+
+          {/* The fund manager: behind its flag until legal signs off the wording */}
+          {overview && overview.flags.fundReferral && (
+            <FundReferralPanel label={overview.fundManager} canAnswer={overview.role === 'OWNER'} />
+          )}
+
+          {/* Tokenized stocks: a later phase, hidden unless switched on */}
+          {overview && overview.flags.tokenizedStocks && (
+            <section className="dash-surface p-5" aria-labelledby="stocks-title">
+              <h2 id="stocks-title" className="text-sm font-semibold text-[#1F4452]">Tokenized stocks and ETFs</h2>
+              <p className="mt-1 max-w-2xl text-[13px] leading-5 text-[#326273]">
+                Held in a multisig of your own on Solana, with the same signers as your Splash Wallet. USDC moves there by a cross-chain USDC transfer, and back the same way.
+              </p>
+              <Link href="/dashboard/customer-service" className="mt-3 inline-flex min-h-11 items-center gap-1 text-[13px] font-semibold text-[#145d6a] underline decoration-1 underline-offset-2">
+                Ask about access <ChevronRight size={13} aria-hidden="true" />
+              </Link>
+            </section>
+          )}
         </div>
 
         {/* ── Right ── */}
         <aside className="space-y-4">
 
-          {/* Pending withdrawals — money in flight comes first */}
-          {notices.length > 0 && (
-            <div className="dash-block p-4">
-              <div className="flex items-center gap-2">
-                <Clock size={14} className="text-[#9f5839]" />
-                <h2 className="text-sm font-semibold text-[#1F4452]">Pending withdrawals</h2>
-              </div>
-              <div className="mt-3 space-y-2">
-                {notices.map((n) => {
-                  const confirming = confirmCancelId === n.id;
-                  const busy = cancelingId === n.id;
-                  return (
-                    <div key={n.id} className="rounded-lg bg-[#E39774]/10 px-3 py-2 text-[13px]">
-                      <div className="flex items-center justify-between gap-2">
-                        <span className="dash-num font-semibold text-[#1F4452]">${fmtUsd(n.amount)}</span>
-                        <div className="flex items-center gap-2">
-                          <span className="text-[#9f5839]">by <LocalTime value={n.availableAt} format="date" locale="en-US" options={{ month: 'short', day: 'numeric' }} /></span>
-                          {!confirming && (
-                            <button
-                              type="button"
-                              onClick={() => setConfirmCancelId(n.id)}
-                              className="rounded-md px-1.5 py-0.5 text-[13px] font-semibold text-[#326273]/90 transition-colors hover:bg-[#326273]/10 hover:text-[#326273]"
-                            >
-                              Cancel
-                            </button>
-                          )}
-                        </div>
-                      </div>
-                      {confirming && (
-                        <div className="mt-2 flex items-center justify-between gap-2 border-t border-[#E39774]/25 pt-2">
-                          <span className="text-[13px] text-[#326273]/90">Cancel and return to Treasury?</span>
-                          <div className="flex items-center gap-1.5">
-                            <button
-                              type="button"
-                              disabled={busy}
-                              onClick={() => cancelWithdrawal(n.id)}
-                              className="rounded-md bg-[#9f5839] px-2 py-1 text-[13px] font-semibold text-white transition-colors hover:bg-[#9a4a2d] disabled:opacity-50"
-                            >
-                              {busy ? 'Cancelling…' : 'Yes, cancel'}
-                            </button>
-                            <button
-                              type="button"
-                              disabled={busy}
-                              onClick={() => setConfirmCancelId(null)}
-                              className="rounded-md px-2 py-1 text-[13px] font-semibold text-[#326273]/90 transition-colors hover:bg-[#326273]/10 disabled:opacity-50"
-                            >
-                              Keep
-                            </button>
-                          </div>
-                        </div>
-                      )}
-                    </div>
-                  );
-                })}
-              </div>
-              <p className="mt-2 text-[13px] leading-4 text-[#326273]/90">Reserved from Treasury now · credited to Operating on the date shown. Cancel any time before it settles.</p>
-            </div>
-          )}
-
-          {/* Risk & compliance */}
-          <div className="dash-block p-4">
+          {/* Risk */}
+          <section className="dash-block p-4" aria-labelledby="risk-title">
             <div className="flex items-center gap-2">
-              <ShieldCheck size={15} className="text-[var(--info)]" />
-              <h2 className="text-sm font-semibold text-[#1F4452]">Risk &amp; Compliance</h2>
+              <ShieldCheck size={15} className="text-[var(--info)]" aria-hidden="true" />
+              <h2 id="risk-title" className="text-sm font-semibold text-[#1F4452]">What you are holding</h2>
             </div>
-            <div className="mt-3 space-y-2">
-              {RISK_ITEMS.map((r) => (
+            <dl className="mt-3 space-y-2">
+              {[
+                { label: 'Instrument', value: `USDY, issued by ${issuer}, backed by US Treasury bills`, icon: Landmark },
+                { label: 'Where it sits', value: 'Your own Splash Wallet. Splash has no key to it.', icon: Wallet },
+                { label: 'Shariah', value: 'Not Shariah-compliant: its return is interest from Treasury bills.', icon: AlertCircle },
+                { label: 'Liquidity', value: 'USDC ↔ USDY on Sui. Thin at size: every quote shows the market.', icon: Zap },
+              ].map((r) => (
                 <div key={r.label} className="flex items-start gap-2 rounded-lg bg-[#F6F0ED] px-3 py-2">
-                  <r.icon size={13} className="mt-0.5 shrink-0 text-[var(--info)]" />
+                  <r.icon size={13} className="mt-0.5 shrink-0 text-[var(--info)]" aria-hidden="true" />
                   <div className="min-w-0 flex-1">
-                    <div className="text-[13px] text-[#326273]/90">{r.label}</div>
-                    <div className="text-[13px] font-medium text-[#1F4452]">{r.value}</div>
+                    <dt className="text-[13px] text-[#326273]">{r.label}</dt>
+                    <dd className="text-[13px] font-medium text-[#1F4452]">{r.value}</dd>
                   </div>
-                  <CheckCircle2 size={13} className="mt-0.5 shrink-0 text-[var(--ok)]" />
                 </div>
               ))}
-            </div>
-            <div className="mt-3 flex items-start gap-2 rounded-lg border border-amber-100 bg-amber-50 px-3 py-2.5">
-              <AlertCircle size={13} className="mt-0.5 shrink-0 text-amber-600" />
-              <p className="text-[13px] leading-4 text-amber-700">
-                Yield is variable and not guaranteed. USDY is T-bill backed; rates move with US Treasury yields.
+            </dl>
+            <div className="mt-3 flex items-start gap-2 rounded-lg border border-[var(--warn)]/40 bg-[var(--warn-bg)] px-3 py-2.5">
+              <AlertCircle size={13} className="mt-0.5 shrink-0 text-[var(--warn-ink)]" aria-hidden="true" />
+              <p className="text-[13px] leading-4 text-[var(--warn-ink)]">
+                The rate is variable and not promised: USDY&rsquo;s price moves with US Treasury yields. USDY is not offered to US persons.
               </p>
             </div>
-          </div>
+          </section>
 
           {/* Links */}
-          <div className="space-y-2">
-            {[
-              { label: 'Ondo USDY overview', icon: Info, href: 'https://ondo.finance/usdy' },
-              { label: 'View on Sui Explorer', icon: Landmark, href: suiScanBaseUrl() },
-            ].map(({ label, icon: Icon, href }) => (
-              <a key={label} href={href} target="_blank" rel="noopener noreferrer" className="flex w-full items-center justify-between rounded-lg border border-[#326273]/10 bg-white px-3 py-2.5 text-[13px] font-medium text-[#326273] transition-colors hover:border-[#5C9EAD]/40 hover:text-[var(--info)]">
-                <div className="flex items-center gap-2"><Icon size={13} />{label}</div>
-                <ChevronRight size={13} className="text-[#326273]/90" />
+          <nav className="space-y-2" aria-label="Treasury links">
+            <Link href="/dashboard/wallet" className="flex min-h-11 w-full items-center justify-between rounded-lg border border-[#326273]/12 bg-white px-3 py-2.5 text-[13px] font-medium text-[#326273] transition-colors hover:border-[#5C9EAD]/40 hover:text-[#145d6a]">
+              <span className="flex items-center gap-2"><Wallet size={13} aria-hidden="true" />Open Wallet</span>
+              <ChevronRight size={13} aria-hidden="true" />
+            </Link>
+            {overview?.address && (
+              <a href={suiScanAccountUrlOn(STABLECOIN_NETWORK, overview.address)} target="_blank" rel="noopener noreferrer" className="flex min-h-11 w-full items-center justify-between rounded-lg border border-[#326273]/12 bg-white px-3 py-2.5 text-[13px] font-medium text-[#326273] transition-colors hover:border-[#5C9EAD]/40 hover:text-[#145d6a]">
+                <span className="flex items-center gap-2"><Landmark size={13} aria-hidden="true" />The wallet on Sui Explorer</span>
+                <ChevronRight size={13} aria-hidden="true" />
               </a>
-            ))}
-          </div>
+            )}
+          </nav>
         </aside>
       </div>
 
-      {/* W9.4 — where your money sits: partner-of-record path, config-driven */}
+      {/* W9.4: where your money sits, partner-of-record path, config-driven */}
       <MoneyPathPanel />
     </div>
   );

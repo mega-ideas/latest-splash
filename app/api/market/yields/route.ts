@@ -8,12 +8,6 @@ const sources = {
   wise: 'https://wise.com/us/interest/',
 };
 
-const fallback = {
-  bank: 0.38,
-  broker: 3.12,
-  wise: 3.14,
-};
-
 function plainText(html: string) {
   return html
     .replace(/<script[\s\S]*?<\/script>/gi, ' ')
@@ -22,13 +16,20 @@ function plainText(html: string) {
     .replace(/\s+/g, ' ');
 }
 
-function firstRate(text: string, patterns: RegExp[], fallbackRate: number) {
+/**
+ * The first rate one of `patterns` reads from a source's own page, or null
+ * when none does (the page was unreachable, or changed). A rate nobody read
+ * is never stood in for by a remembered one: the landing shows "No
+ * reading" (the A1 review).
+ */
+function firstRate(text: string, patterns: RegExp[]): number | null {
   for (const pattern of patterns) {
     const match = text.match(pattern);
-    const rate = Number(match?.[1]);
+    if (!match?.[1]) continue;
+    const rate = Number(match[1]);
     if (Number.isFinite(rate)) return rate;
   }
-  return fallbackRate;
+  return null;
 }
 
 async function sourceText(url: string) {
@@ -55,9 +56,9 @@ export async function GET() {
   const treasury = getTreasuryRate();
 
   return NextResponse.json({
-    bank: firstRate(bankText, [/Savings\s+([0-9.]+)/i], fallback.bank),
-    broker: firstRate(brokerText, [/USD\s+>\s*10,?000\s+([0-9.]+)%/i, /up to USD\s+([0-9.]+)%/i], fallback.broker),
-    wise: firstRate(wiseText, [/([0-9.]+)% APY on USD/i, /USD\s+([0-9.]+)%/i], fallback.wise),
+    bank: firstRate(bankText, [/Savings\s+([0-9.]+)/i]),
+    broker: firstRate(brokerText, [/USD\s+>\s*10,?000\s+([0-9.]+)%/i, /up to USD\s+([0-9.]+)%/i]),
+    wise: firstRate(wiseText, [/([0-9.]+)% APY on USD/i, /USD\s+([0-9.]+)%/i]),
     splash: treasury.netApyPct,
     splashVariable: true,
     splashIntroductory: treasury.introductory,

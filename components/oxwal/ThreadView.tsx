@@ -5,6 +5,7 @@ import Link from 'next/link';
 import { AlertTriangle, ArrowUpRight, CheckCircle2, Clock3, RotateCcw } from 'lucide-react';
 
 import ActionCard from '@/components/oxwal/ActionCard';
+import SheetCard from '@/components/oxwal/SheetCard';
 import type { ActionCardProposal } from '@/lib/agent/action-card';
 import type { OxwalChatApproval, OxwalThreadItem } from '@/lib/oxwal/use-oxwal-thread';
 
@@ -92,6 +93,7 @@ export default function ThreadRow({
   chatApprovals,
   clockMs,
   onApprove,
+  sheetActions,
   compact = false,
 }: {
   item: OxwalThreadItem;
@@ -99,8 +101,15 @@ export default function ThreadRow({
   chatApprovals: Record<string, OxwalChatApproval>;
   clockMs: number;
   onApprove: (proposal: ActionCardProposal) => void;
+  /** What a payout sheet in the thread can do: prepare the batch, tick the box for rows to check, dismiss. */
+  sheetActions?: { prepare: (id: string) => void; confirm: (id: string, confirmed: boolean) => void; dismiss: (id: string) => void };
   compact?: boolean;
 }) {
+  if (item.kind === 'sheet') {
+    if (!sheetActions) return null;
+    return <SheetCard id={item.id} sheet={item.sheet} compact={compact} onPrepare={sheetActions.prepare} onConfirm={sheetActions.confirm} onDismiss={sheetActions.dismiss} />;
+  }
+
   if (item.kind === 'user') {
     return (
       <div className="ml-auto max-w-[86%] rounded-lg rounded-tr-sm bg-[#1F4452] px-3 py-2 text-sm font-medium leading-6 text-white">
@@ -140,7 +149,7 @@ export default function ThreadRow({
   if (item.kind === 'notice') {
     return (
       <div className="flex flex-wrap items-center gap-2 pl-8">
-        <span className="inline-flex items-center gap-1.5 rounded-md border border-[#E39774]/55 bg-[#E39774]/15 px-2.5 py-1.5 text-[13px] font-semibold leading-5 text-[#9A4A2D]">
+        <span className="inline-flex items-center gap-1.5 rounded-md border border-[var(--warn)] bg-[var(--warn-bg)] px-2.5 py-1.5 text-[13px] font-semibold leading-5 text-[var(--warn-ink)]">
           <AlertTriangle className="h-3.5 w-3.5 shrink-0" />
           {item.text}
         </span>
@@ -161,7 +170,7 @@ export default function ThreadRow({
   if (item.kind === 'session-expired') {
     return (
       <div className="flex flex-wrap items-center gap-2 pl-8">
-        <span className="inline-flex items-center gap-1.5 rounded-md border border-[#E39774]/55 bg-[#E39774]/15 px-2.5 py-1.5 text-[13px] font-semibold leading-5 text-[#9A4A2D]">
+        <span className="inline-flex items-center gap-1.5 rounded-md border border-[var(--warn)] bg-[var(--warn-bg)] px-2.5 py-1.5 text-[13px] font-semibold leading-5 text-[var(--warn-ink)]">
           <AlertTriangle className="h-3.5 w-3.5 shrink-0" />
           Your session ended, so Zeke paused. Sign in again to pick up where you left off.
         </span>
@@ -176,9 +185,10 @@ export default function ThreadRow({
   }
 
   if (item.kind === 'handoff') {
-    // Only ever a link into Send USDC. The server builds it; this refuses to
+    // Only ever a link into Wallet (or the old Send USDC path, which
+    // redirects there with its query). The server builds it; this refuses to
     // render anything else, so a stream cannot turn the card into a link out.
-    const safe = item.handoff.href.startsWith('/dashboard/send-usdc?');
+    const safe = item.handoff.href.startsWith('/dashboard/wallet?') || item.handoff.href.startsWith('/dashboard/send-usdc?');
     return (
       <div className={compact ? 'pl-7' : 'pl-8'}>
         <div className="rounded-lg border border-[#5C9EAD]/40 bg-white px-3 py-2.5">
@@ -214,7 +224,7 @@ export default function ThreadRow({
   if (compact) {
     return (
       <div className="rounded-lg border border-[#efc46f]/60 bg-[#efc46f]/12 px-3 py-2.5">
-        <div className="font-mono text-[12px] font-semibold uppercase tracking-[0.12em] text-[#9A4A2D]">
+        <div className="font-mono text-[12px] font-semibold uppercase tracking-[0.12em] text-[var(--gold-ink)]">
           Unsigned proposal
         </div>
         <p className="mt-1 text-[13px] font-semibold leading-5 text-[#1F4452]">
@@ -235,7 +245,7 @@ export default function ThreadRow({
   return (
     <div className="space-y-1.5">
       <div className="flex items-center gap-2 pl-8">
-        <span className="inline-flex items-center gap-1.5 rounded-md border border-[#efc46f]/60 bg-[#efc46f]/15 px-2 py-1 font-mono text-[12px] font-semibold uppercase tracking-[0.12em] text-[#9A4A2D]">
+        <span className="inline-flex items-center gap-1.5 rounded-md border border-[#efc46f]/60 bg-[#efc46f]/15 px-2 py-1 font-mono text-[12px] font-semibold uppercase tracking-[0.12em] text-[var(--gold-ink)]">
           {approval?.state === 'approved' ? 'Signed · queued for settlement' : 'Unsigned proposal'}
         </span>
       </div>
@@ -315,7 +325,7 @@ export default function ThreadRow({
       )}
 
       {approval?.state === 'blocked' && (
-        <div className="flex flex-wrap items-center gap-2 rounded-lg border border-[#E39774]/55 bg-[#E39774]/12 px-3 py-2.5 text-[13px] font-semibold text-[#9A4A2D]">
+        <div className="flex flex-wrap items-center gap-2 rounded-lg border border-[var(--warn)] bg-[var(--warn-bg)] px-3 py-2.5 text-[13px] font-semibold text-[var(--warn-ink)]">
           <AlertTriangle className="h-4 w-4 shrink-0" />
           {approval.note ?? 'Policy requires this one to go through the approval queue.'}
           <Link

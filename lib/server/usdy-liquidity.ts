@@ -44,12 +44,47 @@ export async function quoteUsdcToUsdyOnSui(
   usdcInMinor: bigint,
   deps: { fetcher?: Fetcher; now?: () => Date } = {},
 ): Promise<UsdyMarketQuote> {
-  if (usdcInMinor <= 0n) return { available: false, reason: 'Enter an amount above zero.' };
+  const route = await findRoute(SUI_USDC_COIN_TYPE.mainnet, USDY_COIN_TYPE_SUI, usdcInMinor, 'USDY', deps);
+  if (!route.available) return route;
+  return { available: true, usdcInMinor, usdyOutMinor: route.amountOut, providers: route.providers, asOf: route.asOf, source: 'cetus-aggregator' };
+}
+
+export type UsdyRedeemMarketQuote =
+  | {
+      available: true;
+      usdyInMinor: bigint;
+      /** USDC the best route returns for the USDY, before any slippage allowance. */
+      usdcOutMinor: bigint;
+      providers: string[];
+      asOf: string;
+      source: 'cetus-aggregator';
+    }
+  | { available: false; reason: string };
+
+/** The other way: what selling USDY for USDC on Sui returns right now. Read-only. */
+export async function quoteUsdyToUsdcOnSui(
+  usdyInMinor: bigint,
+  deps: { fetcher?: Fetcher; now?: () => Date } = {},
+): Promise<UsdyRedeemMarketQuote> {
+  const route = await findRoute(USDY_COIN_TYPE_SUI, SUI_USDC_COIN_TYPE.mainnet, usdyInMinor, 'USDC', deps);
+  if (!route.available) return route;
+  return { available: true, usdyInMinor, usdcOutMinor: route.amountOut, providers: route.providers, asOf: route.asOf, source: 'cetus-aggregator' };
+}
+
+async function findRoute(
+  from: string,
+  target: string,
+  amountIn: bigint,
+  targetName: 'USDY' | 'USDC',
+  deps: { fetcher?: Fetcher; now?: () => Date },
+): Promise<{ available: true; amountOut: bigint; providers: string[]; asOf: string } | { available: false; reason: string }> {
+  if (amountIn <= 0n) return { available: false, reason: 'Enter an amount above zero.' };
+  const usdcInMinor = amountIn;
   const fetcher = deps.fetcher ?? fetch;
   const url =
-    `${CETUS_ROUTER}?from=${encodeURIComponent(SUI_USDC_COIN_TYPE.mainnet)}` +
-    `&target=${encodeURIComponent(USDY_COIN_TYPE_SUI)}` +
-    `&amount=${usdcInMinor.toString()}&by_amount_in=true`;
+    `${CETUS_ROUTER}?from=${encodeURIComponent(from)}` +
+    `&target=${encodeURIComponent(target)}` +
+    `&amount=${amountIn.toString()}&by_amount_in=true`;
 
   let body: { code?: number; msg?: string; data?: { amount_in?: unknown; amount_out?: unknown; routes?: Array<{ path?: Array<{ provider?: string }> }> } };
   try {
@@ -65,21 +100,14 @@ export async function quoteUsdcToUsdyOnSui(
   if (body.code !== 200 || !body.data) {
     return {
       available: false,
-      reason: `No Sui route can fill this size at a sane price (${body.msg ?? 'no route'}): there is not enough USDY liquidity on Sui.`,
+      reason: `No Sui route can fill this size at a sane price (${body.msg ?? 'no route'}): ${targetName === 'USDY' ? 'there is not enough USDY liquidity on Sui' : 'there is not enough liquidity on Sui to sell this much USDY'}.`,
     };
   }
-  const amountIn = safeBigint(body.data.amount_in);
+  const answeredIn = safeBigint(body.data.amount_in);
   const amountOut = safeBigint(body.data.amount_out);
-  if (amountIn !== usdcInMinor || amountOut === null || amountOut === 0n) {
+  if (answeredIn !== usdcInMinor || amountOut === null || amountOut === 0n) {
     return { available: false, reason: 'The Sui DEX route finder returned a quote that does not match the request.' };
   }
   const providers = [...new Set((body.data.routes ?? []).flatMap((r) => (r.path ?? []).map((p) => p.provider ?? '')).filter(Boolean))].sort();
-  return {
-    available: true,
-    usdcInMinor,
-    usdyOutMinor: amountOut,
-    providers,
-    asOf: (deps.now ?? (() => new Date()))().toISOString(),
-    source: 'cetus-aggregator',
-  };
+  return { available: true, amountOut, providers, asOf: (deps.now ?? (() => new Date()))().toISOString() };
 }

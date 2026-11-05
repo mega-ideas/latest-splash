@@ -10,10 +10,7 @@ import { copilotModel } from '../ai/model.ts';
  * authorize execution. Never invents PII/account numbers.
  */
 
-import { getCorridorFeeBps } from '@/lib/fx/corridors';
-import { custodyPhaseEnabled } from '@/lib/server/custody-phase';
 import { recallForOrg, rememberForOrg, type RecalledMemory } from '@/lib/server/memwal';
-import { getTreasuryRate } from '@/lib/server/usdy';
 
 export interface CopilotSuggestion {
   suggestionId: string;
@@ -25,6 +22,13 @@ export interface CopilotSuggestion {
   confidence: number | null;
   requiresAuth: boolean;
   suggestedAction?: string;
+  /**
+   * What tapping the card asks Zeke. Built from fixed words and codes the
+   * server derived (a currency, a count), never from a recalled memory or a
+   * document: the description may quote those for the reader, and the prompt
+   * asks Zeke to prepare, so it must not carry anyone else's words.
+   */
+  prompt?: string;
   /** Set when Zeke read the document and refused: the lane it asks for is
    *  locked for this business. The UI must not offer a route onward. */
   blocked?: { lane: string; reason: string };
@@ -69,11 +73,45 @@ function normaliseAmount(raw: string): { amount: string; amountMinor: bigint } {
  * remembered: a vendor or currency the parser could not read ('') is not a
  * fact to store ("settles in " with nothing after it, or, before, an
  * invented 'USD').
+ *
+ * The name is untrusted text, and a memory is recalled and shown later (the
+ * suggestion cards print it), so only a normalised company name is kept:
+ * letters, digits, spaces and &, at most 40 characters, cut at a word.
+ * Everything else, sentence punctuation included, becomes a space, so a
+ * stored name cannot be a sentence. A name that reads as an instruction is
+ * not stored at all: one with a word an instruction needs (ignore, prepare,
+ * approve, pay, send, transfer and the like), a run of three or more digits
+ * (an amount) or a 0x address. Even so, nothing recalled is put into a
+ * prompt: the suggestion cards send one built from fixed words and a
+ * currency code (suggestionsFromMemories). The Zeke page's "What MemWal
+ * stores" card lists this memory (lib/agent/memwal-disclosure.ts).
  */
+const VENDOR_NAME_MAX = 40;
+const INSTRUCTION_WORDS =
+  /\b(ignore|disregard|override|prepare|approve|approved|pay|paid|send|sent|transfer|release|sign|wire|execute|instructions?|rules?)\b/iu;
+const AMOUNT_OR_ADDRESS = /\d{3,}|0x[0-9a-f]+/iu;
+
+export function invoiceVendorMemory(recipient: string, currency: string): string | null {
+  if (!currency) return null;
+  if (INSTRUCTION_WORDS.test(recipient) || AMOUNT_OR_ADDRESS.test(recipient)) return null;
+  const words = recipient
+    .replace(/[^\p{L}\p{N} &]+/gu, ' ')
+    .replace(/\s+/g, ' ')
+    .trim()
+    .split(' ');
+  let vendor = '';
+  for (const word of words) {
+    const next = vendor ? `${vendor} ${word}` : word;
+    if (next.length > VENDOR_NAME_MAX) break;
+    vendor = next;
+  }
+  if (!/[\p{L}\p{N}]/u.test(vendor)) return null;
+  return `Invoice vendor ${vendor} settles in ${currency}`;
+}
+
 function rememberInvoiceVendor(orgId: string, recipient: string, currency: string): void {
-  const vendor = recipient.replace(/\s+/g, ' ').trim().slice(0, 80);
-  if (!vendor || !currency) return;
-  void rememberForOrg(orgId, `Invoice vendor ${vendor} settles in ${currency}`);
+  const memory = invoiceVendorMemory(recipient, currency);
+  if (memory) void rememberForOrg(orgId, memory);
 }
 
 export async function parseInvoice(
@@ -166,12 +204,12 @@ export async function optimizeBatch(
   // row. Approximate the saved spread as ~6 bps per row collapsed into a group.
   const SAVED_BPS_PER_COLLAPSED_ROW = Number(process.env.BATCH_SAVED_BPS_PER_ROW ?? 6);
   let savings = 0;
-  for (const [currency, idxs] of Object.entries(groups)) {
+  for (const idxs of Object.values(groups)) {
     if (idxs.length < 2) continue;
-    const feeBps = getCorridorFeeBps(currency);
     const groupTotal = idxs.reduce((s, i) => s + rows[i].amount, 0);
-    // collapsing (n-1) rows of spread; scaled by the corridor's fee weight.
-    savings += (groupTotal * (SAVED_BPS_PER_COLLAPSED_ROW / 10_000)) * ((idxs.length - 1) / idxs.length) * Math.max(0.5, feeBps / 100);
+    // Collapsing (n-1) rows of spread. It used to be scaled by the corridor's
+    // flat fee; a corridor carries no fee any more (A1 §2.8).
+    savings += (groupTotal * (SAVED_BPS_PER_COLLAPSED_ROW / 10_000)) * ((idxs.length - 1) / idxs.length);
   }
   return {
     suggestedGrouping: Object.values(groups),
@@ -221,10 +259,11 @@ export function suggestionsFromMemories(memories: RecalledMemory[]): CopilotSugg
         suggestionId: `cop_${Date.now()}_${out.length}`,
         type: 'batch',
         title: 'Pre-stage your recurring batch',
-        // Only what Zeke can do: proposeBatchPayout drafts a batch for approval.
+        // Only what Zeke can do: read a payout sheet the person attaches and prepare a batch from it.
         // It used to promise the cheapest corridor and a pre-open lock, which
         // nothing computes.
-        description: `Pattern recalled: “${m.text}”. Want me to draft this batch for your approval?`,
+        description: `Pattern recalled: “${m.text}”. Attach the sheet and I will check every row for you.`,
+        prompt: 'A recurring batch came up in my payment patterns. What do you need from me to prepare the next one?',
         confidence: relevance,
         requiresAuth: true,
       });
@@ -236,35 +275,13 @@ export function suggestionsFromMemories(memories: RecalledMemory[]): CopilotSugg
         // window, which this card used to promise.
         title: `Check USD→${ccy}`,
         description: `Pattern recalled: “${m.text}”. Want me to check the current USD→${ccy} rate?`,
+        prompt: `What is the current USD→${ccy} rate?`,
         confidence: relevance,
         requiresAuth: false,
       });
     }
   }
   return out;
-}
-
-/**
- * The card shown when memory suggests nothing. It pitches Smart Treasury,
- * which holds customer funds, so it waits for the custody phase like every
- * other treasury surface (lib/server/custody-phase.ts). It also waits for
- * TREASURY_EXECUTION_ENABLED, which /api/treasury requires before it moves
- * anything: "Move some over?" is not an offer to make while that refuses.
- * Otherwise there is no card, and the copilot page says there is nothing to
- * suggest. It is a canned card, so it has no confidence to state: it was
- * shown at an invented 60%.
- */
-export function idleCashSuggestion(custodyOn: boolean, executionOn: boolean): CopilotSuggestion | null {
-  if (!custodyOn || !executionOn) return null;
-  const rate = getTreasuryRate();
-  return {
-    suggestionId: `cop_${Date.now()}`,
-    type: 'treasury',
-    title: 'Put idle USDC to work',
-    description: `Idle Available cash earns 0%. Smart Treasury (Ondo USDY, T-bill) is ${rate.label}. Move some over?`,
-    confidence: null,
-    requiresAuth: true,
-  };
 }
 
 /** What the cards ask memory for. The copilot page never sent its own. */
@@ -274,22 +291,19 @@ const SUGGESTION_RECALL_QUERY = 'patterns';
  * Cards for one org, from that org's memory only. `orgId` is the session's:
  * the route used to take a `?user` query string and recall from a namespace
  * every workspace shared, so the cards could quote another tenant's memory.
+ *
+ * With no memory there is no card. The fallback card pitched the retired
+ * custodial Treasury ledger ("Idle Available cash ... Move some over?"),
+ * named the issuer without the signed-partner check, and offered a
+ * move Splash no longer makes (v2 D9, the 5.7 review). Treasury is USDY in the
+ * business's own wallet, on its own page.
  */
-export async function getCopilotSuggestions(
-  orgId: string,
-  custodyOn: boolean = custodyPhaseEnabled(),
-  // The same reading as app/api/treasury/route.ts.
-  treasuryExecutionOn: boolean = process.env.TREASURY_EXECUTION_ENABLED === 'true',
-): Promise<CopilotSuggestion[]> {
+export async function getCopilotSuggestions(orgId: string): Promise<CopilotSuggestion[]> {
   let out: CopilotSuggestion[] = [];
   try {
     out = suggestionsFromMemories(await recallForOrg(orgId, SUGGESTION_RECALL_QUERY, 6));
   } catch {
-    // memory unavailable — fall back below
-  }
-  if (out.length === 0) {
-    const fallback = idleCashSuggestion(custodyOn, treasuryExecutionOn);
-    if (fallback) out.push(fallback);
+    // memory unavailable: no cards
   }
   return out.slice(0, 5);
 }

@@ -61,6 +61,11 @@ export function suiScanTxUrlOn(network: SuiNetworkName, digest: string): string 
   return `https://suiscan.xyz/${network}/tx/${encodeURIComponent(digest)}`;
 }
 
+/** Suiscan account page on a NAMED network: the business wallet lives on the mainnet lane. */
+export function suiScanAccountUrlOn(network: SuiNetworkName, address: string): string {
+  return `https://suiscan.xyz/${network}/account/${encodeURIComponent(address)}`;
+}
+
 /**
  * The testnet faucet, or null on mainnet — where there is no faucet and
  * offering one is an invitation to look for free mainnet SUI.

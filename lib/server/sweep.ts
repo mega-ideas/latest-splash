@@ -8,7 +8,9 @@ import { createSweepJob, updateSweepJob } from '@/lib/server/operations';
 import { readRecipientForStaff } from '@/lib/server/recipients-store';
 import { recordMovement } from '@/lib/server/ledger-store';
 import { patchTransfer, readTransferForStaff } from '@/lib/server/transfers-store';
-import { pdaxAdapter } from '@/lib/server/pdax';
+import { formatMinor } from '@/lib/money';
+import { legacySweepPayout } from '@/lib/server/pdax';
+import { bankPartnerForCurrency, payoutPartner } from '@/lib/payouts/registry';
 
 export async function completeDeliveryForTransfer(intentId: string) {
   const intent = await readTransferForStaff(intentId);
@@ -33,6 +35,19 @@ export async function completeDeliveryForTransfer(intentId: string) {
     return { state: 'DISBURSED' as const };
   }
 
+  // A sweep's rate comes from the payout partner's own quote, taken BEFORE
+  // anything is credited: in production the partner refuses (no sandbox
+  // rate, no made-up reference), and nothing must be left behind when it does.
+  let fxRate = '';
+  if (intent.deliveryTier === 'SWEEP_ACCOUNT') {
+    // The route that pays this currency quotes it; a currency no route pays
+    // stops here, with nothing credited.
+    const route = bankPartnerForCurrency(intent.targetCurrency);
+    if (!route) throw new Error(`No payout route pays ${intent.targetCurrency}; nothing was credited.`);
+    const quote = await payoutPartner(route).quote({ currency: intent.targetCurrency, sendMinor: BigInt(intent.stablecoinAmountMicro), now: new Date() });
+    fxRate = formatMinor(quote.rateMicro, 6);
+  }
+
   // The RECIPIENT's stored balance, held inside the paying org's book — the
   // payer's own balance was debited at authorization. `subject` is what
   // separates the two inside one tenant.
@@ -52,7 +67,6 @@ export async function completeDeliveryForTransfer(intentId: string) {
 
   // Staff read: the transfer in hand already established who owns this.
   const recipient = intent.recipientId ? await readRecipientForStaff(intent.recipientId) : null;
-  const quote = await pdaxAdapter.quote(intent.targetCurrency, intent.stablecoinAmountMicro);
   const job = await createSweepJob({
     orgId: intent.orgId,
     transferIntentId: intent.id,
@@ -60,13 +74,13 @@ export async function completeDeliveryForTransfer(intentId: string) {
     partner: 'PDAX',
     amountUsdcMicro: intent.stablecoinAmountMicro,
     targetCurrency: intent.targetCurrency,
-    fxRate: quote.fxRate,
+    fxRate,
   });
   await patchTransfer(intent.id, { state: 'SWEEPING', sweepJobId: job.id });
   await updateSweepJob(job.id, { state: 'EXECUTING' });
 
   try {
-    const result = await pdaxAdapter.payout(job);
+    const result = await legacySweepPayout(job);
     const completedAt = new Date();
     const heldDurationMs = completedAt.getTime() - new Date(job.createdAt).getTime();
     await recordMovement({

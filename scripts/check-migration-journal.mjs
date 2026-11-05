@@ -78,6 +78,22 @@ for (let i = 0; i < Math.min(tags.length, files.length); i += 1) {
   }
 }
 
+// And `when` must rise. drizzle's migrator does not read idx or the tag to
+// decide what to run: it applies the entries whose `when` is later than the
+// newest row already in drizzle.__drizzle_migrations. An entry no later than
+// the one before it is skipped on every database that has applied that one,
+// and nothing reports it.
+for (let i = 1; i < entries.length; i += 1) {
+  if (!(Number(entries[i].when) > Number(entries[i - 1].when))) {
+    problems.push(
+      `meta/_journal.json entry ${i} ("${tags[i]}") has when ${entries[i].when}, not later than ` +
+        `"${tags[i - 1]}" (${entries[i - 1].when}) — a database that has applied "${tags[i - 1]}" ` +
+        'will skip it, with no error.',
+    );
+    break;
+  }
+}
+
 if (problems.length > 0) {
   console.error('Migration journal is out of step with drizzle/:\n');
   for (const problem of problems) console.error(`  ✖ ${problem}`);

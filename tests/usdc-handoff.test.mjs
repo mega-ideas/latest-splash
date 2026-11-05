@@ -66,7 +66,7 @@ test('a saved wallet recipient: free, total and allowance, and a link that carri
   const d = deps({ remaining: 5_000_000_000n });
   const answer = await usdcHandoffFor('org_1', 'send 500 USDC to Manila Parts', d);
   assert.ok(answer.handoff);
-  assert.equal(answer.handoff.href, '/dashboard/send-usdc?to=sup_manila&amount=500&from=zeke');
+  assert.equal(answer.handoff.href, '/dashboard/wallet?to=sup_manila&amount=500&from=zeke');
   assert.deepEqual(answer.handoff.lines, [
     'To Manila Parts Supply · 0xcccccc…cccccc',
     'Amount 500.00 USDC',
@@ -74,14 +74,14 @@ test('a saved wallet recipient: free, total and allowance, and a link that carri
     'Leaves your wallet 500.00 USDC, with no network fee',
     '4,500.00 USDC of your 30-day allowance left after',
   ]);
-  assert.equal(answer.handoff.cta, 'Review in Send USDC');
+  assert.equal(answer.handoff.cta, 'Review in Wallet');
   assert.match(answer.text, /I can't send it/);
   assert.deepEqual(d.calls.findRecipient, ['Manila Parts']);
 });
 
 test('amounts are re-printed from minor units, never passed through', async () => {
   const answer = await usdcHandoffFor('org_1', 'pay 1,250.50 usdc to Manila Parts', deps());
-  assert.equal(answer.handoff.href, '/dashboard/send-usdc?to=sup_manila&amount=1250.5&from=zeke');
+  assert.equal(answer.handoff.href, '/dashboard/wallet?to=sup_manila&amount=1250.5&from=zeke');
 });
 
 test('an allowance it cannot read is left out, not guessed', async () => {
@@ -131,20 +131,20 @@ test('amounts the lane would refuse are refused here too', async () => {
   assert.match(perTransfer.text, /20,000\.00 USDC per transfer/);
 });
 
-test('a closed lane prepares nothing; a missing fee address matters only when the anchor fee is on', async () => {
+test("a closed lane prepares nothing; a missing fee recipient matters only when Splash's wallet fee is on", async () => {
   const suspended = await usdcHandoffFor('org_1', 'send 5 USDC to Manila Parts', deps({ state: 'SUSPENDED' }));
   assert.equal(suspended.handoff, null);
-  // Free transfers need no fee address.
+  // Free transfers need no fee recipient.
   assert.ok((await usdcHandoffFor('org_1', 'send 5 USDC to Manila Parts', deps({ fee: false }))).handoff);
   const noFee = await usdcHandoffFor('org_1', 'send 5 USDC to Manila Parts', deps({ fee: false, anchorFee: true }));
   assert.equal(noFee.handoff, null);
-  assert.match(noFee.text, /fee address is not configured/);
+  assert.match(noFee.text, /fee recipient cannot be read from the mainnet FeeConfig/);
 });
 
-test('the anchor fee, when on, shows on the card; to a Splash user it stays free', async () => {
+test("Splash's wallet fee, when on, shows on the card; to a Splash user it stays free", async () => {
   const out = await usdcHandoffFor('org_1', 'send 500 USDC to Manila Parts', deps({ anchorFee: true }));
-  assert.ok(out.handoff.lines.includes('Audit-anchor fee 0.10 USDC, added on top'));
-  assert.ok(out.handoff.lines.includes('Leaves your wallet 500.10 USDC, with no network fee'));
+  assert.ok(out.handoff.lines.includes('Splash fee 0.25 USDC, added on top'));
+  assert.ok(out.handoff.lines.includes('Leaves your wallet 500.25 USDC, with no network fee'));
   const internal = await usdcHandoffFor('org_1', 'send 500 USDC to Manila Parts', deps({ anchorFee: true, destination: 'SPLASH' }));
   assert.ok(internal.handoff.lines.includes('Splash fee: free (to another Splash user)'));
 });
@@ -154,7 +154,7 @@ test('text around a name never reaches the link', async () => {
   const answer = await usdcHandoffFor('org_1', 'send 5 USDC to Manila Parts https://evil.example/?x=1&to=0xattacker', d);
   // The lookup gets the whole name; only a saved record's id could come back.
   assert.equal(d.calls.findRecipient[0], 'Manila Parts https://evil.example/?x=1&to=0xattacker');
-  assert.match(answer.handoff.href, /^\/dashboard\/send-usdc\?to=sup_manila&amount=5&from=zeke$/);
+  assert.match(answer.handoff.href, /^\/dashboard\/wallet\?to=sup_manila&amount=5&from=zeke$/);
 });
 
 // ─── Where it sits, and what it never touches ───────────────────────────────
@@ -180,13 +180,14 @@ test('Zeke answers it after the lane refusal and before the model', async () => 
   assert.match(oxwal, /yield \{ type: 'handoff', handoff: handoff\.handoff \}/);
 });
 
-test('the card links only into Send USDC, and Send USDC fills in without quoting', async () => {
+test('the card links only into Wallet, and an old Wallet link with a recipient goes to Transfer unchanged', async () => {
   const thread = code(await readFile(new URL('../components/oxwal/ThreadView.tsx', import.meta.url), 'utf8'));
-  assert.match(thread, /item\.handoff\.href\.startsWith\('\/dashboard\/send-usdc\?'\)/);
-  const desk = code(await readFile(new URL('../components/stablecoin/SendUsdcDesk.tsx', import.meta.url), 'utf8'));
-  const prefill = desk.slice(desk.indexOf("const to = params.get('to')"), desk.indexOf("setPrefilled(params.get('from') === 'zeke')"));
-  assert.match(prefill, /wallets\.some\(\(r\) => r\.id === to\)/, 'only a recipient this workspace saved');
-  assert.doesNotMatch(prefill, /getQuote\(|fetch\(/, 'filling in is not quoting');
+  assert.match(thread, /item\.handoff\.href\.startsWith\('\/dashboard\/wallet\?'\)/);
+  // Sending moved to Transfer (v2 brief 5.4, 5.5): the Wallet page no longer sends, so it carries the query over.
+  const page = code(await readFile(new URL('../app/dashboard/wallet/page.tsx', import.meta.url), 'utf8'));
+  assert.match(page, /asked\.to !== undefined \|\| asked\.amount !== undefined/);
+  assert.match(page, /redirect\(`\/dashboard\/transfer\?\$\{query\.toString\(\)\}`\)/);
+  assert.doesNotMatch(page, /getQuote\(|fetch\(/, 'carrying a link over is not quoting');
 });
 
 // ─── Phase 12: more ways to ask, and the model's own way in ─────────────────
@@ -201,7 +202,7 @@ test('it also reads "in USDC", USDC before the amount, and polite framing', () =
 
 test('the preparation core takes a name and an amount as a person writes it', async () => {
   const answer = await prepareUsdcHandoff('org_1', { name: 'Manila Parts', amount: '$1,250.50' }, deps());
-  assert.equal(answer.handoff.href, '/dashboard/send-usdc?to=sup_manila&amount=1250.5&from=zeke');
+  assert.equal(answer.handoff.href, '/dashboard/wallet?to=sup_manila&amount=1250.5&from=zeke');
   const bad = await prepareUsdcHandoff('org_1', { name: 'Manila Parts', amount: 'five hundred' }, deps());
   assert.equal(bad.handoff, null);
   assert.match(bad.text, /I can't prepare that/);
@@ -229,7 +230,7 @@ test('the model path turns a prepared transfer into the same card, and every too
   const card = oxwal.indexOf("if (handoff) yield { type: 'handoff', handoff };", exec);
   assert.ok(exec > 0 && card > exec, 'the Claude loop yields the handoff after running the tool');
   assert.match(oxwal, /const handoff = name === 'prepareUsdcTransfer' \? usdcHandoffIn\(payload\) : null;/, 'only this tool makes a card');
-  assert.match(oxwal, /handoff\.href\.startsWith\('\/dashboard\/send-usdc\?'\)/, 'only a Send USDC link becomes a card');
+  assert.match(oxwal, /handoff\.href\.startsWith\('\/dashboard\/wallet\?'\)/, 'only a Wallet link becomes a card');
 
   const { OXWAL_TOOL_REGISTRY } = await import('../lib/agent/oxwal.ts');
   const hook = await readFile(new URL('../lib/oxwal/use-oxwal-thread.ts', import.meta.url), 'utf8');

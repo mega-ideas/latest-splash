@@ -39,9 +39,6 @@ const nextConfig: NextConfig = {
       { pathname: "/isometric/**", search: "" },
       { pathname: "/partners/**", search: "" },
       { pathname: "/splash-main-icon.png", search: "" },
-      { pathname: "/airwallex-logo.png", search: "" },
-      { pathname: "/sumsub-logo.png", search: "" },
-      { pathname: "/deepbook-mark.png", search: "" },
     ],
     // A redirect is followed without re-checking remotePatterns (16.3 follows
     // 3 by default), so follow none. dangerouslyAllowLocalIP is already false

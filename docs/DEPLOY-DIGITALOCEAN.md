@@ -74,6 +74,7 @@ new build refuses to install or start on the old runtime and environment.
    | `SUI_MAINNET_RPC_URL` | Optional; the stablecoin lane's mainnet client. Defaults to `https://fullnode.mainnet.sui.io:443` |
    | `SUI_SETTLEMENT_MODE` | `auto` (the default and recommended), `live`, or `simulate` for demos. `auto` with mocks off is live settlement, so the defaults require the signer below |
    | `SPLASH_CORE_PACKAGE_ID`, `SPLASH_PEG_STATE_ID`, `SPLASH_COMPLIANCE_CONFIG_ID`, `SPLASH_ADMIN_CAP_ID`, `SPLASH_ANCHOR_CAP_ID`, `SPLASH_CAP_REGISTRY_ID`, `SPLASH_BUSINESS_ACCOUNT_ID`, `DEEPBOOK_POOL_ID`, `DEEPBOOK_QUOTE_TYPE`, `USDC_TYPE` | From the package the deployment runs, all from one publish (`docs/KEY-CEREMONY-RUNBOOK.md` §3.7). Settlement, anchors and peg pushes throw without `SPLASH_ANCHOR_CAP_ID` and `SPLASH_CAP_REGISTRY_ID`. `USDC_TYPE` must be the real coin type — the dev stand-in `0x2::sui::SUI` is refused. `SPLASH_TREASURY_ID`, `SPLASH_SMART_TREASURY_SUI_ID` and `SPLASH_PAYOUT_DELEGATION_ID` are custody-phase only: blank in Phase 0, unless the full-scope settlement rule asks for `SPLASH_TREASURY_ID` |
+   | `SPLASH_FEE_CONFIG_ID`, `SPLASH_ADDRESS_REGISTRY_ID`, `SPLASH_SPEND_PACKAGE_ID` | v2 (Amendment A1), from the same publish. The quote API reads Splash's fee schedule and recipient from `SPLASH_FEE_CONFIG_ID`: on mainnet without it no fee is quoted and no payment is built, and a quote answers 503 while it cannot be read. `verify_business` needs `SPLASH_ADDRESS_REGISTRY_ID`. The operator-outflow monitor reads all three to clear a v2 executor payment (`splash_spend::pay_intent`), its fee leg and a partner or business-wallet recipient; without them those payments are flagged. See `docs/v2/fees.md` |
    | `OPERATOR_SUI_ADDRESS` / `OPERATOR_SUI_PRIVATE_KEY` | Required once settlement is live (`live`, or `auto` with mocks off) or `TREASURY_EXECUTION_ENABLED=true`. Ed25519 or Secp256k1 `suiprivkey…`. **Encrypted/secret env vars only** |
    | `PASSKEY_RP_ID` | **Decide before anyone enrols a passkey.** Unset, it is the host of `NEXT_PUBLIC_APP_URL`; changing it later orphans every passkey, and a passkey's Sui address is the user's Splash wallet, so another domain means another wallet. Use the parent domain (`splashz.xyz`) if passkeys must work on more than one subdomain — see `docs/PHASE-STATUS.md`. Production's decision is `splashz.xyz` (`docs/GO-LIVE-HANDOVER.md`) |
 
@@ -87,7 +88,7 @@ new build refuses to install or start on the old runtime and environment.
    | `FEATURE_ZKLOGIN=true` | `ZKLOGIN_GOOGLE_CLIENT_ID` (part of address derivation — never rotate once users exist), `ZKLOGIN_USER_SALT` |
    | WhatsApp approvals | Dropped for now: the Twilio account is inactive, and in production WhatsApp approvals can't be switched on without delivery, so workspaces approve by click (`docs/GO-LIVE-HANDOVER.md`). To bring it back: `TWILIO_ACCOUNT_SID`, `TWILIO_AUTH_TOKEN`, `TWILIO_WHATSAPP_FROM`; point the Twilio webhook at `/api/webhooks/whatsapp` and set `TWILIO_WEBHOOK_URL` to that exact public URL — behind a proxy the request URL differs from the one Twilio signed, and every inbound message is refused |
    | MemWal | `MEMWAL_PRIVATE_KEY` and `MEMWAL_ACCOUNT_ID` together, or neither |
-   | Stablecoin lane | `CHAINALYSIS_SANCTIONS_API_KEY` to screen wallet recipients. `SPLASH_FEE_ADDRESS_MAINNET` only once `STABLECOIN_ANCHOR_FEE=on` (stablecoin transfers are free without it; `doctor` checks on mainnet that it is a wallet, not an object; the full value is in the founder's `.env.local`, see `docs/GO-LIVE-HANDOVER.md`). Leave `STABLECOIN_GASLESS` blank: wallet transfers go without gas, so no sponsor key is needed. Recommended: `SUI_MAINNET_RPC_URL` pointing at a dedicated gRPC fullnode — Mysten's public one rate-limits (`Too Many Requests`) under bursts. Optional `ETHEREUM_RPC_URL` / `USDY_ORACLE` and `DEEPBOOK_STABLE_PAIRS` (the old name `DEEPBOOK_STABLE_PAIR` is ignored). See `docs/STABLECOIN-LANE.md`, Configuration |
+   | Stablecoin lane | `CHAINALYSIS_SANCTIONS_API_KEY` to screen wallet recipients. With `STABLECOIN_ANCHOR_FEE=on`, the wallet fee is paid to the mainnet `FeeConfig`'s fee recipient, read through `SPLASH_FEE_CONFIG_ID` (stablecoin transfers are free while the switch is off, and while `FeeConfig` has no recipient; `doctor`'s **Fee wallet** row checks on mainnet that the recipient is a wallet, not an object). `SPLASH_FEE_ADDRESS_MAINNET` is retired: nothing reads it. Leave `STABLECOIN_GASLESS` blank: wallet transfers go without gas, so no sponsor key is needed. Recommended: `SUI_MAINNET_RPC_URL` pointing at a dedicated gRPC fullnode — Mysten's public one rate-limits (`Too Many Requests`) under bursts. Optional `ETHEREUM_RPC_URL` / `USDY_ORACLE` and `DEEPBOOK_STABLE_PAIRS` (the old name `DEEPBOOK_STABLE_PAIR` is ignored). See `docs/STABLECOIN-LANE.md`, Configuration |
    | 0xWal | `ANTHROPIC_API_KEY` (+ `ANTHROPIC_MODEL`) recommended; without it 0xWal runs the local planner |
    | Extra POST origins | `ALLOWED_ORIGINS`, comma-separated |
 
@@ -161,6 +162,68 @@ new build refuses to install or start on the old runtime and environment.
    every scope (WS4): it watches the operator address, which signs in the
    stablecoin scope too. A 502 from it means the monitor could not look, and
    is an alert in itself.
+   Schedule `https://<domain>/api/cron/governance-alerts` every 15 minutes in
+   every scope too (v2): it tells every business owner when a core upgrade,
+   a governance owner change or a registry addition is announced, inside the
+   24-hour notice. It reads the state of the canonical upgrade wrapper and
+   compliance config, not the event feed. It needs
+   `SPLASH_UPGRADE_DELAY_PACKAGE_ID`, `SPLASH_UPGRADE_WRAPPER_ID` and
+   `SPLASH_COMPLIANCE_CONFIG_ID`. Core's original id is read from the
+   wrapper, so `SPLASH_CORE_PACKAGE_ID` may name the core version the app
+   calls. It answers 502 without those ids; when either id is not the
+   canonical object of the canonical type (that case also pages through
+   `OPERATOR_ALERT_WEBHOOK_URL`); or when it cannot read both objects in
+   full. A 502 is again an alert in itself. It also reads the canonical
+   `FeeConfig` (`SPLASH_FEE_CONFIG_ID`, required) and tells every owner of
+   a proposed or applied fee schedule or fee recipient.
+   Schedule `https://<domain>/api/cron/spend-rule-alerts` hourly (v2 Phase
+   2): it reads every business's spending rules from the chain and emails
+   that business's owners about near-threshold patterns (detective only).
+   It answers 502 without a database or when any business's rules could not
+   be read. Leave `https://<domain>/api/cron/billing` unscheduled while
+   `FEATURE_SUBSCRIPTION_BILLING` is off (it answers 404).
+   Schedule `https://<domain>/api/cron/limit-changes` every 15 minutes (v2
+   Phase 3, limits): it starts every approved higher limit whose 24 hour notice
+   has passed and tells the owners (approved, declined, started), once each. A
+   limit never starts late if it does not run (every read starts what is due);
+   only the "started" notice does. It answers 503 without a database.
+   Schedule `https://<domain>/api/cron/scheduled-payments` every five minutes
+   (v2 Phase 3, scheduled batches): it makes each schedule's run, sends the
+   automatic ones' day-before notice, starts a run at its due time ("ask me
+   first" prepares the batch and asks the owners; "pay automatically" pays
+   inside the owners' allowance after every check, or hands the run back with
+   the reason), follows prepared batches to their end and settles automatic runs.
+   Safe to call twice. It answers 401 without `CRON_SECRET`, 502 without a
+   database or when any business could not be worked on. Without
+   `SCHEDULED_PAYER_KMS_KEY_ID` nothing is paid automatically: every run is
+   handed back to "ask me first".
+   Schedule `https://<domain>/api/cron/wallet-signing` every five minutes
+   (v2 §4.1): it closes Business Splash Wallet signature requests past their
+   expiry and clears the partial signatures they held, and reads on chain
+   every submission whose outcome is unknown or that is stuck past its lease,
+   closing it as executed (and opening the next step) or failed. It also
+   carries the ladder for requests nobody has answered (v2 Phase 3): it tells
+   the people who can approve a waiting request again after 10 minutes, 1 hour
+   and 4 hours, in the app and by e-mail through the one Splash sender, and
+   tells the person who asked and the owners "Nobody approved in time. Nothing
+   was paid. Ask again." for each request that ran out. Each step is one
+   database row, so it is safe to call twice and a restart loses nothing; a
+   reminder can be up to one interval (five minutes) late. It answers
+   502 without a database, when any partial signature is still held for a
+   closed request, when a submission is still stuck, when a chain read
+   failed, or when a waiting request could not be read or told.
+   Schedule `https://<domain>/api/cron/withdrawals` every five minutes, after
+   the wallet-signing sweep (v2 §4.4): it marks withdrawals sent whose
+   owners' request executed, posts their digest to the payout partner once
+   the chain shows the instructed intent, reverses the instruction and
+   cancels the withdrawal when the request lapsed, and records or frees a
+   partner test deposit. It answers 502 without a database, without
+   `SPLASH_CORE_ORIGINAL_PACKAGE_ID`, or when a row could not be settled.
+   Schedule `https://<domain>/api/cron/cross-chain` every ten minutes (v2
+   §4.7): it asks Circle's attestation service again for every burned CCTP
+   payment, and reports a payment burned but not minted six hours after its
+   burn. It answers 502 without a database, without `CCTP_IRIS_API_URL` in
+   production, when Circle could not be asked, or when a payment is stuck.
 
 **Redeploys**: push to `main` → App Platform rebuilds, runs the pre-deploy
 migration job, then deploys. Deleted files disappear from the server because

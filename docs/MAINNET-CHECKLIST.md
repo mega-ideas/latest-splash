@@ -4,6 +4,274 @@ Status snapshot 2026-07-18, the day before demo day. Source of truth for
 "what's left": the mainnet-readiness prompt (W1–W8) + the W9/W10 addendum.
 Order of work: W1 → W2 → (W3 ∥ W4) → W5 → W6 → W7 → W8; W10 alongside.
 
+## v2 mainnet steps — human only (brief §9, 24 Oct 2026)
+
+Claude Code writes these steps and does not perform them. Nothing here is
+done by a script that holds a mainnet key. The design is in
+[`docs/v2/phase1-move-design.md`](v2/phase1-move-design.md) and the
+procedure in [`docs/UPGRADE-POLICY.md`](UPGRADE-POLICY.md).
+
+**Before any publish**
+
+- [ ] Sui CLI `mainnet-v1.82.3`. Every package passes `sui move build &&
+      sui move test`, and `npm run lint` passes, including `check:core`,
+      `check:spend` and `check:fees` (the generated fee-vector test is up to
+      date, the 100 bps ceiling is the same in `splash_core`, `splash_spend`
+      and `lib/fees/schedule.ts`, no literal fee rate in customer copy, and
+      no immediate fee setter but `set_discount`).
+- [ ] The independent Move review (OtterSec, or Zellic as backup) has signed
+      off on this exact source commit. Record the commit.
+- [ ] **The governance multisig exists**: Sky, Sebastian and the cold backup,
+      2-of-3, with no single member able to sign alone. Record its address and
+      the three public keys. It never signs `0x2::address_alias`.
+- [ ] **The Splash finance multisig exists**, the fee recipient: no single
+      member able to sign alone, and no member key the KMS operator's. Record
+      its address and its members' keys (`flag || public key`), weights and
+      threshold: the fee recipient proposal names exactly these. If Splash
+      ops gets its own multisig for `OpsCap`, record it too
+      (`SPLASH_OPS_ADDRESS`).
+- [ ] The previously exposed operator and API keys are rotated, and the
+      operator signs only through AWS KMS (`OPERATOR_KMS_KEY_ID`; production
+      refuses a raw key at boot).
+
+**Publish order (fresh packages; v2 core is not an upgrade of anything)**
+
+1. [ ] Publish `splash_core`. Record the package ID, `AdminCap`,
+       `TreasuryCap`, `AnchorCap`, `CapRegistry`, the `ConfigTicket` and
+       the `UpgradeCap`, and from Amendment A1 the shared `FeeConfig` and
+       address `Registry` and the `FeeAdminCap` and `OpsCap` (both minted to
+       the publisher). `FeeConfig` starts with the launch schedule and **no
+       fee recipient**, so Splash's fees are off and nothing is ever paid to
+       the publisher.
+2. [ ] `compliance_config::create<USDC>`, consuming the `ConfigTicket`, with
+       native mainnet USDC
+       (`0xdba34672e30cb065b1f93e3ab55318768fd6fef66c15942c9f7cb846e2f900e7::usdc::USDC`).
+       Exactly one config can ever exist. Record its ID. Every
+       `spend_policy::create_policy` must pass this config, and each policy
+       records its ID: `splash_spend` then opens and pays only against it.
+3. [ ] Publish `splash_spend` and make it immutable **in the same
+       transaction**: one PTB with `Publish`, then
+       `0x2::package::make_immutable` on the `UpgradeCap` the publish
+       returned, and nothing else. A separate transaction leaves a window in
+       which one key holds the `UpgradeCap`, and the verify step fails such a
+       publish. Record the digest.
+4. [ ] Publish `splash_upgrade_delay` the same way: `Publish` and
+       `make_immutable` in one transaction. Record the digest.
+       `scripts/e2e-testnet.mjs` (through `scripts/v2-end-state.mjs`) checks
+       both publishes: each must be exactly those two commands, leave no
+       `UpgradeCap` behind, and be version 1 with no later versions.
+5. [ ] Transfer core's `UpgradeCap` to the governance multisig. The multisig
+       calls `upgrade_delay::wrap(cap, keys, weights, threshold)` itself,
+       which makes the policy additive. Record the `DelayedUpgradeCap` ID.
+       Confirm on chain that the policy is 128 (additive) and the owner is the
+       multisig.
+6. [ ] Transfer `AdminCap` to the governance multisig. Transfer the
+       `ComplianceCap` to a third address (2-of-3), never the operator's.
+6a. [ ] **The fee ceremony.** Transfer `FeeAdminCap` and `OpsCap` to the
+       governance multisig (`OpsCap` may go to a separate Splash ops multisig
+       instead), never the operator's. Both have `store`, so a plain transfer
+       works. With `FeeAdminCap` one key could set any discount at once and
+       propose any schedule or recipient alone.
+6b. [ ] Read `FeeConfig`'s schedules and check each kind against A1 §2.2
+       (`docs/v2/fees.md`): Splash business free; wallet 2 bps, minimum
+       250,000 and maximum 5,000,000 minor units; exchange 15/12/10/7/5 bps
+       and cross-chain and bank payout 30/20/12/7/5 bps, on upper bounds of
+       1,000, 10,000, 50,000 and 100,000 USDC and `u64::MAX`, minimum 0,
+       maximum `u64::MAX`. The verify step does not read the schedule, so
+       this is a manual read; record the output.
+6c. [ ] The governance multisig calls `fee_config::propose_fee_recipient`
+       with the finance multisig's member keys, weights and threshold. The
+       chain derives the address and refuses a multisig one member can sign
+       for (1304). Check that the `FeeRecipientProposed` event names the
+       finance multisig's recorded address. Wait 24 hours. Then call
+       `apply_fee_recipient`, no later than seven days after the notice ran
+       out (1306 after that: propose again). Splash's fees are on from then.
+       Until then every fee is 0, which is a valid state to onboard in; do
+       not leave a proposal for any other address pending (withdraw it with
+       `cancel_fee_recipient_proposal`).
+6d. [ ] Splash ops (the `OpsCap` holder) registers each signed payout
+       partner's deposit addresses with `address_registry::add_partner_address`,
+       and checks each `PartnerAddressAdded` event. A payment to a
+       registered address is charged and settled only as a bank payout.
+       Business wallets need no step: verification enters them.
+7. [ ] The governance multisig calls
+       `compliance_config::propose_addition<splash_spend::splash_spend::SettleWitness>`
+       for the settlement-app registry (2). Wait 24 hours. Then call
+       `activate_addition`, no later than 7 days after the notice ran out.
+       Spending rules work from then on.
+8. [ ] Do not register any bridge adapter until the CCTP V2 adapter has been
+       reviewed and published **immutable**.
+8a. [ ] **Before the first business onboards, read the config's registries
+       and check them exactly.** `settlement_apps` is exactly
+       `[<published splash_spend>::splash_spend::SettleWitness]`,
+       `bridge_adapters` is `[]`, `accepted_assets` is exactly native mainnet
+       USDC, and `pending_additions` is `[]`. Read `FeeConfig` too: no
+       schedule proposal is pending for any kind, and either no fee recipient
+       is set and none but the finance multisig is pending, or the finance
+       multisig is the recipient. On-chain governance checks prove
+       only that the sender holds `AdminCap` and is a multisig no single
+       member can sign for, not that it is the governance multisig, and a
+       proposal made before the alert cron runs reaches no owner.
+       `scripts/v2-end-state.mjs` does not read the registries, so this is a
+       manual read; record the output.
+8b. [ ] **Before any asset addition:** confirm the asset has 6 decimals
+       (`coin_registry::decimals` on its `Currency`). Tier ceilings, the
+       bank-payout floor and the 10,000 USDC second-approval threshold are
+       6-decimal minor units, and `activate_addition` does not check
+       decimals.
+9. [ ] ~~Decision for Sky: when the legacy approver path closes.~~ **Gone:
+       there is no legacy path to close.** This step used to ask when to
+       switch off `legacy_enabled` (`admin_disable_legacy` or
+       `disable_legacy`). Sky decided (decision 3, 24 Oct 2026) not to
+       publish the legacy approval path at all, because a public function,
+       however firmly closed, can never be removed once published. So v2 core
+       has no `legacy_enabled`, no approver set and no
+       `confirm_with_approval`, and none of those functions exists to call.
+       The check is now only that `tests/legacy-path-removed.test.mjs` passes
+       on the audited commit.
+
+**Environment (mainnet)**
+
+- [ ] `SPLASH_CORE_PACKAGE_ID`, `SPLASH_PACKAGE_ID`,
+      `SPLASH_COMPLIANCE_CONFIG_ID`, `SPLASH_CAP_REGISTRY_ID` and
+      `SPLASH_ANCHOR_CAP_ID` are set to the new IDs, as are the governance
+      alert IDs `SPLASH_UPGRADE_DELAY_PACKAGE_ID` and
+      `SPLASH_UPGRADE_WRAPPER_ID`.
+- [ ] `SPLASH_FEE_CONFIG_ID` and `SPLASH_ADDRESS_REGISTRY_ID` are set (the
+      quote API reads the fee from `FeeConfig`, and on mainnet without it no
+      fee is quoted and no payment is built; `verify_business` and the
+      operator-outflow monitor need the `Registry`), and so is
+      `SPLASH_SPEND_PACKAGE_ID` (the operator-outflow monitor's approved
+      path), with `SPLASH_SPEND_POLICY_REGISTRY_ID`, the `PolicyRegistry`
+      splash_spend shares at publish (spending rules, §4.2: without both no
+      rule is built or read). For the verify step, also `SPLASH_FEE_ADMIN_CAP_ID`,
+      `SPLASH_OPS_CAP_ID`, `SPLASH_OPS_ADDRESS` (blank: the governance
+      multisig) and `SPLASH_FINANCE_ADDRESS`; unset, those checks are
+      reported skipped, never passed.
+- [ ] `FEATURE_SUBSCRIPTION_BILLING` is **unset or `false`** (A1 §6: built,
+      not enabled). `/api/cron/billing` is not scheduled. Before it is ever
+      enabled: `SPLASH_FINANCE_ADDRESS` is the finance multisig and equals
+      `FeeConfig`'s applied fee recipient, plans are seeded, and a testnet
+      subscribe, pull and revoke has run.
+- [ ] **Scheduled batches** (v2 Phase 3, `docs/v2/phase3-scheduled-batches.md`).
+      "Ask me first" needs only the cron: `/api/cron/scheduled-payments` is
+      scheduled every five minutes with `CRON_SECRET` and answers 200. Human
+      steps for "pay automatically", none of which a build does:
+      1. Sebastian reviews the design, the key policy below and the default
+         allowance caps (per payment 2,000, daily 5,000, monthly 20,000 USDC,
+         90 days) before it is switched on.
+      2. Create a **second** AWS KMS key (ECC secp256k1 or secp256r1, sign and
+         verify), not the operator's. Key policy: only the app's role may
+         `kms:Sign` and `kms:GetPublicKey`; no `kms:ScheduleKeyDeletion` or
+         policy changes outside the break-glass admin; a CloudTrail alarm on any
+         `Sign` by another principal. Derive its Sui address from the public key.
+      3. Set `SCHEDULED_PAYER_KMS_KEY_ID`, `SCHEDULED_PAYER_SUI_ADDRESS` and
+         `AWS_REGION`. The boot refuses the operator's key or address. Leave both
+         unset to keep automatic payments off (every run is handed back).
+      4. Fund the payer with **nothing**: no USDC and no SUI. The operator
+         sponsors gas.
+      5. Add the payer to the operator-outflow watch (it is not watched yet).
+      6. A testnet rehearsal: an owner-signed allowance, one automatic run, a
+         Skip, the kill switch, a revoke. Hardware passkey check first (Phase 2).
+- [ ] The near-threshold alert cron (`/api/cron/spend-rule-alerts`) is
+      scheduled hourly with `CRON_SECRET`, and answers 200 (a 502 lists the
+      businesses whose spending rules could not be read).
+- [ ] The governance alert cron reads `FeeConfig` too: with
+      `SPLASH_FEE_CONFIG_ID` unset it answers 502, and a 502 naming it means
+      the id is not the canonical `FeeConfig` of core's original package
+      (the upgrade and owner-change alerts are still delivered, and the run
+      still answers 502). Before the cron is scheduled, its GraphQL read has
+      run once against the testnet `FeeConfig` and parsed (the parser is
+      tested on fixtures only). A test fee proposal on testnet (a schedule and
+      a recipient) reached every test owner, and so did its withdrawal.
+- [ ] `SPLASH_CUSTODY_PACKAGE_ID` and `SPLASH_PAYOUT_DELEGATION_ID` are
+      **unset**. Production on mainnet refuses to boot with either, because
+      custody and the meter are retired in v2. On mainnet the
+      `splash_custody` settlement paths (single transfer, Smart Treasury
+      allocation) refuse in every `SUI_SETTLEMENT_MODE`, so
+      `SUI_SETTLEMENT_MODE=simulate` cannot mark a payment SETTLED. (The
+      custody payout-run route and its `SUI_BATCH_SETTLEMENT_MODE` switch were
+      removed in v2 Phase 3.)
+- [ ] `FUNDING_DEPOSIT_DERIVATION_SECRET` and
+      `FUNDING_CCTP_DEPOSIT_ADDRESSES_JSON` are **unset**. Production on
+      mainnet refuses to boot with either: on mainnet funding sessions give
+      out no deposit address (D1, D3), and a stablecoin funding session is
+      refused with `no_deposit_address_on_mainnet`.
+- [ ] The governance alert cron (`/api/cron/governance-alerts`) is scheduled,
+      and a test proposal on testnet reached every test owner. Against the
+      mainnet ids it answers 200. A 502 naming `SPLASH_UPGRADE_WRAPPER_ID` or
+      `SPLASH_COMPLIANCE_CONFIG_ID` means that id is not the canonical object.
+- [ ] **The hardware 2-of-3 passkey check has passed on testnet** (owed from
+      Phase 0): run on testnet by one approver (Sky, decided 25 Oct) with
+      three of his own authenticators on three kinds of device, as three
+      owner logins of one testnet business; the runbook in
+      `docs/v2/phase2-business-wallet.md`, `scripts/wallet-hardware-check.mjs`
+      output and the executed registration digest recorded under a
+      `wallet-2-of-3` heading in `docs/mainnet-checks-2026-10.md`. No business
+      wallet is created on mainnet before it: the code refuses every wallet
+      request on mainnet until `WALLET_MAINNET_ENABLED=true` and
+      `WALLET_HARDWARE_CHECK_REF=docs/mainnet-checks-2026-10.md#wallet-2-of-3`
+      are both set, and production will not boot with only the first.
+- [ ] A testnet dry run shows a transaction sponsored from the operator's SUI
+      **address balance** (no gas coin) is accepted, before
+      `WALLET_GAS_SPONSOR=operator` is set. The operator's SUI address balance
+      is funded, within `OPERATOR_HOT_BALANCE_CEILING_MICRO`'s intent.
+- [ ] The wallet signature sweep (`/api/cron/wallet-signing`) is scheduled
+      every five minutes and answers 200 (it also reconciles submissions whose
+      outcome is unknown, and answers 502 while any is stuck).
+
+**Partners and legal**
+
+- [ ] Sumsub, Elliptic and every payout partner contract is signed before its
+      flag is switched on.
+- [ ] Compliance (v2 §4.6, `docs/v2/phase2-compliance.md`): Sumsub's webhook
+      is set to `HMAC_SHA256_HEX` and `SUMSUB_WEBHOOK_SECRET` is set
+      (`SUMSUB_WEBHOOK_ALLOW_SHA1` stays off, or is turned off once the switch
+      is made); compliance confirms `KYT_SCREENING_MAX_AGE_HOURS` (default
+      24); one
+      KYB applicant and one Travel Rule transfer are run in Sumsub's sandbox
+      against this code before `SUMSUB_TRAVEL_RULE_ENABLED=true`; Elliptic's
+      wallet-exposure call is checked against the contracted account's
+      sandbox, and compliance sets `ELLIPTIC_REVIEW_SCORE` and
+      `ELLIPTIC_BLOCK_SCORE`; counsel confirms whose Travel Rule obligation
+      a payment from the business's own self-hosted wallet to an exchange is,
+      and the sender-declaration wording.
+- [ ] `SIGNED_PARTNERS` lists exactly the partners whose agreements are
+      signed. It is empty by default, and nobody is named until then.
+- [ ] The SSM registration number is entered in `BRAND.legalEntity`
+      (`content/brand.ts`). The footer carries no entity until it is.
+- [ ] Legal sign-off on Treasury, including the Halogen referral wording,
+      before Treasury is enabled. What waits on it (docs/v2/phase3-treasury.md):
+      `FEATURE_FUND_REFERRAL` (the eligibility questions in
+      `lib/treasury/fund-eligibility.ts`, the referral link `FUND_REFERRAL_URL`
+      and the read-only holding) and `TREASURY_WALLET_SWAPS`. Both are off. The
+      holding needs a contracted read-only API from the fund manager, and swaps
+      need a live swap route that the wallet signing service accepts. Neither is
+      in this build, so production refuses both rather than show a stand-in.
+      `FEATURE_ONDO_STOCKS` stays off until the section 7 phase.
+- [ ] Each partner confirms its deposit-address model (Phase 0 check 6). Is
+      the address fixed per business, or issued per payout? **Decided by Sky
+      (decision 2, 24 Oct 2026):** fixed per business per partner, verified
+      once by a test deposit and bound to its beneficiaries by the business
+      wallet. Each partner still confirms it can work that way, and on which
+      networks it deposits.
+- [ ] Withdrawals (v2 §4.4, `docs/v2/phase2-withdrawals.md`): set
+      `WITHDRAWAL_ACCOUNT_KEY` (random, at least 32 characters, kept like any
+      other secret; to rotate, move the old value to
+      `WITHDRAWAL_ACCOUNT_KEY_PREVIOUS`; losing every key makes the stored bank
+      accounts unusable), and `SPLASH_CORE_ORIGINAL_PACKAGE_ID` (required in
+      production: withdrawals refuse without it). Schedule
+      `/api/cron/withdrawals` every five minutes, and `/api/cron/cross-chain`
+      every ten (it needs `CCTP_IRIS_API_URL`). Before relying on the
+      derived intent id, dry-run one kind 4 withdrawal on testnet and compare
+      the created intent with `withdrawals.intent_id`.
+      The Hata and Fiuu credentials (`HATA_API_KEY`, `HATA_WEBHOOK_SECRET`,
+      `FIUU_MERCHANT_ID`, `FIUU_VERIFY_KEY`) are set only once both contracts
+      are signed and the adapter is wired. Each partner's deposit address is
+      added to the on-chain partner registry (`OpsCap`), or a kind 4 payout
+      to it aborts. `PAYOUT_SANDBOX_WEBHOOKS_ENABLED` stays off in
+      production.
+
 ## Shipped (in review)
 - [x] W9.0 type & color discipline · W9.1 quote comparison card ·
       W9.2 receipt + proof layer + share link · W9.4 money-path panel
@@ -46,8 +314,9 @@ Order of work: W1 → W2 → (W3 ∥ W4) → W5 → W6 → W7 → W8; W10 alongs
 
 ## W4 — compliance rails (largest gap)
 - [ ] KYT pipeline behind provider interface + stub: screen at beneficiary
-      create, pre-settlement, inbound funding; screening_results persisted;
-      risk ≥ threshold → COMPLIANCE_HOLD lane; fail closed
+      create, pre-settlement, inbound funding; screening results persisted
+      (in a table made for it then; the unused `screening_results` table was
+      dropped by migration 0080); risk ≥ threshold → COMPLIANCE_HOLD lane; fail closed
 - [ ] KYB tier → server-enforced limits in lib/policy/evaluate.ts; middleware
       assertion on every money route
 - [ ] Sanctions name screening + travel-rule data package (per payout-partner format)

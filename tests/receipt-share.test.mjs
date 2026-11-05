@@ -46,13 +46,15 @@ test('receipt business face keeps chain vocabulary inside the verify section onl
   assert.match(source, /href="\/trust"/);
 });
 
-test('receipt step ships the accountant PDF and supplier share actions', async () => {
+test('receipt step ships the PDF, the share link, WhatsApp, email and the accountant', async () => {
   const step = await readFile(new URL('../components/transfer/StepReceipt.tsx', import.meta.url), 'utf8');
-  assert.match(step, /PDF for your accountant/);
-  assert.match(step, /Share with supplier/);
-  assert.match(step, /fetch\('\/api\/receipts\/share'/);
-  assert.match(step, /size: A4/);
-  assert.match(step, /receiptNetworkLine\(\)/);
+  assert.match(step, /receipt\?format=pdf/);
+  assert.match(step, /Send to accountant/);
+  assert.match(step, /whatsappUrl\(/);
+  assert.match(step, /mailtoUrl\(/);
+  assert.match(step, /Copy link/);
+  assert.match(step, /Self-billed e-invoice \(MyInvois\)/);
+  assert.match(step, /Open MyInvois/);
 });
 
 test('network line flips to mainnet from the runtime profile', async () => {

@@ -52,6 +52,7 @@ export async function GET(request: Request) {
       type: 'batch' as const,
       title: `Batch ${invoices.length} open ${currency} invoices`,
       description: `${invoices.length} open invoices are on the USD to ${currency} corridor.`,
+      prompt: `I have ${invoices.length} open ${currency} invoices. Walk me through them.`,
       confidence: null,
       requiresAuth: true,
       suggestedAction: `batch:${currency}:${invoices.map((invoice) => invoice.id).join(',')}`,

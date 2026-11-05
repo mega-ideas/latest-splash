@@ -14,8 +14,8 @@
  *
  * Both times it landed in a file that decides whether money moves:
  *
- *   app/api/batches/authorize/route.ts — the payroll replay key, the guard
- *   that stops a re-submitted file paying every recipient twice.
+ *   the v1 payout-run route (removed in v2 Phase 3) — the payroll replay key,
+ *   the guard that stops a re-submitted file paying every recipient twice.
  *
  *   lib/server/dual-approval.ts — the module that decides whether a payment
  *   needs a second approver. It was committed binary and reviewed by nobody,

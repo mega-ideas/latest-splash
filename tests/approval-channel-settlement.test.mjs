@@ -328,7 +328,8 @@ async function migratedDb() {
     }
   }
   // Acme: Ben makes payments, Priya (checker) and Nadia (admin) approve, Tom
-  // only looks. Lin is an admin at Northwind and only a viewer at Acme.
+  // and Lin only look. Wen is an admin at Northwind. A person belongs to ONE
+  // business (migration 0074), so nobody holds a role in both.
   await client.exec(`
     INSERT INTO organizations (id, name, kyb_lifecycle) VALUES
       ('acme', 'Acme Trading', 'ACTIVE'), ('northwind', 'Northwind', 'ACTIVE');
@@ -337,13 +338,14 @@ async function migratedDb() {
       ('usr_priya', 'priya@acme.test', 'Priya'),
       ('usr_nadia', 'nadia@acme.test', 'Nadia'),
       ('usr_tom', 'tom@acme.test', 'Tom'),
-      ('usr_lin', 'lin@northwind.test', 'Lin');
+      ('usr_lin', 'lin@acme.test', 'Lin'),
+      ('usr_wen', 'wen@northwind.test', 'Wen');
     INSERT INTO memberships (id, user_id, org_id, role) VALUES
       ('m_ben', 'usr_ben', 'acme', 'maker'),
       ('m_priya', 'usr_priya', 'acme', 'checker'),
       ('m_nadia', 'usr_nadia', 'acme', 'admin'),
       ('m_tom', 'usr_tom', 'acme', 'viewer'),
-      ('m_lin_nw', 'usr_lin', 'northwind', 'admin'),
+      ('m_wen_nw', 'usr_wen', 'northwind', 'admin'),
       ('m_lin_acme', 'usr_lin', 'acme', 'viewer');
   `);
   return { client, db: drizzle(client, { schema }) };
@@ -668,8 +670,7 @@ test('maker ≠ checker and org-scoped roles hold for ballots, whoever issued th
   await withChannelWorld(async ({ client, db, store }) => {
     const { proposal } = await moneyRoutePayment(client);
     // Ballots the request path would never issue — the maker's own, and one
-    // from someone who approves at Northwind but only views at Acme — voted
-    // alongside Priya's.
+    // from someone who only views at Acme — voted alongside Priya's.
     await client.query(`DELETE FROM approval_tokens WHERE proposal_id = $1 AND user_id = 'usr_nadia'`, [proposal.id]);
     await client.query(
       `INSERT INTO approval_tokens (id, proposal_id, org_id, user_id, code, channel, expires_at, decision, decided_at)
@@ -711,9 +712,10 @@ test('the code channel reads eligibility from the membership in the payment’s 
 
     assert.deepEqual(await resolveApproverById('usr_tom', 'acme'), { ok: false, reason: 'role viewer may not approve' });
     assert.deepEqual(await resolveApproverById('usr_ben', 'acme'), { ok: false, reason: 'role maker may not approve' });
-    // An admin elsewhere is not an approver here.
+    // A viewer here is not an approver, and an admin elsewhere is not a member here.
     assert.deepEqual(await resolveApproverById('usr_lin', 'acme'), { ok: false, reason: 'role viewer may not approve' });
-    assert.equal((await resolveApproverById('usr_lin', 'northwind')).ok, true);
+    assert.deepEqual(await resolveApproverById('usr_wen', 'acme'), { ok: false, reason: 'not a member of this org' });
+    assert.equal((await resolveApproverById('usr_wen', 'northwind')).ok, true);
     assert.deepEqual(await resolveApproverById('usr_nadia', 'northwind'), { ok: false, reason: 'not a member of this org' });
   });
   assert.deepEqual(await resolveApproverById('usr_priya', 'acme'), { ok: false, reason: 'no database configured' });

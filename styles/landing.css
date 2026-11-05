@@ -469,6 +469,20 @@
   color: var(--pending);
 }
 
+/* Splash's row holds the fee breakdown (components/fees/FeeBreakdown.tsx),
+   which needs the row's full width: it stacks at every size. */
+@media (min-width: 480px) {
+  .ld-calc-row.ld-calc-row-stack {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+
+.ld-calc-empty {
+  margin: 0;
+  color: var(--slate);
+  font-size: var(--text-sm);
+}
+
 .ld-calc-error {
   color: var(--error);
   font-size: var(--text-sm);

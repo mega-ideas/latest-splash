@@ -1,17 +1,24 @@
 export type AutonomyTier = 'TIER_0_PROPOSE' | 'TIER_1_THRESHOLD' | 'TIER_2_SCOPED_AUTO';
 
-export type ProposalKind =
-  | 'PAYMENT'
-  | 'INTERNAL_TRANSFER'
-  | 'FX_CONVERT'
-  | 'TREASURY_ALLOCATE'
-  | 'TREASURY_REDEEM'
-  | 'BATCH_PAYOUT'
-  | 'NETTING_SETTLE'
+/**
+ * Every kind of proposal Zeke can draft. A payout run (a batch of payments) is
+ * not one: a sheet goes to the wallet batch flow (lib/server/wallet-batches.ts),
+ * which the owners sign once, so Zeke drafts no batch proposal.
+ */
+export const PROPOSAL_KINDS = [
+  'PAYMENT',
+  'INTERNAL_TRANSFER',
+  'FX_CONVERT',
+  'TREASURY_ALLOCATE',
+  'TREASURY_REDEEM',
+  'NETTING_SETTLE',
   /** An x402 (HTTP 402) payment request an operator pasted. Outbound, screened,
    *  human-approved — and not settleable until the session mandate and EVM
    *  payee screening exist (docs/X402-ASSESSMENT.md). */
-  | 'X402_PAYMENT';
+  'X402_PAYMENT',
+] as const;
+
+export type ProposalKind = (typeof PROPOSAL_KINDS)[number];
 
 export type ProposalStatus =
   | 'DRAFTED'
@@ -66,7 +73,9 @@ export interface FinancialImpact {
   amountOut?: bigint;
   currencyIn?: string;
   currencyOut?: string;
-  feeBps?: number;
+  /** Splash's fee on the payment, in USDC minor units, from the fee schedule
+   *  (A1 §4). It replaced a flat per-corridor rate. */
+  splashFeeMinor?: bigint;
   fxRate?: ProposalFxRate;
   yieldDeltaBps?: number;
   nettingSaved?: bigint;

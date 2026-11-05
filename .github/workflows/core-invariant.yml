@@ -30,13 +30,23 @@ jobs:
         # add an exception to the script.
         run: node scripts/check-core-no-balance.mjs
 
+      - name: splash_spend can never rotate a spender or leak a permit
+        # splash_spend publishes immutable and is the only code that can pull a
+        # business's funds under an allowance. A permit or a Balance that
+        # escapes it is escaped for ever (brief §3.4).
+        run: node scripts/check-spend-permits.mjs
+
       - name: the invariant checker itself still catches what it claims to
         # A control that can be walked past is worse than no control, because it
-        # gets quoted as evidence. These pin every bypass an adversarial review
-        # found in the first version: nested containers, aliased imports,
-        # multi-line fields, single-line structs, and subdirectories.
+        # gets quoted as evidence. These pin every bypass adversarial reviews
+        # found: nested containers, aliased imports, multi-line fields,
+        # single-line structs and subdirectories; then positional structs,
+        # enums, generic holders, bags and dynamic fields; and, for
+        # splash_spend, string literals that hid code, aliases, method calls,
+        # out-parameters and money drawn but not settled. The compiled-module
+        # cross-check runs in .github/workflows/move.yml, which builds.
         run: |
           npm ci --ignore-scripts --no-audit --no-fund
           node --disable-warning=MODULE_TYPELESS_PACKAGE_JSON \
                --experimental-strip-types \
-               --test tests/core-invariant-check.test.mjs
+               --test tests/core-invariant-check.test.mjs tests/spend-permits-check.test.mjs

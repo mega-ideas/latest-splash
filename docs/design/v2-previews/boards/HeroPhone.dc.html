@@ -1,0 +1,71 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Product section, phone</title>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Geist:wght@400;500;600;700;800;900&amp;family=Geist+Mono:wght@500;600;700&amp;display=swap">
+<style>
+body{margin:0;background:#fffaf4}
+*{box-sizing:border-box}
+.num{font-variant-numeric:tabular-nums}
+.xt{color:#fffaf1;-webkit-text-stroke:1.5px #083640;text-shadow:1.5px 1.5px 0 #0d6370,3px 3px 0 #0d6370,4.5px 4.5px 0 #083640}
+.xt-gold{color:#efc46f;-webkit-text-stroke:1.2px #083640;text-shadow:1.5px 1.5px 0 #c49646,3px 3px 0 #c49646,4.5px 4.5px 0 #083640}
+.mono{font-family:'Geist Mono',ui-monospace,monospace}
+button{font:inherit}
+</style>
+</helmet>
+<div style="width: 390px; height: 1500px; overflow: hidden; font-family: Geist, ui-sans-serif, system-ui, sans-serif; color: #0c3e48; background: radial-gradient(70% 30% at 90% 8%, rgba(239,196,111,.2), transparent 70%), radial-gradient(70% 30% at 0% 60%, rgba(159,207,199,.25), transparent 70%), #fffaf4; padding: 40px 18px; display: flex; flex-direction: column; gap: 18px; align-items: center; text-align: center">
+<span class="mono" style="padding: 5px 12px; background: #efc46f; box-shadow: 3px 3px 0 #083640; font-size: 11px; font-weight: 700; letter-spacing: .22em">THE PRODUCT</span>
+<h2 style="margin: 6px 0 0; font-size: 46px; font-weight: 900; letter-spacing: -.055em; line-height: .98; display: flex; flex-direction: column; gap: .1em">
+<span class="xt">Pay the invoice.</span><span class="xt-gold">Keep the proof.</span>
+</h2>
+<p style="margin: 6px 0 0; font-size: 15px; line-height: 1.55; color: #33545b">Your team approves every payment. It settles in one Sui transaction and leaves a receipt anyone can verify.</p>
+
+<div aria-label="Payment calculator" style="width: 100%; background: #fffdf9; border-radius: 20px; border: 1px solid rgba(12,62,72,.12); box-shadow: 0 30px 60px -24px rgba(8,54,64,.5); padding: 18px; display: flex; flex-direction: column; gap: 14px; text-align: left; position: relative; z-index: 2">
+<div role="tablist" aria-label="Send to" style="display: flex; padding: 3px; border-radius: 99px; background: #f1ebe3">
+<button type="button" role="tab" aria-selected="true" style="flex: 1; border: 0; padding: 10px; border-radius: 99px; background: #0c3e48; color: #fffaf4; font-size: 14px; font-weight: 600">To a bank</button>
+<button type="button" role="tab" aria-selected="false" style="flex: 1; border: 0; padding: 10px; border-radius: 99px; background: transparent; color: #33545b; font-size: 14px; font-weight: 600">To a wallet</button>
+</div>
+<span class="num" style="align-self: flex-end; display: inline-flex; align-items: center; gap: 6px; padding: 5px 10px; border-radius: 99px; border: 1px solid rgba(12,62,72,.14); font-size: 12px; font-weight: 600"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" aria-hidden="true"><rect x="5" y="11" width="14" height="10" rx="2"/><path d="M8 11V8a4 4 0 0 1 8 0v3"/></svg>1 USDC = 57.40 PHP</span>
+<div style="display: flex; flex-direction: column; gap: 6px"><span style="font-size: 12px; color: #4e6f78">You send exactly</span>
+<div style="display: flex; justify-content: space-between; align-items: center"><span style="display: inline-flex; align-items: center; gap: 6px; padding: 6px 10px 6px 6px; border-radius: 99px; background: #f1ebe3; font-weight: 700; font-size: 14px"><svg width="20" height="20" viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="11" fill="#2775ca"/><circle cx="12" cy="12" r="7" fill="none" stroke="#fff" stroke-width="1.6"/></svg>USDC</span><span class="num" style="font-size: 32px; font-weight: 800; letter-spacing: -.03em">5,035.00</span></div></div>
+<div style="display: flex; flex-direction: column; gap: 6px"><span style="font-size: 12px; color: #4e6f78">Supplier gets</span>
+<div style="display: flex; justify-content: space-between; align-items: center"><span style="display: inline-flex; align-items: center; gap: 6px; padding: 6px 10px 6px 6px; border-radius: 99px; background: #f1ebe3; font-weight: 700; font-size: 14px"><svg width="20" height="20" viewBox="0 0 24 24" aria-hidden="true"><defs><clipPath id="php"><circle cx="12" cy="12" r="11"/></clipPath></defs><g clip-path="url(#php)"><rect width="24" height="12" fill="#0038a8"/><rect y="12" width="24" height="12" fill="#ce1126"/><path d="M0 0 L12 12 L0 24 Z" fill="#fff"/></g></svg>PHP</span><span class="num" style="font-size: 32px; font-weight: 800; letter-spacing: -.03em; color: #0d6370">287,000.00</span></div></div>
+<div style="display: flex; flex-direction: column; border-top: 1px solid rgba(12,62,72,.1); padding-top: 4px">
+<div style="display: flex; justify-content: space-between; padding: 9px 0; font-size: 13px"><span style="color: #4e6f78">Arrives</span><span style="font-weight: 700">Minutes, by InstaPay</span></div>
+<div class="num" style="display: flex; justify-content: space-between; padding: 9px 0; font-size: 13px"><span style="color: #4e6f78">Total fees, included</span><span style="font-weight: 700">35.00 USDC</span></div>
+</div>
+<button type="button" style="border: 0; border-radius: 12px; padding: 15px; background: #efc46f; color: #0c3e48; font-weight: 800; font-size: 16px; box-shadow: 0 4px 0 #b98a36">Send payment</button>
+</div>
+
+<div aria-label="Splash dashboard on a phone" style="width: 300px; margin-top: -40px; border-radius: 28px; border: 1px solid rgba(12,62,72,.18); background: #f3ece7; box-shadow: 0 30px 60px -30px rgba(8,54,64,.5); overflow: hidden; text-align: left; position: relative; z-index: 1; padding-top: 52px">
+<div style="background: #1F4452; color: #fff; padding: 12px 14px; display: flex; align-items: center; justify-content: space-between"><span style="display: flex; align-items: center; gap: 8px; font-weight: 700"><img src="/_blob/6193a3f61fc3c88e80b8955cab664679" alt="" style="width: 22px; height: 22px">Splash<span style="color: #bfe6ee">.</span></span><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="2" stroke-linecap="round" aria-hidden="true"><path d="M4 7h16M4 12h16M4 17h16"/></svg></div>
+<div style="padding: 14px; display: flex; flex-direction: column; gap: 10px">
+<div style="background: #fffaf2; border: 1px solid rgba(50,98,115,.14); border-radius: 12px; padding: 12px"><span class="mono" style="font-size: 9px; letter-spacing: .12em; color: #145d6a; font-weight: 700">SPLASH WALLET</span><div class="num" style="font-size: 20px; font-weight: 800">48,250.00 <span style="font-size: 11px; color: #4e6f78">USDC</span></div></div>
+<div style="background: #fffaf2; border: 1px solid rgba(50,98,115,.14); border-radius: 12px; padding: 12px; display: flex; justify-content: space-between; align-items: center"><span style="font-size: 13px; font-weight: 600">2 need approval</span><span style="font-size: 12px; font-weight: 700; padding: 6px 10px; border-radius: 8px; background: #0c3e48; color: #fff">Review</span></div>
+<div style="background: #fffaf2; border: 1px solid rgba(50,98,115,.14); border-radius: 12px; padding: 4px 12px">
+<div class="num" style="display: flex; justify-content: space-between; padding: 9px 0; font-size: 12px; border-bottom: 1px solid rgba(50,98,115,.08)"><span style="font-weight: 600">Luzon Components</span><span>₱287,000.00</span></div>
+<div class="num" style="display: flex; justify-content: space-between; padding: 9px 0; font-size: 12px; border-bottom: 1px solid rgba(50,98,115,.08)"><span style="font-weight: 600">PT Sinar Jaya</span><span>Rp 81,450,000</span></div>
+<div class="num" style="display: flex; justify-content: space-between; padding: 9px 0; font-size: 12px"><span style="font-weight: 600">Kedai Teknik</span><span>2,400.00 USDC</span></div>
+</div>
+</div>
+</div>
+
+<div style="display: flex; flex-direction: column; gap: 10px; width: 100%; margin-top: 6px">
+<a href="#desk" style="padding: 15px; border-radius: 10px; background: #efc46f; color: #0c3e48; font-weight: 700; text-decoration: none; box-shadow: 0 4px 0 #b98a36">Open payment desk</a>
+<a href="#login" style="padding: 15px; border-radius: 10px; background: #fffdf9; color: #0c3e48; font-weight: 700; text-decoration: none; border: 1px solid rgba(12,62,72,.16)">Log in</a>
+</div>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"$preview":{"width":390,"height":1500}}'>
+class Component extends DCLogic {
+  renderVals() { return {}; }
+}
+</script>
+</body>
+</html>

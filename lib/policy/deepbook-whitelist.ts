@@ -1,7 +1,8 @@
 /**
  * DeepBook venue whitelist helpers (audit S-12).
  *
- * `peg_monitor::assert_deepbook_liquidity` measures depth and slippage on a
+ * `liquidity_guard::assert_deepbook_liquidity` (splash_custody; the v1 testnet
+ * package had it in peg_monitor) measures depth and slippage on a
  * `Pool` object the CALLER supplies. DeepBook pools are permissionlessly
  * creatable, so without a whitelist the guard proves nothing: stand up a pool,
  * seed it with your own liquidity, and every assert passes. `ComplianceConfig`

@@ -1,4 +1,3 @@
-import { formatMinor, MICRO_DECIMALS, parseMinor, sumMinor, USD_DECIMALS } from '@/lib/money';
 import { formatUsdc, shortAddress } from '@/lib/payments/stablecoin-lane';
 import type { StepUpPurpose } from '@/lib/server/step-up';
 
@@ -114,74 +113,9 @@ export function profileChangeSubject(ctx: { orgId: string; userId: string }, cha
   };
 }
 
-/**
- * The rows a batch run pays: a name, an address and an amount settlement can
- * pay — read the way settlement reads it, in micro-USD, and more than zero.
- * The rest are blocked. The authorize route and the approval binding below
- * both use this, so what an approval covers is exactly what the run pays.
- *
- * This was `parseFloat(amount) > 0` in the route, which accepted "1.2.3" as
- * 1.2 and left settlement to reject the whole run after it was approved.
- */
-export function payableBatchRows<Row>(rows: readonly Row[]): Row[] {
-  return rows.filter((row) => {
-    if (!row || typeof row !== 'object') return false;
-    const { name, address, amount } = row as { name?: unknown; address?: unknown; amount?: unknown };
-    if (!name || !address) return false;
-    try {
-      return parseMinor((amount ?? '0') as string, MICRO_DECIMALS, 'half-up') > 0n;
-    } catch {
-      return false;
-    }
-  });
-}
-
-/** The currency a batch pays out in, which also sets its corridor fee. */
-export function batchTargetCurrency(payload: Payload): string {
-  return typeof payload.targetCurrency === 'string' ? payload.targetCurrency : 'PHP';
-}
-
-/**
- * What a batch approval covers: each row the run pays (name, address and
- * amount, in order) and the payout currency. Blocked rows pay nothing and are
- * left out. Values are compared exactly as the route passes them to
- * settlement, without normalising, so a respelled address or amount needs a
- * new approval rather than being assumed equal.
- */
-export function batchPayoutSubstance(payload: Payload) {
-  const rows = Array.isArray(payload.rows) ? (payload.rows as unknown[]) : [];
-  return {
-    rows: payableBatchRows(rows).map((row) => {
-      const { name, address, amount } = row as { name?: unknown; address?: unknown; amount?: unknown };
-      return { name: name ?? null, address: address ?? null, amount: amount ?? null };
-    }),
-    targetCurrency: batchTargetCurrency(payload),
-  };
-}
-
 /** What a Smart Treasury approval covers: which way the money moves, and how much. */
 export function treasuryMoveSubstance(payload: Payload) {
   return { action: payload.action ?? null, amountUsd: payload.amountUsd ?? null };
-}
-
-export function batchPayoutSubject(ctx: { orgId: string; userId: string }, payload: Payload): StepUpSubject {
-  const rows = Array.isArray(payload.rows) ? (payload.rows as Array<Record<string, unknown>>) : [];
-  const targetCurrency = batchTargetCurrency(payload);
-  // Exact, in cents: the summary an approver reads must not be off by a float.
-  const cents = rows.map((r) => {
-    try {
-      return parseMinor(String(r.amount ?? '0').trim() || '0', USD_DECIMALS, 'half-up');
-    } catch {
-      return 0n;
-    }
-  });
-  const total = formatMinor(sumMinor(cents), USD_DECIMALS);
-  return {
-    subjectId: `batch:${ctx.orgId}:${ctx.userId}`,
-    subject: { kind: 'batch-payout', orgId: ctx.orgId, rows, targetCurrency },
-    label: `batch of ${rows.length} payouts`,
-    summary: `Authorize a batch payout: ${rows.length} payment${rows.length === 1 ? '' : 's'}, $${total} total, paid out in ${targetCurrency}.`,
-  };
 }
 
 function text(value: unknown): string {
@@ -249,8 +183,6 @@ export function payloadSubject(
       return settingsChangeSubject(ctx, payload);
     case 'PROFILE_CHANGE':
       return profileChangeSubject(ctx, payload);
-    case 'BATCH_PAYOUT':
-      return batchPayoutSubject(ctx, payload);
     case 'FIAT_TRANSFER':
       return fiatTransferSubject(ctx, payload);
   }

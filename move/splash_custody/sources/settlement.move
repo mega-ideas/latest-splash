@@ -53,7 +53,10 @@ const MAX_FEE_BPS: u64 = 200;
 /// large payroll is not merely expensive — above ~1,023 rows it is
 /// unexecutable at any gas budget, and the caller only finds out from an
 /// unnamed system error. 256 leaves ~4x headroom and gives the failure a name.
-/// Must match `MAX_BATCH_ROWS` in `lib/policy/batch-limits.ts`.
+/// This is the custody pool's own bound. The TypeScript copy of it went with
+/// the v1 payout-run route (v2 Phase 3). A business's Batch payouts run from
+/// its own wallet and are capped at 20 payments (`BATCH_MAX_PAYMENTS` in
+/// `lib/batch/sheet.ts`), a separate limit on a separate path.
 const MAX_BATCH_ROWS: u64 = 256;
 
 public struct SettlementPool<phantom T> has key {

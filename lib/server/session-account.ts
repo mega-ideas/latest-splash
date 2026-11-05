@@ -60,7 +60,8 @@ export function isForeignAccountId(supplied: string | null | undefined, resolved
  * behaviour. What was wrong is that nothing caught it: all six routes reached
  * for `resolveSessionAccount` directly, so a perfectly ordinary state (signed
  * up, waiting for an administrator to grant access) surfaced as a 500. Two of
- * those routes were `transfers/authorize` and `batches/authorize`, so a user
+ * those routes were `transfers/authorize` and the v1 payout-run route (since
+ * removed), so a user
  * whose membership had just been revoked was told the server was broken rather
  * than that they no longer hold approval rights.
  *

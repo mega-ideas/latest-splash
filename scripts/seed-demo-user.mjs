@@ -150,7 +150,7 @@ try {
       kyb,
       `${orgName} Sdn Bhd`,
       '202401000001',
-      'Level 8, Menara Demo, Jalan Ampang',
+      'Level 8, Menara Acme, Jalan Ampang',
       'Kuala Lumpur',
       'Wilayah Persekutuan',
       '50450',
@@ -170,7 +170,7 @@ try {
      VALUES ($1, $2, $3, $4, now())
      ON CONFLICT (email) DO UPDATE SET password_hash = EXCLUDED.password_hash
      RETURNING id`,
-    [`usr_seed_${slug}`, email, 'Demo Operator', hash],
+    [`usr_seed_${slug}`, email, 'Acme Operator', hash],
   );
   // On conflict the RETURNING id is the EXISTING row's id, which may differ
   // from the one just proposed. The membership below must use that one.

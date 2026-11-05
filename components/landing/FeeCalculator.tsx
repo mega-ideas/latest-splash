@@ -2,29 +2,40 @@
 
 import { useMemo, useState } from 'react';
 
-import { SPLASH_USD_PHP, estimatePayment, formatBps } from '@/lib/fx/calculator';
+import FeeBreakdown from '@/components/fees/FeeBreakdown';
+import { scheduleFromWire, scheduleToWire, type FeeScheduleWire } from '@/lib/fees/copy';
+import { feeQuoteToWire } from '@/lib/fees/quote';
+import { LAUNCH_SCHEDULE } from '@/lib/fees/schedule';
+import { SPLASH_LEG, estimatePayment, formatBps } from '@/lib/fx/calculator';
 import { getComparisonBaseline } from '@/lib/fx/comparison-baselines';
 import { MoneyError, formatMinor, parseMinor } from '@/lib/money';
 
 /**
- * The cost of sending, for one amount, on the one leg Splash prices.
+ * What it costs to send one amount, on the one leg Splash prices.
  *
- * Two rows: Splash, marked illustrative until a real quote; and a bank wire
- * from a named, dated dataset — a category, never a competitor. No exchange
- * rate is assumed, so no peso figure is shown: the rate is quoted when the
- * customer sends. All arithmetic is bigint minor units through lib/money.ts.
+ * Splash's fee is the fee breakdown every surface shows (Amendment A1 §2.7):
+ * Splash's fee with its kind and tier, the payout partner's fee with its
+ * source, the total debited. It is computed from `schedule`, which the page
+ * reads from the FeeConfig in force and hands down as data, so no rate is
+ * typed in here; while that FeeConfig's fees are off (`feesOn` false) the
+ * breakdown shows no Splash fee and says it is not charged yet. Beside it, a bank wire from a named, dated dataset: a
+ * category, never a competitor. No exchange rate is assumed, so no peso
+ * figure is shown: the rate is quoted when the customer sends. All
+ * arithmetic is bigint minor units through lib/money.ts.
  */
 
 const PRESETS = ['500', '1000', '5000', '25000'] as const;
 const BASELINE = getComparisonBaseline('PHP');
+const LAUNCH_WIRE = scheduleToWire(LAUNCH_SCHEDULE);
 
 function usd(minor: bigint): string {
   const [whole, fraction] = formatMinor(minor, 2).split('.');
   return `US$${Number(whole).toLocaleString('en-US')}.${fraction}`;
 }
 
-export default function FeeCalculator() {
+export default function FeeCalculator({ schedule = LAUNCH_WIRE, feesOn = true }: { schedule?: FeeScheduleWire; feesOn?: boolean }) {
   const [amount, setAmount] = useState<string>('1000');
+  const fees = useMemo(() => scheduleFromWire(schedule), [schedule]);
 
   const parsed = useMemo(() => {
     const cleaned = amount.replace(/[,\s]/g, '');
@@ -39,9 +50,7 @@ export default function FeeCalculator() {
     }
   }, [amount]);
 
-  const estimate = parsed.minor ? estimatePayment({ amountUsdMinor: parsed.minor, baseline: BASELINE, fxRate: null }) : null;
-  const flatFee = usd(SPLASH_USD_PHP.flatUsdMinor);
-  const margin = formatBps(SPLASH_USD_PHP.marginBps);
+  const estimate = parsed.minor ? estimatePayment({ amountUsdMinor: parsed.minor, baseline: BASELINE, fxRate: null, schedule: fees, feesOn }) : null;
 
   return (
     <div className="ld-calc">
@@ -75,17 +84,16 @@ export default function FeeCalculator() {
 
       <div>
         <div className="ld-calc-rows" aria-live="polite">
-          <div className="ld-calc-row ld-calc-row-splash">
+          <div className="ld-calc-row ld-calc-row-splash ld-calc-row-stack">
             <div>
-              <strong>Splash ({SPLASH_USD_PHP.label})</strong>
-              <small>
-                {flatFee} flat plus {margin} of the amount, on the USD to PHP leg only.
-              </small>
+              <strong>Splash ({SPLASH_LEG.label})</strong>
+              <small>A payout to a bank, {SPLASH_LEG.leg}. The fee comes from the published schedule and is charged on top.</small>
             </div>
-            <div className="ld-calc-cost">
-              <strong>{estimate ? usd(estimate.splash.costMinor) : 'US$0.00'}</strong>
-              <small>{estimate ? `${formatBps(estimate.splash.effectiveBps)} all-in on this amount` : 'Enter an amount'}</small>
-            </div>
+            {estimate ? (
+              <FeeBreakdown quote={feeQuoteToWire(estimate.splash.quote)} label="Splash's fee on this amount" />
+            ) : (
+              <p className="ld-calc-empty">Enter an amount to see the fee.</p>
+            )}
           </div>
 
           {estimate?.bankWire ? (
@@ -94,7 +102,7 @@ export default function FeeCalculator() {
                 <strong>Bank wire, USD to PHP</strong>
                 <small>
                   Category figure from {estimate.bankWire.dataset.name}, as of {estimate.bankWire.dataset.asOf}. Delivery{' '}
-                  {estimate.bankWire.delivery}.
+                  {estimate.bankWire.delivery}. All-in.
                 </small>
               </div>
               <div className="ld-calc-cost">
@@ -105,9 +113,9 @@ export default function FeeCalculator() {
           ) : null}
         </div>
         <p className="ld-fine" id="calc-note">
-          Illustrative until you get a quote. The exchange rate is quoted when you send and is not
-          included here, so no peso figure is shown. Neither
-          row includes converting another currency into US dollars first.
+          Illustrative until you get a quote. The payout partner quotes its own fee, and the exchange rate,
+          when you send; neither is included here, so no peso figure is shown. Neither row includes
+          converting another currency into US dollars first.
         </p>
       </div>
     </div>

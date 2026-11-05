@@ -26,7 +26,8 @@ import test from 'node:test';
 const SURFACES = [
   'lib/agent/oxwal.ts',
   'components/FloatingCopilot.tsx',
-  'app/dashboard/copilot/page.tsx',
+  'app/dashboard/zeke/page.tsx',
+  'components/oxwal/ZekeSuggestions.tsx',
 ];
 
 /**

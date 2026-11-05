@@ -19,10 +19,9 @@ async function source(file) {
   return readFile(new URL(`../${file}`, import.meta.url), 'utf8');
 }
 
-test('both money routes create a proposal instead of only refusing', async () => {
+test('the money route creates a proposal instead of only refusing', async () => {
   for (const file of [
     'app/api/transfers/authorize/route.ts',
-    'app/api/batches/authorize/route.ts',
   ]) {
     const text = await source(file);
     const block = text.slice(text.indexOf('requiresSecondApproval'));
@@ -36,7 +35,6 @@ test('both money routes create a proposal instead of only refusing', async () =>
 test('the maker is the session identity, never a request field', async () => {
   for (const file of [
     'app/api/transfers/authorize/route.ts',
-    'app/api/batches/authorize/route.ts',
   ]) {
     const text = withoutComments(await source(file));
     // `createdBy` is what `proposals/[id]/submit` compares against the approver
@@ -56,7 +54,6 @@ test('a payment refused for approval is still refused when the queue is unreacha
   assert.match(text, /return null;/);
   for (const file of [
     'app/api/transfers/authorize/route.ts',
-    'app/api/batches/authorize/route.ts',
   ]) {
     const route = await source(file);
     const block = route.slice(route.indexOf('requiresSecondApproval'));
@@ -79,7 +76,6 @@ test('the proposal carries the checks that already passed, not just an amount', 
 
   for (const file of [
     'app/api/transfers/authorize/route.ts',
-    'app/api/batches/authorize/route.ts',
   ]) {
     const route = await source(file);
     const block = route.slice(route.indexOf('requiresSecondApproval'));
@@ -109,14 +105,6 @@ test('a re-submitted payment finds its pending proposal rather than queueing a s
   // a re-submission. tests/proposal-idempotency.test.mjs drives it end to end,
   // across a restart and after the first proposal is carried out.
   assert.match(text, /const stored = store\.create\(proposal\);\s*if \(stored\.id !== proposal\.id\) return stored;/);
-
-  const batch = await source('app/api/batches/authorize/route.ts');
-  // The proposal is named by the same rows the run's own replay key is, so the
-  // queued proposal and the run that would have been created share an
-  // identity. (Once approved, the run itself is keyed by the approval —
-  // tests/batch-approval.test.mjs.)
-  assert.match(batch, /const rowsKey = deriveIdempotencyKey\(orgId, acceptedRows, targetCurrency\);/);
-  assert.match(batch, /idempotencyKey: `batch:\$\{rowsKey\}`/);
 });
 
 test('the submit route still enforces maker ≠ checker against the DB identity', async () => {

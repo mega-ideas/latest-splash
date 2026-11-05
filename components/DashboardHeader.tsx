@@ -164,7 +164,7 @@ export default function DashboardHeader({ collapsed, session, onLogout }: Dashbo
                 <button
                   type="button"
                   onClick={onLogout}
-                  className="flex w-full items-center gap-2.5 rounded-xl px-3 py-2.5 text-[13px] text-[#9f5839] transition-colors hover:bg-orange-50"
+                  className="flex w-full items-center gap-2.5 rounded-xl px-3 py-2.5 text-[13px] text-[var(--gold-ink)] transition-colors hover:bg-[var(--gold-tint)]"
                   role="menuitem"
                 >
                   <LogOut size={13} />

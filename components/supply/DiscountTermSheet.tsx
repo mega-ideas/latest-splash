@@ -1,8 +1,10 @@
 'use client';
 
 import { useState, type KeyboardEvent } from 'react';
-import { AnimatePresence, motion, useReducedMotion } from 'framer-motion';
+import { AnimatePresence, motion } from 'framer-motion';
 import { ArrowRight, Check, ReceiptText } from 'lucide-react';
+
+import { useHydratedReducedMotion } from '@/components/useHydratedReducedMotion';
 
 /**
  * The signature element of /working-capital: a live-feeling but explicitly
@@ -51,7 +53,7 @@ const OUTCOMES: Record<
 
 export default function DiscountTermSheet() {
   const [choice, setChoice] = useState<Choice>('early');
-  const reduce = useReducedMotion();
+  const reduce = useHydratedReducedMotion();
   const outcome = OUTCOMES[choice];
 
   function onKey(event: KeyboardEvent<HTMLDivElement>) {
@@ -64,10 +66,13 @@ export default function DiscountTermSheet() {
   return (
     <motion.figure
       className="wc-ticket"
-      initial={reduce ? false : { opacity: 0, y: 28 }}
-      whileInView={reduce ? undefined : { opacity: 1, y: 0 }}
+      // The same first frame on the server and while hydrating; a
+      // reduced-motion visitor gets the reveal at once, not skipped, so
+      // the sheet never stays at its hidden first frame.
+      initial={{ opacity: 0, y: 28 }}
+      whileInView={{ opacity: 1, y: 0 }}
       viewport={{ once: true, margin: '-60px' }}
-      transition={{ duration: 0.7, ease: [0.16, 1, 0.3, 1] }}
+      transition={reduce ? { duration: 0 } : { duration: 0.7, ease: [0.16, 1, 0.3, 1] }}
     >
       <figcaption className="wc-ticket-head">
         <span className="wc-ticket-tag">

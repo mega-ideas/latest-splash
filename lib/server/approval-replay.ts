@@ -21,8 +21,7 @@
  * screening, and the daily ceiling can be consumed by other payments. An
  * approval says "this payment is authorised". It does not say "skip the
  * checks". It removes the second-approver requirement, because that is
- * exactly what it supplied, and on the batch and treasury routes the maker's
- * second factor, which was single-use and spent making the proposal.
+ * exactly what it supplied.
  *
  * ─── The header is a claim, not a credential ────────────────────────────────
  *
@@ -94,14 +93,14 @@ export async function replayThroughRoute(
     return { ok: false, error: detail };
   }
 
-  // The route answered with a run it had ALREADY carried out: this approval
-  // paid nothing. Counted as a success, it read "Payout run started" and nobody
-  // was paid. An approved run is claimed under its own approval's key
-  // (lib/server/batch-approval.ts), so this means that approval had already
-  // released one; whatever the cause, nothing new was paid.
+  // A route that answers a reused key with the payment it ALREADY carried out
+  // (a 200 marked idempotentReplay) paid nothing for this approval. Counted as
+  // a success, it would read as sent when nobody was paid. No route replayed
+  // from here answers that way today; the guard stays so one that starts to
+  // cannot turn into a false "sent".
   if (parsed.idempotentReplay === true) {
     const earlier = typeof parsed.id === 'string' ? ` as ${parsed.id}` : '';
-    return { ok: false, error: `This run had already been carried out${earlier}; nothing new was paid for this approval.` };
+    return { ok: false, error: `This payment had already been carried out${earlier}; nothing new was paid for this approval.` };
   }
 
   const ref =
@@ -114,14 +113,4 @@ export async function replayThroughRoute(
 export async function authorizeTransferForApproval(input: ReplayInput): Promise<ReplayResult> {
   const { POST } = await import('@/app/api/transfers/authorize/route');
   return replayThroughRoute(POST, '/api/transfers/authorize', input);
-}
-
-export async function authorizeBatchForApproval(input: ReplayInput): Promise<ReplayResult> {
-  const { POST } = await import('@/app/api/batches/authorize/route');
-  return replayThroughRoute(POST, '/api/batches/authorize', input);
-}
-
-export async function authorizeTreasuryForApproval(input: ReplayInput): Promise<ReplayResult> {
-  const { POST } = await import('@/app/api/treasury/route');
-  return replayThroughRoute(POST, '/api/treasury', input);
 }

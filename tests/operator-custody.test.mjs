@@ -190,8 +190,22 @@ const OPERATOR = '0x' + '0a'.repeat(32);
 const APPROVED = '0x' + '1b'.repeat(32);
 const STRANGER = '0x' + 'ee'.repeat(32);
 const CORE = '0x' + 'c0'.repeat(32);
+const SPEND = '0x' + 'd0'.repeat(32);
+const WALLET = '0x' + 'b0'.repeat(32);
 
-const policy = { operator: OPERATOR, corePackageIds: [CORE], approvedRecipients: new Set([APPROVED]) };
+const policy = {
+  operator: OPERATOR,
+  corePackageIds: [CORE],
+  spendPackageIds: [SPEND],
+  approvedRecipients: new Set([APPROVED]),
+  registeredRecipients: new Set(),
+  feeRecipient: null,
+};
+// The v2 executor path: splash_spend::pay_intent, its receipt anchored in core.
+const V2_CALLS = [
+  { package: SPEND, module: 'splash_spend', function: 'pay_intent' },
+  { package: CORE, module: 'audit_anchor', function: 'anchor' },
+];
 const gasOnly = (digest) => ({
   digest,
   moveCalls: [{ package: CORE, module: 'audit_anchor', function: 'anchor_audit_hash' }],
@@ -213,19 +227,20 @@ test('the monitor flags a synthetic unapproved outflow', () => {
   const report = classifyOperatorTransactions([drained, gasOnly('ANCHOR')], policy);
   assert.equal(report.flagged.length, 1);
   assert.equal(report.flagged[0].digest, 'DRAIN');
-  assert.equal(report.flagged[0].reason, 'not_confirm_with_approval');
+  assert.equal(report.flagged[0].reason, 'not_approved_path');
   assert.deepEqual(report.flagged[0].recipients, [{ address: STRANGER, coinType: USDC, amount: '900000000' }]);
   assert.deepEqual(report.notOutflows, ['ANCHOR'], 'gas alone is not an outflow');
 });
 
-test('confirm_with_approval to an approved recipient passes; to anyone else it is flagged', () => {
+test('a v2 executor payment to an approved recipient passes; to anyone else it is flagged', () => {
   const pay = (digest, to) => ({
     digest,
-    moveCalls: [{ package: CORE, module: 'payment_intent', function: 'confirm_with_approval' }],
+    moveCalls: V2_CALLS,
     gasMist: 1_000_000n,
     balanceChanges: [
-      { owner: OPERATOR, coinType: SUI, amount: -501_000_000n },
-      { owner: to, coinType: SUI, amount: 500_000_000n },
+      { owner: WALLET, coinType: USDC, amount: -500_000_000n },
+      { owner: to, coinType: USDC, amount: 500_000_000n },
+      { owner: OPERATOR, coinType: SUI, amount: -1_000_000n },
     ],
   });
   const report = classifyOperatorTransactions([pay('GOOD', APPROVED), pay('BAD', STRANGER)], policy);
@@ -233,29 +248,41 @@ test('confirm_with_approval to an approved recipient passes; to anyone else it i
   assert.deepEqual(report.flagged.map((f) => [f.digest, f.reason]), [['BAD', 'recipient_not_approved']]);
 });
 
-test('confirm_with_approval from a package that is not ours is flagged', () => {
+test('pay_intent from a package that is not ours is flagged', () => {
   const spoof = {
     digest: 'SPOOF',
-    moveCalls: [{ package: '0x' + '99'.repeat(32), module: 'payment_intent', function: 'confirm_with_approval' }],
+    moveCalls: [{ ...V2_CALLS[0], package: '0x' + '99'.repeat(32) }, V2_CALLS[1]],
     gasMist: 0n,
     balanceChanges: [
       { owner: OPERATOR, coinType: USDC, amount: -10n },
       { owner: APPROVED, coinType: USDC, amount: 10n },
     ],
   };
-  assert.equal(classifyOperatorTransactions([spoof], policy).flagged[0].reason, 'not_confirm_with_approval');
+  assert.equal(classifyOperatorTransactions([spoof], policy).flagged[0].reason, 'not_approved_path');
 });
 
-test('value that leaves the operator for an object, not an address, is flagged', () => {
-  const intoObject = {
+test('value that leaves for an object, not an address, is flagged', () => {
+  // The operator's own SUI into an object: not the approved path at all.
+  const fromOperator = {
     digest: 'OBJ',
     moveCalls: [{ package: CORE, module: 'payment_intent', function: 'confirm_with_approval' }],
     gasMist: 1_000_000n,
     balanceChanges: [{ owner: OPERATOR, coinType: SUI, amount: -301_000_000n }],
   };
-  const report = classifyOperatorTransactions([intoObject], policy);
-  assert.equal(report.flagged[0].reason, 'outflow_without_recipient');
+  const report = classifyOperatorTransactions([fromOperator], policy);
+  assert.equal(report.flagged[0].reason, 'not_approved_path');
   assert.equal(report.flagged[0].operatorOutflow[0].amount, '300000000');
+  // The wallet's USDC into an object on the v2 path: no address received it.
+  const fromWallet = {
+    digest: 'OBJ_V2',
+    moveCalls: V2_CALLS,
+    gasMist: 1_000_000n,
+    balanceChanges: [
+      { owner: WALLET, coinType: USDC, amount: -300_000_000n },
+      { owner: OPERATOR, coinType: SUI, amount: -1_000_000n },
+    ],
+  };
+  assert.equal(classifyOperatorTransactions([fromWallet], policy).flagged[0].reason, 'outflow_without_recipient');
 });
 
 // ─── 5. D-0004: the operator key never enters 0xWal or an agent tool ───────

@@ -114,11 +114,11 @@ export default function ApprovalChannelCard({
   }
 
   return (
-    <div className="dash-surface p-6">
-      <div className="flex items-center gap-3">
-        <MessageSquare className="text-[var(--info)]" />
-        <div>
-          <h2 className="text-xl font-bold text-[#326273]">Approvals on WhatsApp</h2>
+    <div className="dash-surface p-4 sm:p-5">
+      <div className="flex items-start gap-3">
+        <MessageSquare className="mt-0.5 h-5 w-5 shrink-0 text-[var(--info)]" aria-hidden="true" />
+        <div className="min-w-0">
+          <h2 className="text-sm font-extrabold text-[#0c3e48]">Approvals on WhatsApp</h2>
           <p className="text-[13px] text-[#326273]/90">
             Where an approver is reached, and what they have to do to release a payment.
           </p>
@@ -183,7 +183,7 @@ export default function ApprovalChannelCard({
             </span>
           )}
           {channel && channel.whatsapp && !channel.verified && (
-            <span className="inline-flex items-center gap-1 rounded-md bg-[#E39774]/20 px-2 py-0.5 font-mono text-[12px] font-semibold uppercase tracking-[0.12em] text-[#9A4A2D]">
+            <span className="inline-flex items-center gap-1 rounded-md bg-[var(--gold-tint)] px-2 py-0.5 font-mono text-[12px] font-semibold uppercase tracking-[0.12em] text-[var(--gold-ink)]">
               <ShieldAlert className="h-3 w-3" /> Not confirmed
             </span>
           )}
@@ -284,7 +284,7 @@ function ChannelOption({
           </span>
         )}
         {caution && (
-          <span className="rounded-md bg-[#E39774]/20 px-1.5 py-0.5 font-mono text-[12px] font-semibold uppercase tracking-[0.12em] text-[#9A4A2D]">
+          <span className="rounded-md bg-[var(--gold-tint)] px-1.5 py-0.5 font-mono text-[12px] font-semibold uppercase tracking-[0.12em] text-[var(--gold-ink)]">
             Weaker
           </span>
         )}

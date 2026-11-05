@@ -124,6 +124,23 @@ export const envSchema = z.object({
   SPLASH_ATTESTATION_CAP_ID: renamedAnchorCap,
   SPLASH_PEG_STATE_ID: objectId,
   SPLASH_COMPLIANCE_CONFIG_ID: objectId,
+  /** Amendment A1: the shared fee_config::FeeConfig, Splash's fee schedule.
+   *  lib/fees/fee-config.ts reads it over SUI_GRAPHQL_URL to quote the fee.
+   *  Unset on mainnet, no fee is quoted and no payment is built; unset
+   *  elsewhere, a quote uses A1's launch schedule and says so. */
+  SPLASH_FEE_CONFIG_ID: objectId,
+  /** splash_core::address_registry::Registry: the partner deposit addresses
+   *  and business wallets. The operator-outflow monitor reads it to clear a
+   *  v2 executor payment to one of them. */
+  SPLASH_ADDRESS_REGISTRY_ID: objectId,
+  /** The splash_spend package, whose pay_intent is the v2 executor path the
+   *  operator-outflow monitor approves. */
+  SPLASH_SPEND_PACKAGE_ID: objectId,
+  /** splash_spend's PolicyRegistry, shared at its publish: each business's
+   *  SpendPolicy id is derived under it (v2 §4.2). With
+   *  SPLASH_SPEND_PACKAGE_ID, needed for spending rules; without both, none
+   *  is built or read. */
+  SPLASH_SPEND_POLICY_REGISTRY_ID: objectId,
   SPLASH_COMPLIANCE_CAP_ID: objectId,
   SPLASH_BUSINESS_ACCOUNT_ID: objectId,
   SPLASH_TRANSFER_COIN_ID: objectId,
@@ -141,15 +158,24 @@ export const envSchema = z.object({
   USDT_BUFFER_ID: objectId,
   TREASURY_ADDRESS: suiAddress,
   OPERATOR_SUI_ADDRESS: suiAddress,
-  /** Splash's Sui mainnet fee wallet: receives the audit-anchor fee on USDC
-   *  sent out of Splash, in the same transaction, when STABLECOIN_ANCHOR_FEE
-   *  is on. Stablecoin transfers are otherwise free and do not need it. A real
-   *  fee must have a real, named destination: never defaulted. */
-  SPLASH_FEE_ADDRESS_MAINNET: suiAddress,
-  /* 'on' charges the audit-anchor fee on USDC sent out of Splash (lib/payments/stablecoin-lane.ts). */
+  /* 'on' charges Splash's wallet fee, from the FeeConfig's schedule and paid to
+     its fee recipient, on USDC sent out of Splash (lib/server/stablecoin-fee.ts). */
   STABLECOIN_ANCHOR_FEE: opt(z.enum(['on', 'off'])),
   /* Unset or 'on': wallet transfers go gasless. 'off': the sending wallet pays gas in SUI. */
   STABLECOIN_GASLESS: opt(z.enum(['on', 'off'])),
+  /* v2 Business Splash Wallet: who pays gas for its Move calls (register,
+     rotate, membership, payments), which Sui's gasless lane does not cover.
+     'operator': Splash's operator signer (KMS in production) sponsors them
+     from its SUI address balance (lib/server/wallet-sponsor.ts). Unset or
+     'off': no wallet transaction is built, and the request says why. */
+  WALLET_GAS_SPONSOR: opt(z.enum(['operator', 'off'])),
+  /* v2 Business Splash Wallet on mainnet (lib/server/wallet-network-gate.ts).
+     Off: no wallet request is built on mainnet. On requires
+     WALLET_HARDWARE_CHECK_REF, where the hardware 2-of-3 passkey check's
+     evidence is recorded (docs/v2/phase2-business-wallet.md runbook), and
+     production refuses to boot without it. */
+  WALLET_MAINNET_ENABLED: flag('false'),
+  WALLET_HARDWARE_CHECK_REF: opt(str.regex(/^docs\/[A-Za-z0-9._/-]+\.md#[A-Za-z0-9_-]+$/, 'must name the evidence, e.g. docs/mainnet-checks-2026-10.md#wallet-2-of-3')),
   /** Chainalysis's free sanctions-screening API. Unset: wallet recipients
    *  are saved unscreened, and reach mainnet only through a named admin's
    *  attestation (lib/server/wallet-screening.ts). */
@@ -170,9 +196,8 @@ export const envSchema = z.object({
   SPLASH_PEG_USDC_DEVIATION_PPM: int(0),
   SPLASH_PEG_USDT_DEVIATION_PPM: int(0),
 
-  /* Settlement. lib/server/sui-settlement.ts, lib/sui/gas.ts. */
+  /* Settlement. lib/server/sui-settlement.ts. */
   SUI_SETTLEMENT_MODE: withDefault(z.enum(['auto', 'live', 'simulate']), 'auto'),
-  SUI_BATCH_SETTLEMENT_MODE: optional,
   /** Raw operator keys: development and testnet only. Production refuses
    *  both (WS4) — it signs through OPERATOR_KMS_KEY_ID. */
   OPERATOR_SUI_PRIVATE_KEY: privkey,
@@ -189,6 +214,15 @@ export const envSchema = z.object({
    *  profile. 'static': a long-lived key pair, for hosts AWS cannot issue a
    *  role to; scope it to kms:Sign + kms:GetPublicKey on this key only. */
   OPERATOR_KMS_CREDENTIALS: withDefault(z.enum(['role', 'static']), 'role'),
+  /* Scheduled payer (v2 Phase 3, scheduled batches, "pay automatically within
+     my limits"). lib/server/scheduled-payer-signer.ts. A SECOND KMS key,
+     separate from the operator's gas-sponsor key (separation of duties): it
+     signs only as the spender of an allowance the owners signed, holds no
+     funds and no SUI. Unset in production, automatic payments are off and
+     every run is handed back to "ask me first". Never a raw key. */
+  SCHEDULED_PAYER_KMS_KEY_ID: opt(str.regex(KMS_KEY_ID, 'must be a KMS key id, key ARN, alias/… or mrk-… id')),
+  /** The address the scheduled-payer KMS key derives; checked against its public key, and never the operator's or the sponsor's. */
+  SCHEDULED_PAYER_SUI_ADDRESS: suiAddress,
   AWS_ACCESS_KEY_ID: optional,
   AWS_SECRET_ACCESS_KEY: optional,
   AWS_SESSION_TOKEN: optional,
@@ -201,9 +235,26 @@ export const envSchema = z.object({
   OPERATOR_HOT_BALANCE_CEILING_MICRO: opt(str.regex(/^\d+$/, 'must be a whole number of micro-USDC')),
   /** Where operator custody alerts are POSTed (ceiling, top-up, outflow). */
   OPERATOR_ALERT_WEBHOOK_URL: httpsUrl,
-  /** Sui GraphQL, read by the outflow monitor. Unset: Mysten's public
-   *  endpoint for SUI_NETWORK. */
+  /** Sui GraphQL, read by the outflow monitor and the governance alert
+   *  monitor. Unset: Mysten's public endpoint for SUI_NETWORK. */
   SUI_GRAPHQL_URL: url,
+  /* v2 upgrade governance (brief 3.5). lib/server/governance-alert-monitor.ts
+     reads the on-chain state of the canonical upgrade wrapper, the canonical
+     compliance config (SPLASH_COMPLIANCE_CONFIG_ID) and the canonical fee
+     config (SPLASH_FEE_CONFIG_ID), and tells every business owner when a core
+     upgrade, a new governance owner, a registry addition, a fee schedule or a
+     fee recipient is pending, and when one takes effect. It reads no event feed:
+     `wrap` is public, so anyone can emit an UpgradeProposed from a wrapper of
+     their own. These ids name the two objects, whose Move types the monitor
+     checks on chain. Read from the environment only, never from
+     data/contract-config.json, so a file staff can edit at runtime cannot
+     widen what counts as canonical. Unset or mismatched, the cron answers 502
+     rather than watch nothing. Core's original id is read from the wrapper's
+     original_package; SPLASH_CORE_PACKAGE_ID is not read by the monitor. */
+  /** The published, immutable splash_upgrade_delay package. */
+  SPLASH_UPGRADE_DELAY_PACKAGE_ID: objectId,
+  /** The one DelayedUpgradeCap that wraps splash_core's UpgradeCap. */
+  SPLASH_UPGRADE_WRAPPER_ID: objectId,
   ENOKI_API_KEY: optional,
   SUI_PEG_UPDATE_GAS_BUDGET: int(10_000_000, 1),
   SUI_RECORD_SETTLEMENT_GAS_BUDGET: int(10_000_000, 1),
@@ -345,10 +396,19 @@ export const envSchema = z.object({
   COMPOSED_TREASURY_ALLOCATION_BPS: int(100, 0),
   MAYBANK_INTERCOMPANY_ENABLED: flag('true'),
 
-  /* Funding rails and providers. lib/server/funding-*.ts, stripe.ts,
-     airwallex.ts, lib/funding/registry.ts. */
+  /* Funding rails and providers. lib/server/funding-*.ts,
+     lib/funding/registry.ts. */
   CARD_FUNDING_ENABLED: flag('false'),
   FEATURE_DUAL_FUNDING: flag('true'),
+  /* Subscription billing (Amendment A1 §6; lib/server/subscription-billing.ts).
+     OFF: built and tested, not enabled. While off, every billing route and
+     the billing cron answer 404 and nothing reads or writes the billing
+     tables; a business with a live plan can still cancel it. No payment ever
+     waits on billing. SPLASH_FINANCE_ADDRESS is the Splash finance multisig,
+     the only spender a billing allowance may name, and only while it is the
+     on-chain FeeConfig's fee recipient (a proven multisig). */
+  FEATURE_SUBSCRIPTION_BILLING: flag('false'),
+  SPLASH_FINANCE_ADDRESS: suiAddress,
   CARD_FUNDING_SURCHARGE_BPS: int(290),
   STRIPE_SECRET_KEY: optional,
   AIRWALLEX_API_KEY: optional,
@@ -368,9 +428,121 @@ export const envSchema = z.object({
   FUNDING_CCTP_SOLANA_ENABLED: flag('false'),
   FUNDING_PROVIDER_STRIPE_ENABLED: flag('true'),
   FUNDING_PROVIDER_AIRWALLEX_ENABLED: flag('true'),
+
+  /* v2 §4.3, funding the Business Splash Wallet (lib/funding/providers.ts,
+     swap-routes.ts, lib/compliance/kyt.ts). Every partner and route is a
+     sandbox outside production; in production each refuses without its
+     credentials and, until its API is wired, with them. None is required at
+     boot: a missing key refuses at the request, never a build. */
+  FUNDING_PROVIDER_HALLIDAY_ENABLED: flag('true'),
+  FUNDING_PROVIDER_TRANSFI_ENABLED: flag('true'),
+  /** Bridge is in talks (D7): stubbed and off. */
+  FUNDING_PROVIDER_BRIDGE_ENABLED: flag('false'),
+  HALLIDAY_API_KEY: optional,
+  HALLIDAY_WEBHOOK_SECRET: optional,
+  STRIPE_FUNDING_WEBHOOK_SECRET: optional,
+  TRANSFI_API_KEY: optional,
+  TRANSFI_WEBHOOK_SECRET: optional,
+  BRIDGE_API_KEY: optional,
+  BRIDGE_WEBHOOK_SECRET: optional,
+  /** The sandbox partners' webhook secret, outside production only: random, at
+   *  least 32 characters, and only read when FUNDING_SANDBOX_WEBHOOKS_ENABLED
+   *  is true. There is no fallback secret. */
+  FUNDING_SANDBOX_WEBHOOK_SECRET: optional,
+  FUNDING_SANDBOX_WEBHOOKS_ENABLED: flag('false'),
+  /** The Sui addresses each partner delivers USDC from (comma-separated, from
+   *  the partner). A delivery from anywhere else is not the partner's. */
+  FUNDING_PROVIDER_HALLIDAY_SUI_SENDERS: optional,
+  FUNDING_PROVIDER_STRIPE_SUI_SENDERS: optional,
+  FUNDING_PROVIDER_TRANSFI_SUI_SENDERS: optional,
+  FUNDING_PROVIDER_BRIDGE_SUI_SENDERS: optional,
+  /** The HMAC key for bank-account fingerprints (random, at least 32
+   *  characters); without it no bank account can be added. The previous
+   *  keys (comma-separated) are still matched after a rotation. */
+  FUNDING_SOURCE_FINGERPRINT_KEY: optional,
+  FUNDING_SOURCE_FINGERPRINT_KEY_PREVIOUS: optional,
+  FUNDING_SWAP_LIFI_ENABLED: flag('true'),
+  FUNDING_SWAP_DEBRIDGE_ENABLED: flag('true'),
+  LIFI_API_KEY: optional,
+  DEBRIDGE_API_KEY: optional,
+  /** Elliptic (D8): deposit and recipient screening (lib/compliance/kyt.ts),
+   *  its AML API's wallet exposure. Both or neither; the secret is the
+   *  base64 one Elliptic issues. */
+  ELLIPTIC_API_KEY: optional,
+  ELLIPTIC_API_SECRET: optional,
+  ELLIPTIC_BASE_URL: httpsUrl,
+  /** Risk-score thresholds (0 to 10) compliance sets at contract; unset, the
+   *  starting policy in lib/compliance/kyt.ts. */
+  ELLIPTIC_REVIEW_SCORE: optional,
+  ELLIPTIC_BLOCK_SCORE: optional,
+  /** Sumsub's Travel Rule for payments to exchange recipients (v2 §4.6,
+   *  lib/compliance/sumsub.ts). Off: production refuses the VASP message
+   *  rather than pretend one was sent; the sender-declaration pack still
+   *  works. Needs SUMSUB_APP_TOKEN and SUMSUB_SECRET_KEY. */
+  SUMSUB_TRAVEL_RULE_ENABLED: flag('false'),
+  /** Sumsub's SHA-1 webhook signature (its old default, used when the
+   *  algorithm header is missing). Production refuses it unless this is on,
+   *  for the switch-over to HMAC_SHA256_HEX only. */
+  SUMSUB_WEBHOOK_ALLOW_SHA1: flag('false'),
+  /** How old a recipient's CLEAR screening may be when a payment to it is
+   *  opened or signed, in hours (1 to 720; default 24). Older is screened
+   *  again, or refused (lib/server/kyt-screenings.ts). */
+  KYT_SCREENING_MAX_AGE_HOURS: optional,
+
+  /* v2 §4.4 and §4.5, payout partners and withdrawals to the business's own
+     bank (lib/payouts/, lib/server/withdrawals.ts). A sandbox outside
+     production; in production each route refuses without its credentials
+     and, until its API is wired, with them. None is required at boot. */
+  PAYOUT_PARTNER_HATA_FIUU_ENABLED: flag('true'),
+  PAYOUT_PARTNER_PDAX_ENABLED: flag('true'),
+  PAYOUT_PARTNER_DURIANPAY_ENABLED: flag('true'),
+  PAYOUT_PARTNER_CCTP_WALLET_ENABLED: flag('true'),
+  HATA_API_KEY: optional,
+  HATA_WEBHOOK_SECRET: optional,
+  FIUU_MERCHANT_ID: optional,
+  FIUU_VERIFY_KEY: optional,
+  /** §4.5 supplier payouts. PH (lib/payouts/pdax.ts; PDAX_API_KEY is below). */
+  PDAX_API_SECRET: optional,
+  PDAX_WEBHOOK_SECRET: optional,
+  /** ID, with the payout partner's exchange partner (lib/payouts/durianpay.ts). */
+  DURIANPAY_API_KEY: optional,
+  DURIANPAY_WEBHOOK_SECRET: optional,
+  DURIANPAY_EXCHANGE_API_KEY: optional,
+  /** Cross-chain USDC over CCTP V2 (lib/payouts/cctp-wallet.ts): Circle's
+   *  attestation and fee API, and the registered bridge adapter's witness
+   *  type. Without both the route refuses; with both it still refuses until
+   *  a bridge adapter is registered on chain. */
+  CCTP_IRIS_API_URL: url,
+  CCTP_BRIDGE_ADAPTER_TYPE: optional,
+  /** Reading a cross-chain payment's mint (lib/server/cross-chain-transfers.ts):
+   *  JSON of https JSON-RPC URLs per CCTP chain, e.g. {"BASE":"https://…"}.
+   *  A chain without one cannot be read, and its payment stays attested. */
+  CCTP_MINT_RPC_URLS_JSON: optional,
+  /** The sandbox payout partners' webhook secret, outside production only:
+   *  random, at least 32 characters, read only when
+   *  PAYOUT_SANDBOX_WEBHOOKS_ENABLED is true. No fallback secret. */
+  PAYOUT_SANDBOX_WEBHOOK_SECRET: optional,
+  PAYOUT_SANDBOX_WEBHOOKS_ENABLED: flag('false'),
+  /** Seals withdrawal bank-account numbers at rest (AES-256-GCM; random, at
+   *  least 32 characters). Without it no bank account can be added or paid. */
+  WITHDRAWAL_ACCOUNT_KEY: optional,
+  /** Rotation: the previous sealing key(s), comma-separated. They only open;
+   *  a value opened with one is sealed again under WITHDRAWAL_ACCOUNT_KEY when
+   *  next used. Clear it once nothing opens with it. */
+  WITHDRAWAL_ACCOUNT_KEY_PREVIOUS: optional,
+  /** splash_core's original (defining) package id, the type tag of the
+   *  intent id a withdrawal instruction is keyed by. Required for withdrawals
+   *  in production (no fallback). Outside production, unset falls back to
+   *  SPLASH_CORE_PACKAGE_ID, which is the original until the first upgrade. */
+  SPLASH_CORE_ORIGINAL_PACKAGE_ID: objectId,
   USDC_AVAILABLE_MICRO: opt(z.coerce.number().int().min(0)),
   USDT_AVAILABLE_MICRO: opt(z.coerce.number().int().min(0)),
   USDT_BUFFER_AGE_MS: int(0),
+
+  /** Partners whose agreements are signed, by id (lib/partners/signed-partners.ts).
+   *  Only these are named in shipped copy; everyone else is described by role.
+   *  Empty by default, so a fresh deployment names nobody (brief §0.8, §3.9). */
+  SIGNED_PARTNERS: opt(str.regex(/^[a-z]+(\s*,\s*[a-z]+)*$/, 'must be comma-separated partner ids, e.g. pdax,sumsub')),
 
   /* Payout and settlement partners. Mocked when USE_MOCK_APIS or unset. */
   PDAX_API_BASE_URL: url,
@@ -391,9 +563,24 @@ export const envSchema = z.object({
   ETHEREUM_RPC_URL: url,
   USDY_ORACLE: opt(z.enum(['on', 'off'])),
   USDY_REDEMPTION_AS_OF: optional,
-  USDY_SWAP_SLIPPAGE_BPS: int(30, 0),
+  /** The swap floor's slippage. One default (30), and no more than 100, which is
+   *  MAX_SWAP_SLIPPAGE_BPS in lib/payments/treasury-usdy.ts (tests hold the two together). */
+  USDY_SWAP_SLIPPAGE_BPS: withDefault(z.coerce.number().int().min(0).max(100), 30),
   USDY_SWAP_VENUE: withDefault(z.enum(['cetus', 'aftermath']), 'cetus'),
   USDY_WITHDRAWAL_DAYS: int(2, 0),
+  /* Treasury in the business's own wallet (v2 D9, brief 5.7). */
+  /** Swaps and redemptions from the business wallet may be handed to its
+   *  signers. Off: Treasury quotes, and prepares nothing. On in production it
+   *  still needs a live swap route (lib/server/treasury-swap-provider.ts),
+   *  which this build does not have, so it refuses rather than pretend. */
+  TREASURY_WALLET_SWAPS: flag('false'),
+  /** The fund-manager referral section (eligibility questions, referral link,
+   *  read-only holding). Off until legal signs off its wording (docs/MAINNET-CHECKLIST.md). */
+  FEATURE_FUND_REFERRAL: flag('false'),
+  /** The fund manager's referral page for eligible businesses. https only. */
+  FUND_REFERRAL_URL: url,
+  /** Tokenized stocks and ETFs (brief section 7, a later phase). Off: hidden. */
+  FEATURE_ONDO_STOCKS: flag('false'),
   SPLASH_PROMO_APY_PCT: opt(z.coerce.number()),
   SPLASH_PROMO_UNTIL: optional,
   OPERATING_BUFFER_USD: int(5_000),
@@ -482,6 +669,47 @@ function productionIssues(env: Env): Issue[] {
     issues.push({ key: 'USDC_TYPE', message: 'is the development stand-in (native SUI); set the real USDC coin type' });
   }
 
+  /* v2 (D11): splash_custody and splash_meter are retired from the mainnet
+     path. App-bound allowances and address balances replace pooling and the
+     spend meter, so a mainnet deployment that names the custody package or a
+     payout delegation is configured for a path that no longer exists. The code
+     stays, for testnet and for the record. */
+  if (env.SUI_NETWORK === 'mainnet') {
+    /* Review B4: a custody path nobody has proven fails closed. Business
+       wallets on mainnet need the hardware 2-of-3 passkey check recorded
+       first (lib/server/wallet-network-gate.ts). */
+    if (env.WALLET_MAINNET_ENABLED && env.WALLET_HARDWARE_CHECK_REF === undefined) {
+      issues.push({
+        key: 'WALLET_HARDWARE_CHECK_REF',
+        message: 'is unset while WALLET_MAINNET_ENABLED=true: business wallets go on mainnet only after the hardware 2-of-3 passkey check passes, and this names where its evidence is recorded',
+      });
+    }
+    for (const key of ['SPLASH_CUSTODY_PACKAGE_ID', 'SPLASH_PAYOUT_DELEGATION_ID'] as const) {
+      if (env[key] !== undefined) {
+        issues.push({ key, message: 'names the retired custody path; splash_custody and splash_meter do not publish to mainnet in v2 (docs/v2/phase1-move-design.md §8) — remove it from the host' });
+      }
+    }
+    /* D1 and D3: Splash holds no key to client funds and owns no account that
+       receives client money. A funding session's deposit address was derived
+       from the first key, so whoever holds it can rebuild the address's
+       private key, or read from the second, an address the operator chose.
+       On mainnet funding sessions give out no deposit address at all
+       (lib/server/funding-sessions.ts), so either key configures a path that
+       must not exist there. */
+    if (env.FUNDING_DEPOSIT_DERIVATION_SECRET !== undefined) {
+      issues.push({
+        key: 'FUNDING_DEPOSIT_DERIVATION_SECRET',
+        message: 'derives the private key of every Sui deposit address from a Splash secret, so Splash would hold a key to client funds (D1, D3); funding sessions give out no deposit address on mainnet — remove it from the host',
+      });
+    }
+    if (env.FUNDING_CCTP_DEPOSIT_ADDRESSES_JSON !== undefined) {
+      issues.push({
+        key: 'FUNDING_CCTP_DEPOSIT_ADDRESSES_JSON',
+        message: 'names CCTP deposit addresses the operator chose, an account between the business and its own wallet (D3); funding sessions give out no deposit address on mainnet — remove it from the host',
+      });
+    }
+  }
+
   /* Email: a grant requires a verified mailbox, and verification is a link
      delivered to it. `console` only prints the link to the server log, so a
      production deployment on it can never verify anyone — and therefore
@@ -530,6 +758,9 @@ function productionIssues(env: Env): Issue[] {
   if (env.TREASURY_EXECUTION_ENABLED) {
     signerNeededBecause ??= 'TREASURY_EXECUTION_ENABLED moves treasury funds';
   }
+  if (env.WALLET_GAS_SPONSOR === 'operator') {
+    signerNeededBecause ??= 'WALLET_GAS_SPONSOR=operator sponsors gas for business wallet transactions';
+  }
 
   /* WS4 — the operator signer is a KMS key, and only a KMS key. A raw key in
      a production environment is a key in the process, whether or not a code
@@ -550,6 +781,22 @@ function productionIssues(env: Env): Issue[] {
       need('AWS_SECRET_ACCESS_KEY', 'OPERATOR_KMS_CREDENTIALS=static');
     }
   }
+  /* The scheduled payer is a second KMS key. If one is named, everything needed
+     to check it is required, and it may not be the operator's key or address:
+     the gas sponsor must never be able to pay, and the payer must never be
+     able to sponsor. */
+  if (env.SCHEDULED_PAYER_KMS_KEY_ID !== undefined) {
+    need('AWS_REGION', "the scheduled payer's KMS signer needs the key's region");
+    need('SCHEDULED_PAYER_SUI_ADDRESS', 'the scheduled payer must be named so it can be checked against its KMS public key');
+    if (env.SCHEDULED_PAYER_KMS_KEY_ID === env.OPERATOR_KMS_KEY_ID) {
+      issues.push({ key: 'SCHEDULED_PAYER_KMS_KEY_ID', message: 'is the operator key: the key that sponsors gas must not also be the key that pays (docs/KEY-POLICY.md, separation of duties)' });
+    }
+    if (env.SCHEDULED_PAYER_SUI_ADDRESS !== undefined && env.SCHEDULED_PAYER_SUI_ADDRESS.toLowerCase() === (env.OPERATOR_SUI_ADDRESS ?? '').toLowerCase()) {
+      issues.push({ key: 'SCHEDULED_PAYER_SUI_ADDRESS', message: 'is the operator address: the gas sponsor and the scheduled payer must be different keys' });
+    }
+  } else if (env.SCHEDULED_PAYER_SUI_ADDRESS !== undefined) {
+    issues.push({ key: 'SCHEDULED_PAYER_SUI_ADDRESS', message: 'is set without SCHEDULED_PAYER_KMS_KEY_ID: an address with no key behind it would be offered to owners as an allowance spender that can never pay' });
+  }
   if (env.OXWAL_CHAIN_MODE === 'live') {
     need('OXWAL_SUI_SENDER', 'OXWAL_CHAIN_MODE=live composes real transactions');
   }
@@ -568,6 +815,13 @@ function productionIssues(env: Env): Issue[] {
     need('STRIPE_SECRET_KEY', env.CARD_FUNDING_ENABLED ? 'CARD_FUNDING_ENABLED=true' : 'Stripe funding is enabled and mocks are off');
   }
   if (vendorsLive && env.FUNDING_PROVIDER_AIRWALLEX_ENABLED) need('AIRWALLEX_API_KEY', 'Airwallex funding is enabled and mocks are off');
+  if (env.SUMSUB_TRAVEL_RULE_ENABLED) {
+    need('SUMSUB_APP_TOKEN', 'SUMSUB_TRAVEL_RULE_ENABLED=true');
+    need('SUMSUB_SECRET_KEY', 'SUMSUB_TRAVEL_RULE_ENABLED=true');
+  }
+  if (env.FEATURE_FUND_REFERRAL) {
+    need('FUND_REFERRAL_URL', 'FEATURE_FUND_REFERRAL=true shows eligible businesses a referral link');
+  }
   if (env.FEATURE_KYB_GATE) {
     need('SUMSUB_APP_TOKEN', 'FEATURE_KYB_GATE=true');
     need('SUMSUB_SECRET_KEY', 'FEATURE_KYB_GATE=true');

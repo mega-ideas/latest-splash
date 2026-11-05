@@ -28,7 +28,6 @@ type Pending = {
 const PURPOSE_LABEL: Record<string, string> = {
   STABLECOIN_TRANSFER: 'USDC transfer',
   FIAT_TRANSFER: 'Payout',
-  BATCH_PAYOUT: 'Batch payout',
   SETTINGS_CHANGE: 'Settings change',
   PROFILE_CHANGE: 'Profile change',
 };
@@ -65,7 +64,7 @@ export default function ApprovalsInbox({ onChange }: { onChange?: () => void }) 
           <Inbox className="h-4 w-4 text-[var(--info)]" /> Waiting for your approval
         </h2>
         {items && items.length > 0 ? (
-          <span className="rounded-full bg-[#E39774]/15 px-2 py-0.5 text-[12px] font-semibold text-[#9F5839]">{items.length}</span>
+          <span className="rounded-full bg-[var(--gold-tint)] px-2 py-0.5 text-[12px] font-semibold text-[var(--gold-ink)]">{items.length}</span>
         ) : null}
       </div>
       {error ? <p role="alert" className="mt-2 text-[13px] text-[var(--error)]">{error}</p> : null}

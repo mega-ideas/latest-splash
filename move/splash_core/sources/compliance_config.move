@@ -7,6 +7,9 @@ module splash_core::compliance_config;
 
 use splash_core::business_account::AdminCap;
 use splash_core::cap_registry::{Self, CapRegistry};
+use splash_core::multisig;
+use std::string::String;
+use std::type_name;
 use sui::clock::Clock;
 use sui::event;
 use sui::vec_set::{Self, VecSet};
@@ -18,6 +21,21 @@ const MAX_SLIPPAGE_BPS: u64 = 1_000;
 /// scan, so this keeps the hot-path guard's gas cost constant-ish and bounded.
 /// One pool per settled corridor is the expected shape; 8 is generous.
 const MAX_ALLOWED_POOLS: u64 = 8;
+
+/// The notice an addition to any v2 registry must give before it takes
+/// effect: the same 24 hours `splash_upgrade_delay` gives a package upgrade.
+const ADDITION_NOTICE_MS: u64 = 86_400_000;
+/// After its notice, an addition must be activated within seven days or it
+/// lapses. One alert cannot be cashed in months later, once owners have
+/// stopped watching.
+const ADDITION_WINDOW_MS: u64 = 604_800_000;
+/// Each registry is a short list scanned on the payment path.
+const MAX_REGISTRY_ENTRIES: u64 = 8;
+const MAX_PENDING_ADDITIONS: u64 = 8;
+
+const REGISTRY_ASSET: u8 = 1;
+const REGISTRY_SETTLEMENT_APP: u8 = 2;
+const REGISTRY_BRIDGE_ADAPTER: u8 = 3;
 
 const E_INVALID_CONFIG: u64 = 350;
 const E_INVALID_CAP: u64 = 351;
@@ -33,6 +51,36 @@ const E_POOL_LIST_EMPTY: u64 = 355;
 /// `AdminCap`-gated; see the note on the cap.
 const E_NOT_A_TIGHTENING: u64 = 356;
 
+// ─── v2 registries (D11) ───────────────────────────────────────────────────
+/// The asset is not on the accepted-asset registry.
+const E_ASSET_NOT_ACCEPTED: u64 = 357;
+/// The witness is not a registered settlement app.
+const E_NOT_A_SETTLEMENT_APP: u64 = 358;
+/// The witness is not a registered bridge adapter.
+const E_NOT_A_BRIDGE_ADAPTER: u64 = 359;
+/// Registry kind is not 1 (asset), 2 (settlement app) or 3 (bridge adapter).
+const E_UNKNOWN_REGISTRY: u64 = 360;
+/// The type is already on that registry.
+const E_ALREADY_REGISTERED: u64 = 361;
+/// The same addition is already waiting out its notice.
+const E_ALREADY_PROPOSED: u64 = 362;
+/// There is no such pending addition.
+const E_NOT_PROPOSED: u64 = 363;
+/// The 24-hour notice for this addition has not run yet.
+const E_NOTICE_NOT_RUN: u64 = 364;
+/// The type is not on that registry, so there is nothing to remove.
+const E_NOT_REGISTERED: u64 = 365;
+/// A registry, or the list of pending additions, is full.
+const E_REGISTRY_FULL: u64 = 366;
+/// The addition's window closed seven days after its notice ran. Propose it
+/// again, so owners are alerted again.
+const E_ADDITION_LAPSED: u64 = 367;
+/// Removing the last accepted asset would stop every payment until a 24-hour
+/// addition runs. Use `pause` to halt.
+const E_LAST_ASSET: u64 = 368;
+// 369 is retired with the legacy approval path's one-way switch
+// (E_LEGACY_DISABLED, raised only by the earlier v2 testnet package).
+
 public struct ComplianceConfig has key {
     id: UID,
     max_deviation_ppm: u64,
@@ -44,6 +92,11 @@ public struct ComplianceConfig has key {
     /// coin: $100 is 100_000_000 for 6-decimal USDC but a different figure for
     /// any other decimals. Zero is rejected by `assert_valid`, so the floor can
     /// never be silently disabled.
+    ///
+    /// On the v2 paths it is the floor of a BANK PAYOUT (kind 4), together
+    /// with the 99 USDC platform minimum: whichever is larger, checked when
+    /// the intent opens and again when it settles (`payment_intent`). Wallet,
+    /// Splash-business and cross-chain payments have no floor.
     min_settlement_amount: u64,
     /// S-12 fix. Object IDs of the DeepBook pools the liquidity guard is
     /// allowed to read. Without this, `assert_deepbook_liquidity` trusts a
@@ -55,6 +108,37 @@ public struct ComplianceConfig has key {
     /// the venue it measures is one the protocol chose.
     allowed_deepbook_pools: VecSet<ID>,
     paused: bool,
+    /// v2 (D6, D11). The coin types a payment may settle in, as
+    /// `type_name::with_defining_ids` strings. Seeded with native USDC.
+    accepted_assets: VecSet<String>,
+    /// v2 (D11). Witness types allowed to open and settle intents on a
+    /// business's behalf — `splash_spend`'s `SettleWitness`, once registered.
+    settlement_apps: VecSet<String>,
+    /// v2. Witness types allowed to discharge a `BridgeObligation`, i.e. to
+    /// burn a cross-chain payment through CCTP. Empty until the CCTP V2
+    /// adapter ships.
+    bridge_adapters: VecSet<String>,
+    /// Additions waiting out their 24-hour notice.
+    pending_additions: vector<PendingAddition>,
+}
+
+/// The single right to create the config, minted once at publish.
+///
+/// Every money path takes `&ComplianceConfig`, and the PTB author chooses
+/// which object to pass. If a second config could exist, a staff member could
+/// pass the unpaused one, or one that accepts another asset, and every pause,
+/// removal and 24-hour addition on the real one would stop nothing. With one
+/// ticket and no way to mint another, there is exactly one config.
+public struct ConfigTicket has key {
+    id: UID,
+}
+
+/// An addition to one of the v2 registries, announced and not yet in force.
+public struct PendingAddition has store, drop, copy {
+    registry: u8,
+    type_name: String,
+    proposed_at_ms: u64,
+    eta_ms: u64,
 }
 
 /// ComplianceCap — SUBTRACTIVE authority, and subtractive BY TYPE.
@@ -107,12 +191,52 @@ public struct DeepbookPoolDisallowed has copy, drop {
     pool_id: ID,
 }
 
-/// Create the shared controls once after a fresh package publish.
+/// An addition to a v2 registry was announced. The backend alerts every
+/// business owner: a new asset, a new app that may move money under spending
+/// rules, or a new bridge adapter is 24 hours away.
+public struct RegistryAdditionProposed has copy, drop {
+    config_id: address,
+    registry: u8,
+    type_name: String,
+    proposed_at_ms: u64,
+    eta_ms: u64,
+}
+
+public struct RegistryAdditionActivated has copy, drop {
+    config_id: address,
+    registry: u8,
+    type_name: String,
+}
+
+public struct RegistryAdditionCancelled has copy, drop {
+    config_id: address,
+    registry: u8,
+    type_name: String,
+}
+
+public struct RegistryEntryRemoved has copy, drop {
+    config_id: address,
+    registry: u8,
+    type_name: String,
+}
+
+/// Mint the one `ConfigTicket`, to the publisher.
+fun init(ctx: &mut TxContext) {
+    transfer::transfer(ConfigTicket { id: object::new(ctx) }, ctx.sender());
+}
+
+/// Create the shared controls, once, consuming the publish's `ConfigTicket`.
 ///
 /// `allowed_deepbook_pools` must name at least one pool: the config is useless
 /// without a venue, and defaulting to "empty means allow everything" is exactly
 /// the failure S-12 describes. Duplicate IDs abort (`vec_set::from_keys`).
-public fun create(
+///
+/// `SettlementAsset` seeds the accepted-asset registry. Bootstrap passes
+/// native USDC on the network being bootstrapped (D6: one payment asset). It
+/// is a type argument rather than a constant because the USDC type differs
+/// between testnet and mainnet. Every later addition gives 24 hours' notice.
+public fun create<SettlementAsset>(
+    ticket: ConfigTicket,
     _admin: &AdminCap,
     registry: &CapRegistry,
     max_deviation_ppm: u64,
@@ -123,6 +247,8 @@ public fun create(
     allowed_deepbook_pools: vector<ID>,
     ctx: &mut TxContext,
 ) {
+    let ConfigTicket { id } = ticket;
+    id.delete();
     assert_valid(max_deviation_ppm, max_staleness_ms, max_slippage_bps, min_depth_base_units, min_settlement_amount);
     assert!(!allowed_deepbook_pools.is_empty(), E_POOL_LIST_EMPTY);
     assert!(allowed_deepbook_pools.length() <= MAX_ALLOWED_POOLS, E_TOO_MANY_POOLS);
@@ -136,6 +262,10 @@ public fun create(
         min_settlement_amount,
         allowed_deepbook_pools: vec_set::from_keys(allowed_deepbook_pools),
         paused: false,
+        accepted_assets: vec_set::singleton(type_string<SettlementAsset>()),
+        settlement_apps: vec_set::empty(),
+        bridge_adapters: vec_set::empty(),
+        pending_additions: vector[],
     };
     let config_id = object::id(&config);
     let cap = ComplianceCap {
@@ -271,14 +401,14 @@ public fun pause(config: &mut ComplianceConfig, cap: &ComplianceCap, registry: &
 /// `ComplianceCap` is `key` with no `store`, is minted once by `create`, and can
 /// move only via `transfer_cap` called BY ITS HOLDER. There is no recovery path.
 /// In an immutable package, losing that cap while `paused == true` deadlocks
-/// `assert_pegged` — and therefore every settlement path — permanently, with no
+/// `assert_active` — and therefore every settlement path — permanently, with no
 /// way back.
 ///
 /// Yes, this weakens the two-key pause: `AdminCap` can now unpause unilaterally.
 /// That is the smaller harm. A permanent, unrecoverable liveness brick is
 /// strictly worse than a cold-multisig quorum being able to resume, and
-/// everything downstream of an unpause is still gated by the peg, the DeepBook
-/// guard, the minimum and the venue whitelist.
+/// everything downstream of an unpause is still gated by the asset registry,
+/// the bank-payout floor and each account's own KYB, freezes and ceilings.
 public fun admin_set_paused(_admin: &AdminCap, config: &mut ComplianceConfig, paused: bool) {
     config.paused = paused;
     emit_update(config);
@@ -320,6 +450,227 @@ public fun execute_break_glass_compliance_cap(
         holder,
     );
 }
+
+// ─── v2 registries: additions give 24 hours' notice, removals are immediate ─
+//
+// Three short lists decide what the v2 money paths will accept: the coin a
+// payment settles in, the app allowed to settle under a business's spending
+// rules, and the adapter allowed to burn a cross-chain payment. Each one is a
+// way to make money easier to move, so adding to any of them is the cold
+// multisig's act (`AdminCap`) AND gives every business owner 24 hours to see
+// it coming and revoke their allowances. Taking something off a list can only
+// stop money moving, so it is immediate, and `ComplianceCap` may do it.
+//
+// Activation needs `AdminCap` a second time. An announced addition does not
+// switch itself on; governance signs again after the notice has run, and
+// within seven days of it, or the addition lapses.
+//
+// Both steps also prove on chain that the sender is a multisig no single
+// member can sign for (`multisig::assert_quorum_sender`), so "never by a
+// single key" does not rest on where `AdminCap` happens to be held.
+
+/// Announce an addition of `T` to `registry`. It can be activated no sooner
+/// than 24 hours from now, and no later than eight days from now.
+public fun propose_addition<T>(
+    _admin: &AdminCap,
+    config: &mut ComplianceConfig,
+    registry: u8,
+    keys: vector<vector<u8>>,
+    weights: vector<u8>,
+    threshold: u16,
+    clock: &Clock,
+    ctx: &TxContext,
+) {
+    multisig::assert_quorum_sender(&keys, &weights, threshold, ctx);
+    let name = type_string<T>();
+    assert!(!registry_set(config, registry).contains(&name), E_ALREADY_REGISTERED);
+    assert!(find_pending(config, registry, &name).is_none(), E_ALREADY_PROPOSED);
+    assert!(config.pending_additions.length() < MAX_PENDING_ADDITIONS, E_REGISTRY_FULL);
+
+    let now = clock.timestamp_ms();
+    let eta_ms = now + ADDITION_NOTICE_MS;
+    config.pending_additions.push_back(PendingAddition {
+        registry,
+        type_name: name,
+        proposed_at_ms: now,
+        eta_ms,
+    });
+    event::emit(RegistryAdditionProposed {
+        config_id: object::id_address(config),
+        registry,
+        type_name: name,
+        proposed_at_ms: now,
+        eta_ms,
+    });
+}
+
+/// Put an announced addition into force, once its notice has run and before
+/// its window closes.
+public fun activate_addition<T>(
+    _admin: &AdminCap,
+    config: &mut ComplianceConfig,
+    registry: u8,
+    keys: vector<vector<u8>>,
+    weights: vector<u8>,
+    threshold: u16,
+    clock: &Clock,
+    ctx: &TxContext,
+) {
+    multisig::assert_quorum_sender(&keys, &weights, threshold, ctx);
+    let name = type_string<T>();
+    let at = find_pending(config, registry, &name);
+    assert!(at.is_some(), E_NOT_PROPOSED);
+    let index = at.destroy_some();
+    let now = clock.timestamp_ms();
+    let eta_ms = config.pending_additions[index].eta_ms;
+    assert!(now >= eta_ms, E_NOTICE_NOT_RUN);
+    assert!(now < eta_ms + ADDITION_WINDOW_MS, E_ADDITION_LAPSED);
+    assert!(registry_set(config, registry).length() < MAX_REGISTRY_ENTRIES, E_REGISTRY_FULL);
+
+    config.pending_additions.remove(index);
+    registry_set_mut(config, registry).insert(name);
+    event::emit(RegistryAdditionActivated { config_id: object::id_address(config), registry, type_name: name });
+}
+
+/// Withdraw an announced addition. Subtractive: it stops a loosening.
+public fun cancel_registry_addition(
+    config: &mut ComplianceConfig,
+    cap: &ComplianceCap,
+    registry_caps: &CapRegistry,
+    registry: u8,
+    type_name: String,
+) {
+    assert_compliance_cap(registry_caps, cap);
+    assert!(cap.config_id == object::id(config), E_INVALID_CAP);
+    // Written out here, not in a helper, so check-compliance-subtractive sees
+    // the removal in the body of the function that takes the cap.
+    let at = find_pending(config, registry, &type_name);
+    assert!(at.is_some(), E_NOT_PROPOSED);
+    config.pending_additions.remove(at.destroy_some());
+    event::emit(RegistryAdditionCancelled { config_id: object::id_address(config), registry, type_name });
+}
+
+/// The same withdrawal, by the cold multisig.
+public fun admin_cancel_registry_addition(
+    _admin: &AdminCap,
+    config: &mut ComplianceConfig,
+    registry: u8,
+    type_name: String,
+) {
+    drop_pending(config, registry, type_name);
+}
+
+/// Take a type off a registry, at once. Subtractive: removing the asset stops
+/// every payment in it, including intents already open; removing an app or an
+/// adapter stops it settling anything.
+public fun remove_registry_entry(
+    config: &mut ComplianceConfig,
+    cap: &ComplianceCap,
+    registry_caps: &CapRegistry,
+    registry: u8,
+    type_name: String,
+) {
+    assert_compliance_cap(registry_caps, cap);
+    assert!(cap.config_id == object::id(config), E_INVALID_CAP);
+    // Written out here, not in a helper, so check-compliance-subtractive sees
+    // the removal in the body of the function that takes the cap.
+    assert!(registry_set(config, registry).contains(&type_name), E_NOT_REGISTERED);
+    if (registry == REGISTRY_ASSET) {
+        assert!(config.accepted_assets.length() > 1, E_LAST_ASSET);
+    };
+    registry_set_mut(config, registry).remove(&type_name);
+    event::emit(RegistryEntryRemoved { config_id: object::id_address(config), registry, type_name });
+}
+
+/// The same removal, by the cold multisig.
+public fun admin_remove_registry_entry(
+    _admin: &AdminCap,
+    config: &mut ComplianceConfig,
+    registry: u8,
+    type_name: String,
+) {
+    drop_entry(config, registry, type_name);
+}
+
+public fun addition_window_ms(): u64 { ADDITION_WINDOW_MS }
+
+fun drop_pending(config: &mut ComplianceConfig, registry: u8, type_name: String) {
+    let at = find_pending(config, registry, &type_name);
+    assert!(at.is_some(), E_NOT_PROPOSED);
+    config.pending_additions.remove(at.destroy_some());
+    event::emit(RegistryAdditionCancelled { config_id: object::id_address(config), registry, type_name });
+}
+
+fun drop_entry(config: &mut ComplianceConfig, registry: u8, type_name: String) {
+    assert!(registry_set(config, registry).contains(&type_name), E_NOT_REGISTERED);
+    // An empty asset list would stop every payment until a 24-hour addition
+    // ran, which no one can reverse sooner. `pause` halts, and AdminCap lifts
+    // a pause at once.
+    if (registry == REGISTRY_ASSET) {
+        assert!(config.accepted_assets.length() > 1, E_LAST_ASSET);
+    };
+    registry_set_mut(config, registry).remove(&type_name);
+    event::emit(RegistryEntryRemoved { config_id: object::id_address(config), registry, type_name });
+}
+
+fun find_pending(config: &ComplianceConfig, registry: u8, name: &String): Option<u64> {
+    let mut i = 0;
+    while (i < config.pending_additions.length()) {
+        let p = &config.pending_additions[i];
+        if (p.registry == registry && &p.type_name == name) return option::some(i);
+        i = i + 1;
+    };
+    option::none()
+}
+
+fun registry_set(config: &ComplianceConfig, registry: u8): &VecSet<String> {
+    if (registry == REGISTRY_ASSET) &config.accepted_assets
+    else if (registry == REGISTRY_SETTLEMENT_APP) &config.settlement_apps
+    else if (registry == REGISTRY_BRIDGE_ADAPTER) &config.bridge_adapters
+    else abort E_UNKNOWN_REGISTRY
+}
+
+fun registry_set_mut(config: &mut ComplianceConfig, registry: u8): &mut VecSet<String> {
+    if (registry == REGISTRY_ASSET) &mut config.accepted_assets
+    else if (registry == REGISTRY_SETTLEMENT_APP) &mut config.settlement_apps
+    else if (registry == REGISTRY_BRIDGE_ADAPTER) &mut config.bridge_adapters
+    else abort E_UNKNOWN_REGISTRY
+}
+
+/// The registry string for a type: what intents store as `settlement_asset`.
+public fun type_string<T>(): String {
+    type_name::with_defining_ids<T>().into_string().to_string()
+}
+
+/// Hot-path guard: the asset an intent settles in is accepted right now.
+public fun assert_asset_accepted(config: &ComplianceConfig, asset: &String) {
+    assert!(config.accepted_assets.contains(asset), E_ASSET_NOT_ACCEPTED);
+}
+
+/// Hot-path guard: `W` is a registered settlement app.
+public fun assert_settlement_app<W>(config: &ComplianceConfig) {
+    assert!(config.settlement_apps.contains(&type_string<W>()), E_NOT_A_SETTLEMENT_APP);
+}
+
+/// Hot-path guard: `W` is a registered bridge adapter.
+public fun assert_bridge_adapter<W>(config: &ComplianceConfig) {
+    assert!(config.bridge_adapters.contains(&type_string<W>()), E_NOT_A_BRIDGE_ADAPTER);
+}
+
+public fun is_asset_accepted(config: &ComplianceConfig, asset: &String): bool {
+    config.accepted_assets.contains(asset)
+}
+public fun accepted_assets(config: &ComplianceConfig): vector<String> { *config.accepted_assets.keys() }
+public fun settlement_apps(config: &ComplianceConfig): vector<String> { *config.settlement_apps.keys() }
+public fun bridge_adapters(config: &ComplianceConfig): vector<String> { *config.bridge_adapters.keys() }
+public fun pending_additions(config: &ComplianceConfig): vector<PendingAddition> { config.pending_additions }
+public fun pending_registry(p: &PendingAddition): u8 { p.registry }
+public fun pending_type_name(p: &PendingAddition): String { p.type_name }
+public fun pending_eta_ms(p: &PendingAddition): u64 { p.eta_ms }
+public fun registry_asset(): u8 { REGISTRY_ASSET }
+public fun registry_settlement_app(): u8 { REGISTRY_SETTLEMENT_APP }
+public fun registry_bridge_adapter(): u8 { REGISTRY_BRIDGE_ADAPTER }
+public fun addition_notice_ms(): u64 { ADDITION_NOTICE_MS }
 
 /// The check every consumer of a `ComplianceCap` must make. Enforced by
 /// `scripts/check-cap-generations.mjs`.
@@ -385,3 +736,15 @@ fun emit_update(config: &ComplianceConfig) {
 /// Public read of the whitelist ceiling so off-chain tooling can validate a
 /// proposed pool set before submitting a transaction.
 public fun max_allowed_pools(): u64 { MAX_ALLOWED_POOLS }
+
+#[test_only]
+/// Tests build a config without the publish's `init`. Production has exactly
+/// the one ticket `init` mints.
+public fun ticket_for_testing(ctx: &mut TxContext): ConfigTicket {
+    ConfigTicket { id: object::new(ctx) }
+}
+
+#[test_only]
+public fun init_for_testing(ctx: &mut TxContext) {
+    init(ctx)
+}

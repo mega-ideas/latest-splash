@@ -102,6 +102,77 @@ function isDemoMode(env: NodeJS.ProcessEnv) {
   return env.NODE_ENV !== 'production' || env.USE_MOCK_APIS === 'true' || env.NEXT_PUBLIC_DEMO_MODE === 'true';
 }
 
+/* ── No deposit address on mainnet (D1, D3) ──────────────────────────────
+
+   Every deposit address this file can produce is one the business does not
+   control: on the Sui rail it is derived from FUNDING_DEPOSIT_DERIVATION_SECRET,
+   so whoever holds the secret can rebuild its private key (and outside
+   production, or in the demo posture, the secret falls back to a constant in
+   this repository); on the CCTP rail it is an address the operator configured,
+   an account between the business and its own wallet. D1 says Splash has no
+   key to client funds and D3 that Splash never owns an account that receives
+   client money, so on mainnet none is produced, in any posture. Funding into
+   the business's own registered wallet is Phase 2 work. Testnet keeps the
+   derived and configured addresses. */
+
+export const DEPOSIT_ADDRESS_REFUSED_CODE = 'no_deposit_address_on_mainnet';
+
+/** What the customer is told when a deposit session is refused. */
+export const DEPOSIT_ADDRESS_REFUSED_REASON =
+  'Splash gives out no USDC deposit address on Sui mainnet. Each address it could give is one Splash holds the key to or chose, ' +
+  'and client money never goes to an account Splash controls. Nothing was created. Choose another way to pay.';
+
+/** The short form, beside a payment source that is not offered. */
+export const DEPOSIT_ADDRESS_UNAVAILABLE = 'No deposit address on Sui mainnet';
+
+export class DepositAddressRefusedError extends Error {
+  readonly code = DEPOSIT_ADDRESS_REFUSED_CODE;
+
+  constructor() {
+    super(DEPOSIT_ADDRESS_REFUSED_REASON);
+    this.name = 'DepositAddressRefusedError';
+  }
+}
+
+/**
+ * Mainnet, as the server or the browser has been told it. Either one counts:
+ * the dashboard names the network from NEXT_PUBLIC_SUI_NETWORK, so an address
+ * shown under a mainnet label is read as a mainnet address. Trimmed and case
+ * folded so a stray space refuses rather than passes.
+ */
+function onMainnet(env: NodeJS.ProcessEnv): boolean {
+  const named = (value: string | undefined) => (value ?? '').trim().toLowerCase() === 'mainnet';
+  return named(env.SUI_NETWORK) || named(env.NEXT_PUBLIC_SUI_NETWORK);
+}
+
+/**
+ * The session as a customer may see it: on mainnet without a deposit address
+ * or the URI that carries one, whatever was stored before.
+ */
+export function withoutDepositAddressOnMainnet(session: FundingSession, env: NodeJS.ProcessEnv = process.env): FundingSession {
+  if (!onMainnet(env)) return session;
+  const shown = { ...session };
+  delete shown.depositAddress;
+  delete shown.depositUri;
+  return shown;
+}
+
+/**
+ * The payment sources as a customer may choose them: on mainnet every
+ * stablecoin deposit source stays listed, so the reason can be shown, but is
+ * not offered. Held balance and bank funding issue no deposit address and are
+ * left as they are.
+ */
+export function withDepositSourcesClosedOnMainnet<T extends { type: string; enabled: boolean; unavailableReason?: string }>(
+  sources: T[],
+  env: NodeJS.ProcessEnv = process.env,
+): T[] {
+  if (!onMainnet(env)) return sources;
+  return sources.map((source) => (source.type === 'stablecoin'
+    ? { ...source, enabled: false, unavailableReason: DEPOSIT_ADDRESS_UNAVAILABLE }
+    : source));
+}
+
 function deriveSuiAddress(businessAccountId: string, selection: FundingSelection, env: NodeJS.ProcessEnv) {
   const derivationSecret = env.FUNDING_DEPOSIT_DERIVATION_SECRET
     ?? (isDemoMode(env) ? 'splash-demo-deposit-derivation-only' : '');
@@ -131,11 +202,13 @@ function readConfiguredCctpAddress(
   return sourceChain === 'SOLANA' ? `DEMO_SOL_${digest.slice(0, 40)}` : `0x${digest.slice(0, 40)}`;
 }
 
+/** The only producer of a deposit address, so the mainnet refusal sits here. */
 function stablecoinDepositAddress(
   businessAccountId: string,
   selection: Extract<FundingSelection, { type: 'stablecoin' }>,
   env: NodeJS.ProcessEnv,
 ) {
+  if (onMainnet(env)) throw new DepositAddressRefusedError();
   if (selection.rail === 'SUI_NATIVE') return deriveSuiAddress(businessAccountId, selection, env);
   return readConfiguredCctpAddress(businessAccountId, selection.sourceChain!, env);
 }

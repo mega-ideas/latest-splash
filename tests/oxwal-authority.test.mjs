@@ -301,7 +301,8 @@ test('14.15 envelope — fixture-backed tools return status DEMO, never LIVE', a
   const balances = await executeOxwalTool('getBalances', { orgId: 'demo-business' });
   assert.equal(balances.status, 'DEMO');
   assert.equal(balances.source, 'fixture.balances');
-  assert.ok(balances.data.balances.length > 0);
+  // v2 D9: Splash holds no balance, so the tool reads out none, custody phase or not.
+  assert.deepEqual(balances.data.balances, []);
 
   const netting = await executeOxwalTool('getNettingOpportunities', { orgId: 'demo-business' });
   assert.equal(netting.status, 'MODELED');
@@ -313,7 +314,16 @@ test('14.15 envelope — fixture-backed tools return status DEMO, never LIVE', a
 
 test('14.15 envelope — a proposal built from fixture evidence carries CONTAINS_DEMO_DATA and policy forces human approval', async () => {
   resetOxwalFixtures();
-  const proposal = await proposeTreasuryAllocation({ orgId: 'demo-business', amountUsd: 100, corridor: 'MY_PH' });
+  // v2 D9: Zeke drafts no custodial treasury allocation any more, custody
+  // phase or not; the policy rule is shown on the proposal shape it had.
+  await assert.rejects(() => proposeTreasuryAllocation({ orgId: 'demo-business', amountUsd: 100, corridor: 'MY_PH' }), /Treasury swap/);
+  const proposal = proposalFixture({
+    kind: 'TREASURY_ALLOCATE',
+    tier: 'TIER_2_SCOPED_AUTO',
+    corridor: 'MY_PH',
+    explain: { ...proposalFixture().explain, financialImpact: { amountIn: BigInt(100_000_000), currencyIn: 'USDC', feeBps: 0 }, requiredApprovers: 1, risk: 'LOW' },
+    simulation: { ok: true, balanceChanges: [{ owner: 'org', coinType: 'USDC', amount: '-100000000' }], gasSponsored: true, simulatedAt: nowIso() },
+  });
   assert.equal(proposal.explain.evidenceQuality, 'CONTAINS_DEMO_DATA');
 
   // TIER_2 whitelisted treasury allocation would auto-execute — but demo
@@ -346,12 +356,17 @@ test('14.15 envelope — evidenceQualityOf is ALL_LIVE only when every item is L
   assert.equal(evidenceQualityOf([]), 'CONTAINS_DEMO_DATA');
 });
 
-test('14.15 envelope — the agent chat answer about balances says the figures are demo data', async () => {
+test('14.15 envelope — the agent chat answer about balances says the figures are sample data', async () => {
   let text = '';
   for await (const event of runOxwalAgent({ message: 'What is my balance?', forceLocal: true })) {
     if (event.type === 'delta') text += event.text;
   }
-  assert.match(text, /demo data/i);
+  // v2 D9: Splash holds no balance, so there is no figure to call sample data;
+  // the answer says so and points to the business's own wallet. And no "demo"
+  // (v2 D14).
+  assert.match(text, /Splash holds no balance/);
+  assert.match(text, /own Splash Wallet/);
+  assert.doesNotMatch(text, /\bdemo\b/i);
 });
 
 // ── 14.16 MAKER ≠ CHECKER (regression) ──────────────────────────────────────

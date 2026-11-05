@@ -148,16 +148,17 @@ test('the health report names the scope and never fails on it', () => {
 
 // ─── Zeke ───────────────────────────────────────────────────────────────────
 
-test('Zeke: in the stablecoin scope it offers no fiat, batch or treasury drafting tool, and refuses one called anyway', async () => {
+test('Zeke: in the stablecoin scope it offers no fiat or treasury drafting tool, and refuses one called anyway', async () => {
   const oxwal = await import('../lib/agent/oxwal.ts');
   const names = (defs) => defs.map((d) => d.name);
   await withScope(undefined, () => {
     const all = names(oxwal.anthropicToolDefinitions());
-    for (const t of ['proposePayment', 'proposeBatchPayout', 'proposeTreasuryAllocation']) assert.ok(all.includes(t), t);
+    for (const t of ['proposePayment', 'proposeTreasuryAllocation']) assert.ok(all.includes(t), t);
+    assert.ok(!all.some((t) => /batch/i.test(t)), 'Zeke has no batch tool in any scope: a sheet goes to the wallet batch flow');
   });
   await withScope('stablecoin', async () => {
     const scoped = names(oxwal.anthropicToolDefinitions());
-    for (const t of ['proposePayment', 'proposeInternalTransfer', 'proposeFxConvert', 'proposeTreasuryAllocation', 'proposeTreasuryRedeem', 'proposeNettingSettlement', 'proposeBatchPayout']) {
+    for (const t of ['proposePayment', 'proposeInternalTransfer', 'proposeFxConvert', 'proposeTreasuryAllocation', 'proposeTreasuryRedeem', 'proposeNettingSettlement']) {
       assert.ok(!scoped.includes(t), `${t} is not offered`);
     }
     assert.ok(scoped.includes('prepareUsdcTransfer'), 'the USDC handoff stays');
@@ -165,11 +166,7 @@ test('Zeke: in the stablecoin scope it offers no fiat, batch or treasury draftin
       () => oxwal.executeOxwalTool('proposePayment', { orgId: 'acme', counterpartyId: 'cp_x', amountUsd: 100 }),
       (e) => e.name === 'ZekeLaneRefusal' && e.message.includes(LAUNCH_SCOPE_REASON),
     );
-    // Called directly (the local planner does), the tool refuses before reading anything.
-    await assert.rejects(
-      () => oxwal.proposeBatchPayout({ orgId: 'acme', corridor: 'USD-USDC', payouts: [{ amountUsd: 5, currency: 'USDC' }] }),
-      (e) => e.name === 'ZekeLaneRefusal',
-    );
+    assert.equal(oxwal.proposeBatchPayout, undefined, 'there is no batch tool to call, directly or through the loop');
   });
 });
 
@@ -181,10 +178,14 @@ test('Zeke: a request for fiat or a payout run is refused before the model, in t
     return said;
   };
   await withScope('stablecoin', async () => {
-    for (const message of ['pay Maria 50,000 PHP', 'run the payroll batch for October', 'allocate idle cash to treasury']) {
+    for (const message of ['pay Maria 50,000 PHP', 'allocate idle cash to treasury']) {
       const said = await ask(message);
       assert.match(said, /open for USDC on Sui only/, message);
     }
+    // A batch of USDC payments from the business's own wallet is open: Zeke points to the payout sheet.
+    const batch = await ask('run the payroll batch for October');
+    assert.match(batch, /attach a payout sheet/i);
+    assert.doesNotMatch(batch, /open for USDC on Sui only/);
   });
 });
 
@@ -228,7 +229,7 @@ test('every route that reaches fiat money or settlement refuses outside the laun
 
 test('the named fiat routes carry the guard', () => {
   for (const route of [
-    'transfers/authorize', 'batches/authorize', 'treasury', 'funding/sessions', 'funding/sessions/[id]',
+    'transfers/authorize', 'treasury', 'funding/sessions', 'funding/sessions/[id]',
     'funding/deposits', 'funding/usd-deposits', 'rate-holds', 'pay/[slug]',
     'cron/accrue-yield', 'cron/settle-withdrawals', 'cron/update-peg', 'cron/audit-batch', 'recipients',
     'stablecoin/treasury-quote', 'funding/options',
@@ -257,7 +258,7 @@ test('Zeke: the capabilities answer lists only what this launch prepares', async
     for await (const event of runOxwalAgent({ forceLocal: true, message: 'what can you do?' })) if (event.type === 'delta') said += event.text;
     return said;
   };
-  await withScope(undefined, async () => assert.match(await ask(), /batch payouts/));
+  await withScope(undefined, async () => assert.match(await ask(), /payout sheet/));
   await withScope('stablecoin', async () => {
     const said = await ask();
     assert.match(said, /USDC transfer/);

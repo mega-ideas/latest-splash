@@ -53,6 +53,9 @@ function toRecord(row: repo.RecipientRow): RecipientRecord {
     walletAddress: row.walletAddress,
     walletProvider: row.walletProvider,
     screeningVerdict: row.screeningVerdict ?? null,
+    delivery: row.delivery,
+    approvedAt: row.approvedAt ?? null,
+    createdBy: row.createdBy ?? null,
     createdAt: row.createdAt,
   };
 }
@@ -82,6 +85,7 @@ export async function persistRecipient(record: RecipientRecord): Promise<Recipie
       payoutMethod: record.payoutMethod,
       walletAddress: record.walletAddress,
       walletProvider: record.walletProvider,
+      delivery: record.delivery,
     }),
   );
 }
@@ -143,8 +147,9 @@ export async function listRecipientsFor(orgId: string, limit = 200): Promise<Rec
 /**
  * Cross-tenant, staff only: approved on-chain payout addresses — wallet
  * beneficiaries whose screening is CLEAR or ATTESTED. The operator outflow
- * monitor (WS4) treats a `confirm_with_approval` to anything else as an
- * unapproved outflow. Addresses only.
+ * monitor (WS4) treats a v2 executor payment (`splash_spend::pay_intent`) to
+ * anything else, other than a registered partner deposit address or business
+ * wallet or Splash's fee recipient, as an unapproved outflow. Addresses only.
  */
 export async function listApprovedWalletAddressesForStaff(): Promise<string[]> {
   if (!usingPostgres()) {

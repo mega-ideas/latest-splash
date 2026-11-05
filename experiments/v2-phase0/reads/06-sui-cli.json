@@ -1,0 +1,8 @@
+{
+  "path": "%USERPROFILE%\\.sui-cli\\mainnet-v1.82.3\\sui.exe",
+  "exists": true,
+  "suiExeSha256": "dc0adb2a48f63ed5bc6becf1f81f06eed8ce921021a1076acf49e6a2d7c53f7e",
+  "releaseArchive": "sui-mainnet-v1.82.3-windows-x86_64.tgz",
+  "releaseArchiveSha256Published": "d9d7c6887ff44f3ee957b87ab506669bab6aaa638f491cf2a9024ae720edaf8a",
+  "note": "The archive was checked against GitHub's published digest before unpacking and then deleted; this file records the binary's own hash."
+}

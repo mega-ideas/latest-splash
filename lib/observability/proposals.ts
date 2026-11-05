@@ -33,7 +33,7 @@ export function recordProposalTransition(metric: ProposalTransitionMetric) {
   increment(`oxwal.proposal_transition.${metric.to.toLowerCase()}`);
   if (metric.kind === 'NETTING_SETTLE' && metric.to === 'SETTLED') increment('oxwal.realized_netting.total');
   if (metric.kind === 'INTERNAL_TRANSFER' && metric.to === 'SETTLED') increment('oxwal.internalized_volume.total');
-  if ((metric.kind === 'PAYMENT' || metric.kind === 'BATCH_PAYOUT') && metric.to === 'SETTLED') {
+  if (metric.kind === 'PAYMENT' && metric.to === 'SETTLED') {
     increment('oxwal.recipient_retention.touchpoints');
   }
 

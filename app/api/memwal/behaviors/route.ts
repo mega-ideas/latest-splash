@@ -42,7 +42,7 @@ export async function GET(request: Request) {
       confidence: memory.relevance,
       demo: false,
     }));
-    // Demo memories were never recalled, so they have no match to show. They
+    // Sample (demo) memories were never recalled, so they have no match to show. They
     // used to carry an invented 94% / 91% / 88%.
     const fallbackMemories = demoBehaviors
       .filter((text) => !seen.has(text.toLowerCase()))

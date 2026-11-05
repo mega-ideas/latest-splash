@@ -1,6 +1,7 @@
+import type { ReactNode } from 'react';
+
 import { suiScanTxUrl, suiVisionTxUrl } from '@/lib/explorer';
 import { listTransactions } from '@/lib/server/operations';
-import { listBatchesForStaff } from '@/lib/server/batches-store';
 import { listTransfersForStaff } from '@/lib/server/transfers-store';
 import { getPegStatus } from '@/lib/server/peg';
 import { readComplianceControls } from '@/lib/server/sui-settlement';
@@ -8,11 +9,11 @@ import ComplianceControlForm from '@/components/admin/ComplianceControlForm';
 import { Activity, CheckCircle2, Circle, ExternalLink, Loader2, ReceiptText, XCircle } from 'lucide-react';
 import { listFundingSessions } from '@/lib/server/funding-sessions';
 import { describeFundingSelection } from '@/lib/funding/registry';
+import { formatUsdc } from '@/lib/fees/copy';
 
 export const dynamic = 'force-dynamic';
 
 export default async function AdminTransactionsPage() {
-  const batches = await listBatchesForStaff();
   const transfers = await listTransfersForStaff();
   const transactions = await listTransactions();
   const fundingSessions = await listFundingSessions();
@@ -24,7 +25,10 @@ export default async function AdminTransactionsPage() {
     ? `DeepBook ${pegStatus.deepbook.pair} ${pegStatus.deepbook.midPrice.toFixed(4)} (${pegStatus.deepbook.deviationBps.toFixed(1)} bps)`
     : 'DeepBook did not answer: settlement is paused';
   const volume = transfers.reduce((sum, transfer) => sum + Number.parseFloat(transfer.sourceAmountUsd || '0'), 0);
-  const fees = volume * 0.015;
+  // Splash's fee as each transfer was charged it, from its own record (A1 §4);
+  // a transfer from before A1 carries none and adds nothing. Not an estimate.
+  const charged = transfers.filter((transfer) => transfer.fees);
+  const splashFeesMinor = charged.reduce((sum, transfer) => sum + BigInt(transfer.fees!.splashFee.minor), 0n);
 
   return (
     <div className="mx-auto max-w-7xl space-y-6">
@@ -35,9 +39,9 @@ export default async function AdminTransactionsPage() {
       </header>
 
       <section className="grid gap-5 md:grid-cols-3">
-        <MonitorCard icon={Circle} label="Peg Status" value={`${zone === 'green' ? '🟢' : zone === 'yellow' ? '🟡' : '🔴'} ${zone[0].toUpperCase()}${zone.slice(1)}`} detail={pegDetail} />
-        <MonitorCard icon={Activity} label="24h Volume" value={`RM ${volume.toLocaleString('en-MY', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`} detail={`${transfers.length} transfer intents`} />
-        <MonitorCard icon={ReceiptText} label="Fees" value={`RM ${fees.toLocaleString('en-MY', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`} detail="Estimated at 1.5% headline" />
+        <MonitorCard icon={Circle} label="Peg status" value={<PegValue zone={zone} />} detail={pegDetail} />
+        <MonitorCard icon={Activity} label="Transfer volume" value={`${volume.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} USDC`} detail={`${transfers.length} transfer intents`} />
+        <MonitorCard icon={ReceiptText} label="Splash fees" value={`${formatUsdc(splashFeesMinor)} USDC`} detail={`Charged on ${charged.length} of ${transfers.length} transfer intents, from their records`} />
       </section>
 
       <ComplianceControlForm initial={complianceControls} />
@@ -68,13 +72,13 @@ export default async function AdminTransactionsPage() {
                 {fundingSessions.map((session) => (
                   <tr key={session.id} className="border-t border-[#326273]/5">
                     <td className="p-3 font-mono text-xs text-[#326273]">{session.id}</td>
-                    <td><span className={`rounded-full px-2.5 py-1 text-xs font-bold ${session.status === 'QUARANTINED' ? 'bg-[#E39774]/20 text-[#9b4e32]' : session.status === 'CREDITED' || session.status === 'CLEARED' ? 'bg-[#5C9EAD]/15 text-[#326273]' : 'bg-[#F6F0ED] text-[#326273]'}`}>{session.status}</span></td>
+                    <td><span className={`rounded-full px-2.5 py-1 text-xs font-bold ${session.status === 'QUARANTINED' ? 'bg-[var(--warn-bg)] text-[var(--warn-ink)]' : session.status === 'CREDITED' || session.status === 'CLEARED' ? 'bg-[#5C9EAD]/15 text-[#326273]' : 'bg-[#F6F0ED] text-[#326273]'}`}>{session.status}</span></td>
                     <td className="font-semibold text-[#326273]">{session.selection.source}</td>
                     <td className="text-[#326273]">{describeFundingSelection(session.selection)}</td>
                     <td className="text-[#326273]">{session.kytPolicy ?? '-'}{session.sourceType ? ` / ${session.sourceType}` : ''}</td>
                     <td className="font-mono text-xs text-[#326273]">{session.normalizeVenue ?? '-'}{session.effectiveSlippageBps !== undefined ? ` / ${session.effectiveSlippageBps} bps` : ''}</td>
                     <td className="font-bold text-[#326273]">{session.feeTier}</td>
-                    <td className="max-w-64 text-xs text-[#9b4e32]">{session.adminFlag ?? session.kytReasons?.join('; ') ?? '-'}</td>
+                    <td className="max-w-64 text-xs text-[var(--gold-ink)]">{session.adminFlag ?? session.kytReasons?.join('; ') ?? '-'}</td>
                   </tr>
                 ))}
               </tbody>
@@ -128,7 +132,7 @@ export default async function AdminTransactionsPage() {
                     <td>
                       <div className="flex items-center gap-2">
                         {transfer.state === 'SETTLED' && <CheckCircle2 className="text-[#237284]" size={14} />}
-                        {transfer.state === 'SETTLING' && <Loader2 className="animate-spin text-[#9f5839]" size={14} />}
+                        {transfer.state === 'SETTLING' && <Loader2 className="animate-spin text-[var(--gold-ink)]" size={14} />}
                         {transfer.state === 'QUEUED' && <Loader2 className="animate-spin text-[#326273]/90" size={14} />}
                         {transfer.state === 'FAILED' && <XCircle className="text-red-500" size={14} />}
                         <span className="font-semibold text-[#326273]">{transfer.state}</span>
@@ -154,69 +158,6 @@ export default async function AdminTransactionsPage() {
                       )}
                     </td>
                     <td className="text-xs text-[#326273]/90">{new Date(transfer.createdAt).toLocaleString()}</td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-        )}
-      </div>
-
-      <div className="dash-surface">
-        <div className="border-b border-[#326273]/10 p-5">
-          <h2 className="text-lg font-bold text-[#326273]">Batch payouts</h2>
-        </div>
-        {batches.length === 0 ? (
-          <div className="p-8 text-center text-sm text-[#326273]/90">No batch transactions yet.</div>
-        ) : (
-          <div className="overflow-x-auto">
-            <table className="w-full min-w-[900px] text-sm">
-              <thead className="bg-[#326273]/5">
-                <tr className="text-left text-[#326273]/90">
-                  <th className="p-3">Batch ID</th>
-                  <th>State</th>
-                  <th className="text-right">Rows</th>
-                  <th className="text-right">Amount</th>
-                  <th>Digest</th>
-                  <th>Package</th>
-                  <th>Explorer</th>
-                  <th>Time</th>
-                </tr>
-              </thead>
-              <tbody>
-                {batches.map((batch) => (
-                  <tr key={batch.id} className="border-t border-[#326273]/5">
-                    <td className="p-3 font-mono text-xs text-[#326273]">{batch.id}</td>
-                    <td>
-                      <div className="flex items-center gap-2">
-                        {batch.state === 'SETTLED' && <CheckCircle2 className="text-[#237284]" size={14} />}
-                        {batch.state === 'SETTLING' && <Loader2 className="animate-spin text-[#9f5839]" size={14} />}
-                        {batch.state === 'QUEUED' && <Loader2 className="animate-spin text-[#326273]/90" size={14} />}
-                        {batch.state === 'FAILED' && <XCircle className="text-red-500" size={14} />}
-                        <span className="font-semibold text-[#326273]">{batch.state}</span>
-                      </div>
-                    </td>
-                    <td className="text-right text-[#326273]">{batch.acceptedRows}</td>
-                    <td className="text-right font-mono text-[#326273]">$ {batch.totalAmount}</td>
-                    <td className="font-mono text-xs text-[#326273]/90">{batch.digest || '—'}</td>
-                    <td className="font-mono text-xs text-[#326273]/90">{batch.packageId || '—'}</td>
-                    <td>
-                      <div className="flex gap-1">
-                        {batch.explorer.suiVisionTxUrl && (
-                          <a href={batch.explorer.suiVisionTxUrl} target="_blank" rel="noopener noreferrer" className="inline-flex items-center gap-1 rounded bg-[#5C9EAD]/10 px-2 py-1 text-xs font-semibold text-[#237284] hover:bg-[#5C9EAD]/20">
-                            <ExternalLink size={10} />
-                            SuiVision
-                          </a>
-                        )}
-                        {batch.explorer.suiScanTxUrl && (
-                          <a href={batch.explorer.suiScanTxUrl} target="_blank" rel="noopener noreferrer" className="inline-flex items-center gap-1 rounded bg-[#5C9EAD]/10 px-2 py-1 text-xs font-semibold text-[#237284] hover:bg-[#5C9EAD]/20">
-                            <ExternalLink size={10} />
-                            SuiScan
-                          </a>
-                        )}
-                      </div>
-                    </td>
-                    <td className="text-xs text-[#326273]/90">{new Date(batch.createdAt).toLocaleString()}</td>
                   </tr>
                 ))}
               </tbody>
@@ -255,7 +196,7 @@ export default async function AdminTransactionsPage() {
                     <td>
                       <div className="flex items-center gap-2">
                         {tx.state === 'SETTLED' && <CheckCircle2 className="text-[#237284]" size={14} />}
-                        {tx.state === 'SETTLING' && <Loader2 className="animate-spin text-[#9f5839]" size={14} />}
+                        {tx.state === 'SETTLING' && <Loader2 className="animate-spin text-[var(--gold-ink)]" size={14} />}
                         {tx.state === 'QUEUED' && <Loader2 className="animate-spin text-[#326273]/90" size={14} />}
                         {tx.state === 'FAILED' && <XCircle className="text-red-500" size={14} />}
                         <span className="font-semibold text-[#326273]">{tx.state}</span>
@@ -295,7 +236,24 @@ export default async function AdminTransactionsPage() {
   );
 }
 
-function MonitorCard({ icon: Icon, label, value, detail }: { icon: typeof Circle; label: string; value: string; detail: string }) {
+const PEG_WORDS = { green: 'Within range', yellow: 'Drifting', red: 'Outside range' } as const;
+const PEG_SWATCH = {
+  green: 'bg-[#237284]',
+  yellow: 'bg-[var(--warn)]',
+  red: 'bg-[var(--error)]',
+} as const;
+
+/** The peg reading in words first; the swatch only repeats it. */
+function PegValue({ zone }: { zone: keyof typeof PEG_WORDS }) {
+  return (
+    <span className="flex items-center gap-3">
+      <span aria-hidden="true" className={`h-3.5 w-3.5 shrink-0 rounded-full ${PEG_SWATCH[zone]}`} />
+      {PEG_WORDS[zone]}
+    </span>
+  );
+}
+
+function MonitorCard({ icon: Icon, label, value, detail }: { icon: typeof Circle; label: string; value: ReactNode; detail: string }) {
   return (
     <div className="dash-block p-6">
       <Icon className="h-5 w-5 text-[#237284]" />

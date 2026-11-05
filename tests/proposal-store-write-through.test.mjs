@@ -168,7 +168,10 @@ test('Zeke books a proposal under the session org whatever the model wrote, and 
   // The model never learns its org id, so the one in its tool call is a guess
   // or an injection. Before write-through that misfiled a proposal in memory;
   // with it, the guess would have become an organizations row.
-  const modelInput = { orgId: 'org-somebody-else-test', counterpartyId: 'cp_acme_ph', amountUsd: 500, currency: 'PHP' };
+  // The session org's own verified supplier: a draft never names another
+  // org's record, the sample workspace's included.
+  oxwal.upsertOxwalCounterpartyFixture({ id: 'cp_session_org_ph', orgId: ORG, name: 'Acme Manufacturing PH', kybStatus: 'VERIFIED' });
+  const modelInput = { orgId: 'org-somebody-else-test', counterpartyId: 'cp_session_org_ph', amountUsd: 500, currency: 'PHP' };
   const proposal = await oxwal.executeOxwalTool(
     'proposePayment',
     oxwal.scopeToolInputToOrg('proposePayment', modelInput, ORG),
@@ -191,9 +194,15 @@ test('the org is the session’s for every org-scoped tool, and only for those',
     oxwal.scopeToolInputToOrg('findSavedRecipient', { orgId: 'org-somebody-else-test', name: 'Acme' }, ORG),
     { orgId: ORG, name: 'Acme' },
   );
+  // Invoices and counterparties are read under the session org too (v2 §4.8):
+  // an invoice that names another tenant's record is not a way to read it.
+  assert.deepEqual(
+    oxwal.scopeToolInputToOrg('getInvoice', { orgId: 'org-somebody-else-test', id: 'inv_demo_acme_5000' }, ORG),
+    { orgId: ORG, id: 'inv_demo_acme_5000' },
+  );
   // A tool that takes no org is left exactly as the model wrote it.
-  const invoiceInput = { id: 'inv_demo_acme_5000' };
-  assert.equal(oxwal.scopeToolInputToOrg('getInvoice', invoiceInput, ORG), invoiceInput);
+  const corridorInput = { corridor: 'MY_PH' };
+  assert.equal(oxwal.scopeToolInputToOrg('getCorridorLiquidity', corridorInput, ORG), corridorInput);
   // No session org: an org-scoped tool refuses rather than trusting the model.
   assert.throws(
     () => oxwal.scopeToolInputToOrg('proposePayment', { orgId: ORG }, undefined),

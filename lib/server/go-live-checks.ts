@@ -20,6 +20,7 @@ import { readUsdyOracle } from './ondo-oracle.ts';
 import { getPegStatus } from './peg.ts';
 import { laneClient } from './stablecoin-chain.ts';
 import { anchorFeeEnabled } from '../payments/stablecoin-lane.ts';
+import { laneWalletFee, type LaneWalletFee } from './stablecoin-fee.ts';
 import { navPriceUsd } from './usdy.ts';
 import { screenWalletAddress } from './wallet-screening.ts';
 import { parseLaunchScope } from '../launch-scope-rules.ts';
@@ -113,29 +114,35 @@ const objectExistsOnMainnet: ObjectProbe = async (id) => {
 };
 
 /**
- * A Sui address and an object id look the same. A coin id copied from an
- * explorer passes the format check, and USDC "sent" to it becomes owned by
- * that object, out of every wallet's reach. So the address is also checked
- * on mainnet: an existing object there is not a wallet.
+ * Who receives Splash's wallet fee on the Send USDC desk: the mainnet
+ * FeeConfig's fee recipient (lib/server/stablecoin-fee.ts), the finance
+ * multisig every settle path pays, never a single address from the
+ * environment. A Sui address and an object id look the same, and USDC
+ * "sent" to an object is out of every wallet's reach, so the recipient is
+ * also checked on mainnet: an existing object there is not a wallet.
  */
-export async function checkFeeAddress(env: NodeJS.ProcessEnv = process.env, isObject: ObjectProbe = objectExistsOnMainnet): Promise<Check> {
-  const address = (env.SPLASH_FEE_ADDRESS_MAINNET ?? '').trim();
-  const anchorFeeOn = anchorFeeEnabled(env);
-  if (!address) {
-    // Stablecoin transfers are free; only the audit-anchor fee needs a wallet.
-    return anchorFeeOn
-      ? failed(`STABLECOIN_ANCHOR_FEE is on but SPLASH_FEE_ADDRESS_MAINNET is not set: USDC transfers out of Splash are closed until the fee wallet is set (${GUIDE}, Configuration).`)
-      : skipped('SPLASH_FEE_ADDRESS_MAINNET not set: not needed while stablecoin transfers are free; the audit-anchor fee (off) will need it');
+export async function checkFeeAddress(
+  env: NodeJS.ProcessEnv = process.env,
+  isObject: ObjectProbe = objectExistsOnMainnet,
+  readFee: (env: NodeJS.ProcessEnv) => Promise<LaneWalletFee> = laneWalletFee,
+): Promise<Check> {
+  if (!anchorFeeEnabled(env)) {
+    return skipped("Splash's wallet fee on the Send USDC desk is off (STABLECOIN_ANCHOR_FEE), so stablecoin transfers are free; when on, it is paid to the mainnet FeeConfig's fee recipient");
   }
-  if (!SUI_ADDRESS.test(address)) {
-    return failed('SPLASH_FEE_ADDRESS_MAINNET is not a Sui address (0x followed by 64 hex characters); an Ethereum address will not do.');
+  const fee = await readFee(env);
+  if (!fee.recipient) {
+    return fee.on
+      ? failed(`STABLECOIN_ANCHOR_FEE is on but Splash's fee recipient cannot be read: ${fee.reason ?? 'unknown'}. USDC transfers out of Splash are closed until it can (${GUIDE}, Configuration).`)
+      : ok('the wallet fee is switched on, but the FeeConfig has no fee recipient yet: fees are off until one is applied through the 24-hour path, so stablecoin transfers are free');
   }
+  const address = fee.recipient;
+  if (!SUI_ADDRESS.test(address)) return failed(`the FeeConfig's fee recipient (${address}) is not a Sui address.`);
   try {
     const { value: object, ms } = await withTimeout('Sui mainnet', () => isObject(address));
     if (object) {
-      return failed(`SPLASH_FEE_ADDRESS_MAINNET (${short(address)}) is an object on mainnet, not a wallet: fees sent there would be owned by that object and unreachable. Copy the address from the wallet itself (Slush: Receive).`, ms);
+      return failed(`the FeeConfig's fee recipient (${short(address)}) is an object on mainnet, not a wallet: fees sent there would be unreachable.`, ms);
     }
-    return ok(`fee wallet ${short(address)} is a wallet address on mainnet; the audit-anchor fee is ${anchorFeeOn ? 'on and goes there' : 'off, so stablecoin transfers are free'}`, ms);
+    return ok(`the wallet fee is on and goes to the FeeConfig's fee recipient ${short(address)}, a wallet address on mainnet`, ms);
   } catch (e) {
     return failed(`could not check ${short(address)} on mainnet: ${reason(e)}`);
   }

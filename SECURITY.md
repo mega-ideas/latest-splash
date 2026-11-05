@@ -30,6 +30,1260 @@ The remaining four modules (`smart_treasury`, `payment_intent`, `audit_anchor`, 
 
 ---
 
+## v2 Phase 2 carried items — fee alerts, near-threshold alerts, subscription billing — 2026-10-25
+
+Designs: `docs/v2/fees.md` (Phase 2 list), `docs/v2/phase2-spending-rules.md`
+("Near-threshold alerts"), `docs/v2/phase2-subscription-billing.md`. Tests:
+`tests/fee-governance-alerts.test.mjs`, `tests/near-threshold-alerts.test.mjs`,
+`tests/subscription-billing.test.mjs`. Migrations 0050 to 0054.
+
+- **Fee proposals alert every owner.** The governance cron reads the
+  canonical `FeeConfig` by state (pending schedules, pending recipient), type
+  checked against core's original package and shared; see the v2 Phase 1
+  section below. `SPLASH_FEE_CONFIG_ID` is required. A withdrawn proposal is
+  told to every owner too (migration 0054). A fee config that cannot be
+  trusted no longer silences the upgrade and owner-change alerts: those are
+  still delivered from the wrapper and the config, nothing from the fee
+  config is used or stored, the refusal is paged and the cron answers 502.
+- **Near-threshold alerts are detective only.** They block nothing: a staff
+  member can build a payment alone. Each business's rules are read with its
+  own context; an alert is recorded and emailed per business, to that
+  business's owners only, once (claimed before sending). The owners' route
+  reads the session's org only.
+- **Subscription billing is off** (`FEATURE_SUBSCRIPTION_BILLING`). While
+  off, every billing route and the cron answer 404 before reading a session
+  or the database; only a live or pending plan can still be cancelled. No payment path
+  imports billing (a test walks `lib/`, `app/` and `components/`).
+- **The wallet reader gained one plain-allowance shape, gated.**
+  `allowance::new` is understood only when the server sets
+  `expect.billing`: USDC, named `splash-billing:…`, to exactly the finance
+  multisig, with an end of term and a calendar-month limit; a billing revoke
+  only for an allowance the server read as this wallet's. The `subscription`
+  purpose requires the bytes to carry exactly the plan's price, term, name and
+  lifetime cap. Without `expect.billing` it is refused as before, and the
+  spending-rule purposes never accept it.
+- **Who can draw.** The finance multisig only, and only while it is
+  `FeeConfig`'s fee recipient on chain (proven a multisig no single key signs
+  for); never the operator. At most the plan price per civil month (the
+  chain's `monthly_rate_limit`), and at most one pull per business per
+  calendar month (UTC) by a unique index. The pull is signed by the finance
+  multisig's members; the server builds, describes and stores the exact
+  bytes, and never signs them. The AllowanceCap stays with the business
+  wallet; revoking it stops billing at once.
+- **Residual.** A finance multisig quorum could sign a pull Splash did not
+  build; the chain still caps it at the plan price per monthly window under
+  that allowance, and only until the wallet revokes it.
+- **Review fixes (carried-items review).**
+  - *Untracked allowances (High).* A subscribe whose follow-up missed the new
+    allowance (indexer lag, swallowed error) stayed pending, and a second
+    subscribe opened a signing request before the insert refused it: owners
+    could grant a second billing allowance Splash did not track and could not
+    revoke through Splash. The pending row is now written before the request
+    opens; an executed but unrecorded subscribe is reconciled by the next plan
+    request (which opens nothing until it is, `reconcile_pending`) and by
+    every billing cron run (a 502 until it is); a subscribe or change revokes
+    every billing allowance the wallet holds in the same transaction; and the
+    cron reports any billing allowance no subscription tracks.
+  - *Cancel needed the finance proof (High).* Cancel is now built from the
+    stored subscriptions and what the wallet holds, never from
+    `SPLASH_FINANCE_ADDRESS` or `FeeConfig`, and revokes every billing
+    allowance the wallet holds to any finance multisig the business
+    subscribed to. The `subscription` purpose requires the transaction to
+    revoke exactly the allowances the server named, no fewer and no other.
+  - *Wrong plan on a retried pull (Medium).* A failed or unsigned pull of a
+    replaced plan is `superseded` (invoice void) and the month is billed
+    under the plan in force on a new row; the unique index is partial
+    (migration 0053), so a month is still drawn at most once. A plan change
+    supersedes the old plan's unsigned pulls at once, and a pull of a plan no
+    longer live notices nobody.
+  - *Stuck pulls (Medium).* A pull unsigned past its gas window is rebuilt on
+    the same row; one sent but never seen once its window has passed is made
+    signable again; a submission the network refuses before running it
+    leaves the pull signable (`not_sent`). The same bytes twice are one
+    transaction, so nothing is drawn twice.
+  - *Invoice numbers (Low)* are a per-month sequence, not a 32-bit hash of
+    the org, so two businesses cannot block each other's billing.
+  - *Calendar month (Low, residual).* The chain's `monthly_rate_limit`
+    windows are anchored on the first charge (`sui::allowance` `anchor_ms`),
+    not on the 1st; "per calendar month (UTC)" in A1's Settings line is
+    enforced by Splash's partial unique index. A finance quorum signing
+    outside Splash could draw the price twice in one calendar month (once in
+    each of two windows), and a plan change starts a fresh window. Both are
+    bounded by the plan price per window and end when the wallet revokes.
+
+## v2 Phase 2 §4.8 — Zeke's rules — 2026-10-25
+
+Design: `docs/v2/phase2-zeke.md`. Tests: `tests/zeke-rules.test.mjs`.
+Migration 0049.
+
+- **D-0004 traced.** Every tool the model is offered is a READ or a draft;
+  the test checks the registry, the implementations and that no agent module
+  imports a signer, keypair, KMS client or approval call.
+- **The limitation statement is code, not prompt.** A deterministic intent
+  classifier states the limit before every money-moving turn acts, and before
+  any money tool the model calls on a turn the classifier did not foresee; a
+  read-only turn hears it once per sign-in session.
+- **Once per session is a primary key** on `zeke_session_notices` (org,
+  session hash, notice), keyed on a hash of the verified session; production
+  without a database fails closed (limit stated, nudge skipped).
+- **Cross-tenant reads closed (Medium).** `getInvoice` and `getCounterparty`
+  took only an id, so a model told by an invoice to read or pay another
+  tenant's record could; and the batch and netting drafts accepted any
+  counterparty id, verified or not. Both now take the session org (another
+  tenant's record is "not found"), and every draft names only this org's
+  verified, clear counterparties. The seeded sample workspace stays visible
+  to all, DEMO-labelled.
+- **The chat route** resolves the org through `requireSessionAccount`, so a
+  signed-in person with no membership gets an answer, not a 500.
+- **The model client test hook** refuses to be set in production.
+- **Review fixes (§4.8 review).**
+  - *Classifier gaps (Medium).* Indirect and polite phrasings ("kindly pay",
+    "we need to pay", "is it possible to pay"), act-on verbs (approve,
+    release, execute, process, fund, repeat, resend a payment, payout, batch
+    or payroll), refund, reimburse, disburse, cash out, off-ramp, buy,
+    rebalance, quoted asks and a money clause after a question are now
+    money-moving. On the model path each response's text is held back until
+    its tool calls are checked, so the statement precedes the model's own
+    "Done, queued" text.
+  - *Forged history (Medium).* The route and the tool loop pass the model
+    only `{role: user|assistant, content: string}` turns, each capped
+    (`sanitizeOxwalHistory`); a forged `tool_result` or system turn is
+    dropped. With a session key the ledger alone decides once-per-session
+    notices, so a forged assistant turn cannot suppress the read statement.
+  - *Sample counterparty payable by every tenant (Medium).* Drafts (payment,
+    batch, netting) now require the counterparty's own org to be the session
+    org. The sample workspace stays readable to all as an example but only
+    the sample workspace can draft against it.
+  - *Low.* A report or summary request is a read; a refused turn or a USDC
+    send that prepares nothing no longer opens with "I can prepare this
+    payment". The session key is an HMAC under `CUSTOMER_SESSION_SECRET`,
+    not a bare hash; expired rows are pruned on about 2% of claims.
+
+## v2 Phase 2 §4.7 — wallet recipients: exchange accounts, proven wallets, CCTP — 2026-10-25
+
+Design: `docs/v2/phase2-wallet-recipients.md`. Tests:
+`tests/wallet-recipients-v2.test.mjs`, with additions to
+`tests/compliance-payment-gates.test.mjs`, `tests/controls-evidence.test.mjs`
+and `tests/spend-rules.test.mjs`. Migration 0047.
+
+- **No payment to a wallet the supplier holds before it proves it holds it
+  (D5b).** A signed Sui personal message over a fixed text naming the
+  address, the supplier, the paying business, a 32-byte nonce and a 72-hour
+  expiry. The link's token is kept only as its SHA-256; the challenge is
+  used up before the signature is checked (one try per link, each nonce
+  once for ever); a newer link replaces an open one; the proof is recorded
+  only if the recipient's address is still the one the link was made for.
+  The proof is also the WALLET tag's gate on a SpendPolicy, and withdrawing
+  it (owners, or removing the recipient) cancels a waiting request that
+  would tag it.
+- **The payment gate** (`walletDeliveryGate`), when a wallet payment, an
+  owners' payment of an open intent or a second approval is opened, and
+  before every signature: kind WALLET only to this business's proven
+  wallet, kind EXCHANGE only to its saved exchange account; an address
+  saved as the other kind is refused, so the declared kind cannot dodge the
+  proof or the Travel Rule. Previously any CLEAR address could be paid as
+  either kind (Medium: D5b was not enforced off chain). The older
+  per-person send lane refuses an unproven wallet and any exchange account
+  at its quote.
+- **The EXCHANGE tag** on a SpendPolicy only for a saved exchange account of
+  this business (previously any address could be tagged EXCHANGE without a
+  proof, which skipped D5b for rule payments: Medium).
+- **The exchange of a Travel Rule message and a sender declaration** is the
+  saved recipient's, not the request's (§4.6 open item closed).
+- **Recipients are screened before they are saved**, a BLOCK never saved;
+  one address is one recipient per business; the org is the session's,
+  owners and staff only; another business's recipient, proof or receipt
+  reads as absent.
+- **Cross-chain (D5c, D13):** USDC only, CCTP V2 only, the owners' multisig
+  only (Move, the rule path and staff asks all refuse kind 3). The receipt
+  records the burn only from this business's own executed multisig request
+  that confirmed the intent on chain; Circle's attestation only for a
+  message that mints exactly this payment (domain, mint recipient, amount,
+  fee bound, any relayer); the mint only from the destination chain's
+  receipt of Circle's `MessageReceived` for that nonce. Forward only, by a
+  trigger; production reads only the configured Circle service and never
+  its sandbox.
+- **Open:** the cross-chain PTB and bridge adapter; reading a Solana mint;
+  the supplier's proof page (Phase 3); a legacy wallet recipient (saved
+  before 0047) is unproven and unpayable until proven, which Phase 3 must
+  explain to the business; Phantom is not offered as a label although D5
+  names it (it ended Sui support; the table refuses it since 0020).
+
+### §4.7 review follow-up — 2026-10-25
+
+Tests: `tests/wallet-recipients-v2-controls.test.mjs`,
+`tests/cross-chain-sweep.test.mjs`, with additions to
+`tests/compliance-payment-gates.test.mjs`, `tests/controls-evidence.test.mjs`
+and `tests/stablecoin-send.test.mjs`. Migration 0048.
+
+- **An exchange account was taken on the business's word (High).** Any
+  address saved as EXCHANGE could be paid once its Travel Rule message was
+  merely `submitted`, so choosing the exchange kind avoided D5(b). Now an
+  exchange account is unconfirmed until a Travel Rule message to that
+  address at that exchange, made after it was saved, is `approved` by the
+  counterparty (never a sandbox one in production): until then its first
+  payment may be opened but not signed (`exchange_unconfirmed`), and the
+  EXCHANGE tag is refused.
+- **Splash-controlled addresses could be recipients (High, B1).** The
+  operator (the gas sponsor), treasury, test recipient, FeeConfig's fee and
+  pending recipient (read live), and the operator's CCTP deposit addresses
+  are refused at saving and at every gate (`splash_controlled_address`);
+  production refuses when it cannot name them.
+- **A late signature check undid an owner's withdrawal (Medium).** The proof
+  is now recorded in one transaction, only if the recipient's ownership
+  epoch is the link's; every withdrawal moves it on (`proof_withdrawn`).
+- **The older WALLET body skipped the supplier's details and the role check
+  (Medium).** It is now the same save, owners and staff only, and the gate
+  refuses a wallet without the supplier's details
+  (`supplier_details_missing`).
+- **EIP-55 was skipped for lower-case addresses (Medium).** A cross-chain EVM
+  address is taken only in its checksummed form.
+- **A Solana mint recipient was the business's word (Medium).** The chain is
+  asked: an SPL Token account for Circle's USDC mint, initialized; its owner
+  recorded. No RPC, no save.
+- **An insider could prove their own wallet as a supplier (Medium).** The
+  business's wallet and its members' addresses are refused (`own_address`);
+  a recipient a staff member saved is paid or tagged only once an owner
+  approves it (maker-checker); the proof link goes to the supplier's email
+  and only an owner is shown it; who saved, approved and proved each
+  recipient is in the controls evidence.
+- **Low:** removing a payable wallet is owners only, and removing any
+  recipient owners and staff only; one EVM transaction may carry several
+  payments' mints; two saves of one address cannot race past
+  one-address-one-recipient (a per-address transaction lock); the send lane
+  re-checks the recipient at submission; a sweep asks Circle again for
+  every burned payment and reports one not minted six hours on.
+- **Residual:** an exchange's `approved` is Sumsub's report of the
+  counterparty's answer, not a test deposit; whether each exchange uses
+  per-customer deposit addresses or a memo is to be confirmed before
+  go-live. A rule payment by a staff member now has a server path
+  (`staff_rule_payment`), and the signing layer runs this gate before each
+  signature on it (an exchange account is not paid under a rule).
+
+## v2 Phase 2 §4.6 — compliance: KYB, Travel Rule, KYT, controls evidence — 2026-10-25
+
+Design: `docs/v2/phase2-compliance.md`. Tests:
+`tests/compliance-kyt.test.mjs`, `tests/compliance-sumsub.test.mjs`,
+`tests/controls-evidence.test.mjs`, `tests/compliance-payment-gates.test.mjs`.
+
+- **Fail closed.** KYB, Travel Rule and KYT each have a labelled sandbox
+  outside production only. In production, decided by the runtime mode
+  alone, KYB and the Travel Rule refuse without Sumsub (503) and KYT
+  answers no verdict; nothing downstream ever sees a made-up session,
+  verdict or reference.
+- **Fixed before this section (High):** `POST /api/kyb/sumsub` took the case
+  id, business name and registration number from the request, did not
+  scope the case to the caller's business, and attached the provider's
+  applicant to any case by id. It now reads the case by the session's org
+  and sends the case's own details. It also created applicants under the
+  case id while the webhook only accepts `org:<orgId>`, so no verdict could
+  reach its business; the applicant is now `org:<orgId>`.
+- **The webhook** verifies the HMAC before reading, in the algorithm Sumsub
+  names (an unknown one is refused), inside a two-day window, and applies
+  each delivery once (`webhook_events`, keyed by the body's SHA-256). Only
+  `externalUserId` names the org. PROVIDER cannot reach ACTIVE; a refused
+  transition is acknowledged and nothing moves back. A RED the applicant may
+  retry no longer rejects. Travel Rule statuses move forward only, for
+  their own reference, txnId and business.
+- **Travel Rule** messages go once per payment (unique per business and
+  payment; Sumsub's txnId is the payment), only to a recipient whose newest
+  screening by this business is CLEAR, with everything read on the server.
+- **KYT.** Elliptic's wallet exposure decides by its risk score (a null
+  score is REVIEW); the sanctions list only makes it stricter. Addresses are
+  checked per chain before screening. Every screening is kept append-only
+  (0045), a verdict needs the provider's reference, and another business's
+  screening does not count. Only CLEAR permits a payment.
+- **Controls evidence** per payment, JSON and PDF, for this business only
+  (another's reads as 404). It carries masked data only and is checked for
+  secret, signature, sealed, salt and account-number fields before it is
+  served.
+- **Review fixes (p2-4.6).** High: the screening was kept but nothing in
+  the money path read it, so a BLOCK or unscreened address could be paid.
+  Now a wallet payment, the owners' payment of an open intent and an
+  owner's second approval are opened only for a fresh CLEAR (BLOCK 403;
+  REVIEW, unscreened or no answer 409; a CLEAR older than 24 hours is
+  screened again or refused), and the check runs again before every
+  signature. High: an exchange payment could be signed and sent with no
+  Travel Rule message, or after Sumsub rejected it. Now it is not signed
+  until the message is with the provider; on hold holds, rejected refuses;
+  an address screened as an exchange's counts as one whatever kind the
+  payment names. Medium: a database failure while applying a KYB verdict
+  was acknowledged as a refused transition and the verdict lost; only
+  `KybTransitionError` is acknowledged now, anything else releases the
+  delivery. Medium: one provider reference covering two addresses returned
+  the first address's screening for the second; the key is per address
+  (0046) and the sanctions list's reference names the address. Medium: the
+  evidence listed today's screenings and KYB case as if they applied at
+  payment time; it now splits screenings at the approving signature, and
+  says when no CLEAR came before, when the KYB case changed after, and when
+  an exchange payment has no Travel Rule message. Medium: two callers could
+  both send a Travel Rule message and a lost answer left it stuck; a
+  compare-and-set claims the send, a duplicate is held `unconfirmed` until
+  Sumsub's webhook names it, two saved recipients at one address are
+  refused, and one deposit address keeps one exchange. Low: the originator
+  is the KYB case's name and number and needs an approved KYB; the evidence
+  refuses account-shaped values and more account keys, and copies partner
+  fee lines field by field; production refuses SHA-1 webhooks unless
+  `SUMSUB_WEBHOOK_ALLOW_SHA1`; only an owner opens a KYB session.
+- **Second pass (p2-4.6, 26 Oct).** Medium: a screening or Travel Rule
+  message the sandbox wrote was taken as the provider's in production when
+  it was already on file (a non-production server writing to the same
+  database): a sandbox CLEAR opened and signed a payment, sent a Travel Rule
+  message, and cleared a held deposit once its source was proven; a sandbox
+  Travel Rule message let an exchange payment be signed. Now a verdict
+  counts only with the provider's reference and time and never the
+  sandbox's in production (`isProviderAnswer`): the address is screened
+  again or the payment refused, the deposit stays held, and production keeps
+  no sandbox verdict; a sandbox BLOCK still blocks. Medium: a cross-chain
+  payment's CCTP receipt was opened without reading the destination
+  address's screening. It now needs this business's fresh CLEAR of that
+  address on its own chain (`crossChainRecipientGate`). Low: the evidence of
+  a cross-chain payment lists the destination address's screenings and
+  names a missing CLEAR before approval; in production it names a sandbox
+  screening or Travel Rule message as not the provider's. Test:
+  `tests/compliance-provider-answers.test.mjs`.
+- **Third pass (p2-4.6 review, 26 Oct).** High: a Solana cross-chain
+  recipient was screened by its USDC token account only, never by the
+  wallet that owns it (read on chain and kept as `destination_token_owner`,
+  but never screened). Sanctions and KYT lists name wallets, so the token
+  account of a listed wallet screened CLEAR, was saved, and passed the
+  cross-chain gate; CCTP would then mint to it, which cannot be undone. Now
+  the owner wallet is screened on save and when the payment is opened
+  (`crossChainDestinationGate`): both must be fresh CLEARs, a BLOCK on
+  either decides, and a Solana recipient with no owner on file is not paid.
+  The evidence lists the owner's screenings (`cross_chain_recipient_owner`)
+  and names a missing CLEAR. Medium: in production, a sandbox Travel Rule
+  message on file held the payment with "send it through the provider",
+  but that send was refused (`travel_rule_conflict`) and the payment could
+  never be signed. A send through the live provider now replaces the
+  sandbox row in one compare-and-set, under a new id so the sandbox's late
+  answer cannot land on it. Low: a retry of an opened cross-chain receipt
+  is screened again (the receipt is kept, the refusal reported); the
+  deposit and recipient handling of a sandbox BLOCK is written down; and
+  the production-only sandbox rule rests on `NODE_ENV` alone, now a line on
+  the mainnet checklist (docs/v2/phase2-business-wallet.md, Mainnet). Open:
+  the cross-chain signing check (still to be built; it must call
+  `crossChainDestinationGate`); nothing in code detects a non-production
+  process on the production database.
+- **Open:** supplier name screening (the recipient screening on save and
+  the exchange taken from the recipient record are closed by §4.7, above);
+  a staff member's own in-limit rule payment
+  (now built, and screened before it is opened and before each signature; a staff
+  member who builds a payment alone, without Splash's backend, is still not
+  screened by Splash); an owner override of a
+  Travel Rule hold (not built: compliance to decide); checking Elliptic's and Sumsub's shapes against
+  the contracted sandboxes; who is the originating party for Travel Rule
+  purposes when the sender is the business's own self-hosted wallet
+  (counsel).
+
+## v2 Phase 2 §4.5 — payout partners behind one interface — 2026-10-25
+
+Design: `docs/v2/phase2-payout-partners.md`. Tests:
+`tests/payout-partners.test.mjs`, `tests/partner-payouts.test.mjs`.
+
+- **One interface, four routes.** `pdax` (PH), `durianpay` (ID, with its
+  exchange partner), `hata_fiuu` (MY own bank) and `cctp_wallet` (USDC to
+  another chain over CCTP V2) each have quote, createPayout (keyed by the
+  intent id), status, handleWebhook and returnOrReverse. The sandbox runs
+  outside production only; in production each refuses without its
+  credentials and, with them, until its API is wired. `cctp_wallet` refuses
+  in production with credentials too: no bridge adapter is registered on
+  chain, so no cross-chain intent can settle.
+- **A failed payout's USDC is asked back until the partner accepts.** Each
+  ask is counted on the row and the acceptance time kept (0044); the sweep
+  asks again every run while it is owed and alerts ops once after five
+  asks. A signed event Splash does not know is acknowledged, changes
+  nothing, and is kept (id, type, status, cut short; no body) in
+  `payout_partner_unknown_events` with an ALERT on its first delivery.
+- **Fixed before this section:** `lib/server/pdax.ts` chose its mock
+  whenever `PDAX_API_KEY` was unset, in production too, and the mock made a
+  `DEMO_PDAX_…` payout reference. The v1 sweep could therefore record a
+  fabricated payout in production. The selection is now the runtime mode
+  alone; the v1 sweep refuses in production and names a `sandbox_pdax_…`
+  reference outside it. The quote engine's partner fee comes from the same
+  adapter and is null in production until the partner quotes.
+- **Supplier payouts ride the withdrawal rails.** The same composed PTB
+  (kind 4, straight to the business's verified deposit address with that
+  partner, one per business per partner), the same instruction before
+  money, the same digest-after-settlement check, webhooks, return rules,
+  unique indexes and sweep. The owners sign under `partner_payout` and are
+  shown the supplier; the server re-checks the account and holder before
+  every signature.
+- **The supplier's account.** Stored only when the bank's own holder name
+  is the name given; the business's own name is refused (that is a
+  withdrawal). The account, the salt and the supplier's ISO 20022 party
+  (structured address, registration number) are sealed, bound to the org
+  and row. A supplier and an own account are never paid through each
+  other's path.
+- **ISO 20022.** Every bank instruction carries a pacs.008-style message
+  built from the very account the intent commits to; each adapter refuses
+  one that names another intent, amount, account, holder, bank, deposit,
+  commitment or purpose. The row keeps the masked evidence form only (last
+  four digits; town and country of the address). A supplier payout needs
+  the payer's KYB profile complete (`originator_incomplete` otherwise).
+- **Review fixes (p2-4.5).** High: a staff draft of kind 4 (or any kind)
+  to the business's partner deposit address could be accepted by an owner
+  and paid as a plain `wallet_payment`, with no instruction to the partner
+  first. Now a bank payout, or any payment to a partner deposit address of
+  the business, is refused with `use_payout_route` in
+  `requestWalletPayment`, `requestOpenIntentPayment`, the ask and accept
+  paths, and the `wallet_payment` shape check. Medium: a name with `&` or
+  an accented letter blocked every withdrawal (`bad_iso20022`): the CBPR+
+  extended characters are accepted and the business's own text is
+  transliterated and flagged. Medium: nothing wrote the registered address
+  a supplier payout's originator needs: the owner's profile save takes the
+  structured address. Low: a spending rule binds only this business's own
+  verified bank accounts, each to its own partner's deposit address; the
+  adapter check also binds the settlement amount, rate, minimum, debtor and
+  charges; registration numbers are masked in the stored evidence and
+  viewers do not read payouts; the dev sweep quotes by currency; each
+  sandbox route has its own webhook secret.
+- **Open:** name screening of a supplier (§4.6); the live partner APIs;
+  Circle's fee API and the bridge adapter for `cctp_wallet`. A staff member
+  holding a spending rule that binds a beneficiary can still open and pay a
+  kind 4 intent from their own device under that rule (Move permits it);
+  Splash does not build or sponsor that path, and the partner gets no
+  instruction for it, so bind beneficiaries in rules only once a staff
+  payout route exists.
+
+## v2 Phase 2 §4.4 — withdrawals to the business's own bank — 2026-10-25
+
+Design: `docs/v2/phase2-withdrawals.md`. Tests: `tests/withdrawals.test.mjs`.
+
+- **No Splash account on the path (D3).** MYR goes business wallet → the
+  business's own deposit address at Hata → Fiuu → the business's bank. The
+  USDC leaves in the canonical composed PTB (open, pay, anchor, delete),
+  kind 4, signed by the owners' multisig. A deposit address that is a Splash
+  address (operator, sponsor, treasury, test recipient, and FeeConfig's fee
+  recipient and pending recipient read live, failing closed), the wallet
+  itself, another business's wallet or another business's address is
+  refused. A return goes to the business wallet only. It counts only when
+  the chain shows it sent by the deposit address into the wallet, in a
+  later checkpoint than the payout's own deposit. Every return digest,
+  short or whole, is claimed once in `withdrawal_returns` (primary key) for
+  one withdrawal or supplier payout; the returned amount is the sum of its
+  claims, it closes the payout only when the sum is exactly the amount
+  sent, and a return that would pass the amount is refused for ops
+  (`return_over`). A short sum is held failed for review, and the partner
+  is asked for the rest. A return with no failure reported first (the
+  partner did not pay out) is taken the same way, from sent or partner
+  received.
+- **Own account only.** A destination is stored only when the name given
+  and the bank's own holder name (the partner's name enquiry) both match
+  the registered legal name, and that name counts only once KYB verified it
+  (kyb_status basic or full). Only an owner may set it, and it is fixed once
+  KYB is under way; a change before that revokes every bank account and
+  cancels withdrawals not yet sent. The trading name is not accepted.
+  Names fold case, punctuation, Latin accents and legal suffixes only;
+  letters of other scripts are compared, not dropped. The
+  account number and the beneficiary salt are AES-256-GCM sealed under
+  `WITHDRAWAL_ACCOUNT_KEY` (rotatable through
+  `WITHDRAWAL_ACCOUNT_KEY_PREVIOUS`), bound to the org and the row. Views
+  and the trail carry the last four digits only.
+- **Deposit address verified once.** A 1 USDC test deposit is signed by the
+  owners (`partner_test_deposit`, bound to that address and amount). The
+  address is verified only when the partner's signed confirmation names that
+  digest and the chain shows that amount from the wallet. A spending rule
+  binds a beneficiary only to a verified address.
+- **Instruction before money, bound to the intent.** The partner is told
+  first. The instruction is keyed by the intent id derived from the payment
+  reference and by the expected amount. It is built from the sealed account
+  only after its commitment is recomputed and matches the intent's
+  `beneficiary_ref` (`beneficiary_mismatch` otherwise). The owners' request
+  (`withdrawal`) accepts only a kind 4 payout to that address, for that
+  beneficiary and amount. It carries the bank code, last four digits,
+  holder, receive amounts, rate and deadline the signers are shown, and the
+  server checks them against the stored account before every signature
+  (`withdrawal_changed`). Removing the account cancels its withdrawals not
+  yet sent. When the request cannot be opened, closes unsigned, or the
+  partner's answer to the instruction is lost, the instruction is reversed.
+  The partner gets the beneficiary salt, so it can check `beneficiary_ref`
+  against the account it pays.
+- **The intent id.** Production requires `SPLASH_CORE_ORIGINAL_PACKAGE_ID`
+  (no fallback). Two Move tests pin the derivation. The digest is posted to
+  the partner only after the executed transaction's `IntentCreated` event
+  names the instructed intent id; a mismatch is held and alerted, never
+  posted.
+- **The signing window.** `settle_by` is the 24-hour signing deadline, not
+  the 5-minute quote. The partner is told the least the account must
+  receive; below it, it returns the USDC.
+- **Quote and fee.** The quote is given only once the wallet holds principal
+  plus fee outside holds. A worse rate (`quote_changed`), a fee above the one
+  shown (`fee_above_shown`) or a fee over the 1% ceiling is refused. Partner
+  fees are their own lines. Splash's fee is the chain's kind 4 fee, bounded
+  by `max_fee`. A quote whose partner fees leave the bank nothing
+  (`below_partner_fees`) and an accepted receive amount of 0
+  (`nothing_received`) are refused before anything is stored or instructed.
+- **Webhooks.** The raw body's HMAC is checked first, inside a 5-minute
+  window. Each event id counts once. An event must match the intent id and
+  the partner's reference. Statuses never regress.
+- **Idempotency.** Unique client key, intent id, payment reference, partner
+  reference and Sui digest. A key reused for another request is refused.
+- **Fail closed.** The partner is a sandbox outside production only
+  (`isProductionRuntime`; `USE_MOCK_APIS` does not bring it back). In
+  production it refuses without credentials and, until the API is wired,
+  with them. Outside production the sandbox still refuses on a server
+  pointed at mainnet. The sandbox webhook secret is random, at least 32
+  characters, with no fallback.
+- **Tenant isolation.** Routes sit behind `walletRoute` (session org).
+  Owners alone change bank accounts and the deposit address; a staff member
+  may ask for a withdrawal, which only the owners' quorum signs. Every store
+  call takes the org; the sweep (`/api/cron/withdrawals`, `CRON_SECRET`)
+  acts on each row within its own org. Reads never call the partner.
+  Another org's ids read as 404.
+- **Open:** the live Hata and Fiuu APIs and their webhook payloads; no
+  reconciliation of `paid_out` against bank evidence yet. (The sweep,
+  `/api/cron/withdrawals`, posts unposted digests; reads never do. Key
+  rotation is through `WITHDRAWAL_ACCOUNT_KEY_PREVIOUS`.)
+
+## v2 Phase 2 §4.3 — funding the Business Splash Wallet — 2026-10-25
+
+Design: `docs/v2/phase2-funding.md`.
+
+- **One destination.** Every channel (funding partner, any Sui wallet, CCTP
+  V2, swap routes) delivers to the wallet the business's `BusinessAccount`
+  names on chain, read per request; the request never names it, and an
+  address Splash controls is refused as destination and as source (D1, D3).
+  The Phase 1 mainnet refusals on the old deposit-address path are unchanged.
+- **Arrivals come from the chain.** A deposit is recorded from a transaction's
+  balance changes to the business wallet, by digest, once per transaction and
+  coin (unique index). A webhook or a request can name a digest, never an
+  amount.
+- **Screened on arrival, held when unverified.** Every deposit's origin is
+  screened (`lib/compliance/kyt.ts`); a sanctions hit is blocked for good; an
+  unknown, unverified, first-use-failed or mismatched source, or no verdict,
+  holds it. Splash builds no wallet payment that would spend held or blocked
+  USDC (`funds_on_hold`).
+- **Sources.** A bank account or card only in the company's registered name;
+  no full account or card number stored. A wallet is proven by a single-use,
+  15-minute signed message naming the business, chain, address and nonce.
+  First use is checked once.
+- **Quote first; peg guard.** A fresh quote below the accepted one is refused.
+  USDT / USDsui convert only within 30 bps (`peg_monitor`'s tolerance) on the
+  coin's own DeepBook pool; no reading refuses.
+- **Fail closed.** Partners, routes and Elliptic are sandboxes outside
+  production and refuse in production (without credentials, and until their
+  APIs are wired, with them). No verdict without a provider's answer.
+- **Webhooks.** HMAC over the raw body, 5-minute replay window, matched by
+  intent id and the partner's order reference, once per event id, no status
+  regressions.
+- **Tenant isolation.** Every route behind `walletRoute` (session org,
+  `requireSessionAccount`); every store call takes the org; another org's
+  ids read as 404. Owners alone change funding sources; viewers only read.
+- **Open:** live partner, route and Elliptic APIs; the conversion signing
+  request; EVM wallet proofs; holds do not bind a staff member's own
+  allowance spend.
+
+### Independent review of §4.3 — 2026-10-25
+
+Regression tests: `tests/wallet-funding-review.test.mjs` (red commit first),
+plus the second-approval case in `tests/spend-rules.test.mjs`. Migration
+`0039_wallet_funding_review`.
+
+| # | Severity | Finding | Status |
+|---|---|---|---|
+| F-1 | Critical | A CCTP mint credited the whole transaction's USDC inflow to the verified burner, so USDC a sanctioned relayer added in the same PTB cleared. **Fixed**: `cctpMint` credits the burner only from exactly one Circle `MessageReceived`, only when the burn's `mintRecipient` is the wallet, and only up to `amount - feeExecuted`; the rest is a separate `remainder` deposit attributed to the transaction sender and screened as the sender's. Two mints, another recipient or an unreadable body credit no burner. | Fixed |
+| F-2 | High | Holds failed open: a deposit nobody reported counted as spendable. **Fixed**: a deposit watcher (`syncWalletDeposits`) reads every transaction that touched the wallet (Sui GraphQL, oldest first, cursor and net USDC in `wallet_deposit_sync`) and records each arrival, screened and held or cleared. Before a payment, `walletFundsWithheld` runs it and withholds held + blocked USDC plus any balance beyond the net the watcher has seen; if the watcher cannot read the chain, no payment is built (`holds_unreadable`). | Fixed |
+| F-3 | High | Rotation moved held funds to an address with no holds, and the owners' second approval was built over held funds. **Fixed**: holds count by business, not address; the rotation transfer (sender = an earlier wallet of the business) is refused as a deposit (`own_wallet_transfer`) and only counted in the watcher's net; `openSecondApproval` runs the same hold check (`fundsOnHold`) as wallet and open-intent payments. | Fixed |
+| F-4 | High | Sandbox webhooks verified with a public fallback secret on any non-production deployment, and the order reference was the intent id's hash. **Fixed**: no fallback; a sandbox webhook needs `FUNDING_SANDBOX_WEBHOOKS_ENABLED=true` and a random `FUNDING_SANDBOX_WEBHOOK_SECRET` of at least 32 characters; the reference is an HMAC under a per-process key. | Fixed |
+| F-5 | Medium | Any deposit, dust or held, made a top-up `arrived`. **Fixed**: `arrived` only when cleared USDC for the top-up covers its quote's floor; otherwise `arriving`. A wallet top-up that named a source accepts only that source's money (`not_from_named_source`). | Fixed |
+| F-6 | Medium | Partner deliveries were not tied to the partner's address or the order amount. **Fixed**: a provider-channel deposit needs the transaction sender to be one of `FUNDING_PROVIDER_<ID>_SUI_SENDERS` (none configured, none accepted: `not_partner_delivery`); a webhook re-reads an earlier row only when it is held, was first read as a plain transfer or this partner's delivery, and covers the order. | Fixed |
+| F-7 | Medium | Bank fingerprints were unsalted SHA-256 of low-entropy data. **Fixed**: HMAC-SHA256 under `FUNDING_SOURCE_FINGERPRINT_KEY` (previous keys still matched); without a key no bank account is added. Partners report the paying account itself; Splash keys it on receipt and keeps neither number nor body. | Fixed |
+| F-8 | Low | Circle's event was matched by the emitting package, which on testnet is TokenMessengerMinter, so real mints were missed. **Fixed**: matched by the event type's original package and `receive_message::MessageReceived`, read from testnet. | Fixed |
+| F-9 | Low | The accepted quote was optional, USDT variants skipped the peg guard, slippage was not part of the idempotent request. **Fixed** (`accepted_quote_required`; any symbol naming USDT is guarded; slippage and the accepted floor are in the fingerprint). | Fixed |
+| F-10 | Low | Source changes left no trail; revocation was permanent. **Fixed**: append-only `funding_source_events` (trigger refuses UPDATE/DELETE); a revoked source can be added again as a new pending row. | Fixed |
+| — | Missing | With Elliptic and Chainalysis both set, Chainalysis's CLEAR was taken as the verdict. **Fixed**: Elliptic decides; a sanctions listing still blocks. | Fixed |
+| F-11 | High | (Second pass.) USDC beside a Circle mint that credits nobody (two mints, an unreadable body, another recipient) was attributed to the transaction sender alone, so the business's own proven wallet relaying two mints cleared them with neither burner screened. **Fixed**: that USDC is held as `mint_unattributable`, whoever sent it, and a recheck keeps the hold. | Fixed |
+| F-12 | High | (Second pass.) A watcher run that stopped at its page limit left the balance minus recorded holds spendable, although transactions beyond the pages read were unscreened (an arrival and a later outflow cancel out in the net). **Fixed**: until a run reaches the newest transaction, `walletFundsWithheld` withholds the whole balance; the next run reads on. | Fixed |
+
+A CCTP relayer (the transaction sender of a pure mint) is recorded but not
+screened against the minted part: `destinationCaller` is zero, so anyone can
+relay a business's mint, and blocking the business's own money for the
+relayer's listing would let any sanctioned address freeze it. What the
+relayer adds is the remainder, screened as theirs.
+
+## v2 Phase 2 §4.1 — the Business Splash Wallet backend — 2026-10-25
+
+Design: `docs/v2/phase2-business-wallet.md`.
+
+- **Signers sign exactly what they see (review B10).** A signature request
+  stores the exact transaction bytes and their digest. What a signer is shown
+  (payee, amount, asset, fee bound, quote deadline, new wallet members) is
+  decoded from those bytes on the server (`lib/wallet/wallet-tx-describe.ts`),
+  never from client state, and the same decoder runs on a signer's device.
+  A partial signature is accepted only if it verifies over the stored bytes
+  under that signer's own key, with the digest the signer reviewed. Tampered
+  bytes, a borrowed key and a replayed signature all fail there.
+- **The reader is also a refusal.** A wallet transaction may contain only the
+  v2 core wallet and payment calls and the plain USDC balance calls. Every
+  `0x2::address_alias` call, any other package, gas-coin use, a withdrawal
+  from the sponsor's or an allowance's balance, and any object other than the
+  org's own account and the configured config objects are refused before
+  anything is stored or signed.
+- **An existing intent is paid only as read from the chain.** Its bytes name
+  just an object id, so the reader refuses it unless the server read the
+  intent first and bound its payee, principal, rate, expiry and asset into
+  the request; the withdrawal must be exactly principal plus max_fee, and
+  every signer is shown the payee and amount.
+- **The signer's device decodes the bytes itself** (`lib/wallet/review-on-device.ts`)
+  and checks their digest and hash; the transaction code compared with
+  WhatsApp is 16 hex characters (64 bits).
+- **Partial signatures** live in Postgres only while a request collects or is
+  being submitted, and are cleared in the statement that closes it (executed,
+  failed, expired, cancelled) or marks its outcome unknown. Requests last at
+  most 24 hours and never past a payment's quote. Nothing logs a signature.
+- **No answer is not a failure.** A submission the network did not confirm is
+  `unknown`: it keeps its digest and dedupe key until the cron reads the
+  digest on chain, or its ValidDuring window passes, so a transaction that
+  landed is never recorded as failed and nothing like it is asked for twice.
+  A submission stuck past a 5-minute lease is reconciled the same way.
+- **No single-key veto.** Only the requester withdraws a request; another
+  signer declines, and the request stays open for the rest.
+- **The chain is the source of truth** for the founder (the account's
+  `owner`), the owners and the current wallet. Every wallet member is made an
+  on-chain owner in the founder's nomination. An owner without a passkey
+  blocks the wallet until named as excluded; a single-signer wallet with
+  co-owners needs each one's consent to that wallet.
+- **Mainnet is gated in code** (`lib/server/wallet-network-gate.ts`): no
+  wallet request until `WALLET_MAINNET_ENABLED=true` and
+  `WALLET_HARDWARE_CHECK_REF` names the hardware check's evidence; production
+  will not boot with the first and not the second.
+- **Abuse bounds.** Wallet routes are rate-limited per person and per
+  business, and the sponsor pays at most 1 SUI of gas per business per 24
+  hours on top of the 0.05 SUI per-transaction cap.
+- **Simulate before sign.** No request is opened for bytes that do not
+  simulate, and the bytes are simulated again before they are submitted.
+- **Gas.** Plain transfers go gasless. Move calls are sponsored by the
+  operator signer (KMS) from its SUI address balance, with no gas coin in the
+  transaction, a 0.05 SUI budget cap, and the sponsor's own check of the
+  bytes before it signs. The sponsor pays gas and never pays or receives
+  client money (D3). Off unless `WALLET_GAS_SPONSOR=operator`.
+- **Tenant isolation.** Every route takes the org from the session
+  (`requireSessionAccount`); every store read takes the org; another org's
+  request is a 404. The account a wallet transaction names is the org's own
+  `sui_business_account_id`, never the single-tenant fallback.
+- **Who may ask, who signs off (Sky, 25 Oct).** Staff may ask the owners to
+  approve a payment (`wallet_approval_asks`). A payment over the rule cannot
+  be opened on chain (`create_intent` refuses it), so it is asked for as a
+  draft: its shape is checked, the owners are shown from the policy why it
+  came to them, and only the quorum can pay it (`create_for_wallet` +
+  `confirm_from_business_wallet_balance`). An ask about an open intent is
+  only about one the asker opened (its on-chain maker is their passkey
+  address), shown to owners as the chain has it. Asks are accepted or
+  declined only by an owner (claimed first, so two owners open one request)
+  and withdrawn only by the asker; the owners are messaged when one arrives.
+  A staff member's migration of their own USDC needs a
+  passkey-signed sign-off from an owner or a person in charge (an off-chain
+  role an owner grants and revokes), bound to the member, the source wallet,
+  the business wallet, a nonce and a 24-hour expiry; nobody signs off their
+  own. A viewer is never in charge. Migration moves USDC only. Every grant,
+  revocation, sign-off and ask is in `wallet_authority_events`, append-only
+  by trigger; its ids carry no foreign key, so it outlives the users in it,
+  and the routes that write it are rate-limited.
+- **Offboarding.** Removing a membership (a role change included) revokes a
+  person-in-charge appointment and voids every usable sign-off at once.
+  A spending rule lives on chain and still pays until the quorum revokes
+  it, so the index flags every rule whose holder was removed, is a viewer,
+  or is nobody here as `orphaned`, and the owners take them all back in one
+  request (`POST /api/wallet/spending-rules/orphaned`).
+- **Spending rules (§4.2, `docs/v2/phase2-spending-rules.md`).** A rule is
+  an allowance bound to SPLASH_SPEND and named for the business's current
+  policy, plus the staff member's place on it. Giving, changing (revoke +
+  reissue in one transaction), taking back, recipients and limits are all
+  signed by the wallet's quorum; a second approval by one owner who is
+  neither maker nor payer. The reader refuses an allowance for any other
+  app, `allowance::new`, `rotate_spender`, a dangling proposal, a name for
+  another policy, and any policy, allowance or cap the server did not read
+  as this business's. The WALLET tag only for an address with a live
+  ownership proof of this business; withdrawing the proof cancels a waiting
+  request that would tag it. The index rolls each window over as the
+  chain will, so what is shown as left is what the next charge sees. A
+  change or a reissue keeps what was spent: the lifetime cap less
+  `current_spend`, and a window with spending in it honoured until it
+  renews. After a rotation the rules are stale until reissued under the new
+  wallet, once per wallet generation and only for current members.
+- **Gas sponsor (Sky, 25 Oct).** The KMS operator key is the wallet gas
+  sponsor; the cap of 1 SUI per business per 24 hours stands.
+- **Open:** the hardware 2-of-3 passkey check (one approver, Sky, with three
+  of his own authenticators on testnet), the address-alias watcher, zkLogin
+  members, a testnet dry run of a sponsored transaction paying gas from an
+  address balance, routes for new payments (they need the audit bundle and
+  quote the Transfer flow composes), and the Phase 3 signing screen rendering
+  the device's own decoding.
+
+## v2 Phase 1 — business wallets, spending rules, a delayed upgrade — 2026-10-24
+
+Brief: `SPLASH_SUI_V2_PROMPT.md` §3. Design and its two reviews:
+`docs/v2/phase1-move-design.md`. Mainnet gate: `docs/mainnet-checks-2026-10.md`.
+
+### The money paths, after v2
+
+Exactly two paths move a business's funds to a third party.
+
+| Path | Function | Who authorises |
+|---|---|---|
+| The owners' multisig | `payment_intent::confirm_from_business_wallet`, `_balance`, `confirm_cross_chain_from_business_wallet` | The protocol: the business wallet signed the transaction |
+| Spending rules | `splash_spend::pay_intent` (Sui intents only) | An app-bound allowance from the business wallet, plus its `SpendPolicy` |
+
+The unbound path (`create_payment_intent`, `create`, `confirm_payment_intent`)
+is **not in v2 core**. It let any signer, in practice Splash's operator, pay a
+recipient from its own coin, and an additive upgrade policy could never remove
+it again.
+
+**The legacy approval path is not in v2 core either** (Sky, decision 3, 24
+Oct 2026). An earlier revision kept `confirm_with_approval` behind a one-way
+`legacy_enabled` switch. A public function, however firmly closed, can never
+be removed once published, so `create_payment_intent_for_account`,
+`approve_payout`, `confirm_with_approval`, the approver set and the switch are
+not published at all (`tests/legacy-path-removed.test.mjs`).
+
+Both paths pay Splash's fee as their own leg (Amendment A1, below and
+[`docs/v2/fees.md`](docs/v2/fees.md)).
+
+### What v2 enforces on chain
+
+- **Wallet registration.** Only the founder nominates a wallet. The wallet
+  registers itself: the transaction sender must equal the multisig address
+  recomputed in Move from its members, and every member must be an owner.
+  If one member can meet the threshold alone, the founder must have chosen
+  that and the wallet must acknowledge it (D1).
+- **Membership after registration.** The business wallet adds and removes
+  owners and names the recovery party. It may do so under an owner freeze,
+  never under a compliance freeze, and it may remove the founder once the
+  founder no longer signs. There is no per-person approver set in v2 core.
+  Any one owner can still freeze.
+- **Recovery only adds an owner.** If the founder loses their key before
+  `nominate_wallet`, no wallet can ever be registered for that account:
+  nomination is founder-only and the founder anchor never moves. The business
+  applies again (`submit_application`, then KYB). If a wallet's quorum is
+  lost, nobody can rotate it, and an owner freeze it does not lift stays; the
+  business opens a new account. Its funds stay in its own wallet.
+- **Bank-payout floor.** A bank payout must be at least the larger of 99 USDC
+  and `ComplianceConfig.min_settlement_amount`, checked when the intent opens
+  and again when it settles (abort 434). Other kinds have no floor.
+- **Wallet rotation** takes two steps: the current wallet proposes, and the new
+  wallet confirms. `wallet_epoch` goes up, so spending rules made under the old
+  wallet stop paying, even after a rotation back to the same address.
+- **`splash_spend` is immutable.** Nothing in it can rotate a spender or let a
+  permit or a `Balance` escape (`npm run check:spend`, in CI).
+- **Every `SpendPolicy` mutation is signed by the business wallet.** The policy
+  lives outside core, so no core upgrade can reach it. A policy grows (a
+  spender, a recipient, a beneficiary, a higher limit, a shorter running
+  window, a new spending rule) only while it is the account's current one and
+  the account is not frozen. Cutting back is always open.
+- **The second-approval threshold counts a running total** (decision 4). A
+  payment needs an owner's approval when it, with what its payer has already
+  paid that recipient in the current window (24 hours by default, fixed at
+  the first payment) and what the window before still counts, is above the
+  threshold. The total belongs to the payer's address, so removing and
+  re-adding a spender does not reset it.
+- **Partner deposit addresses are paid only as bank payouts** (decision 2).
+  A policy binds each verified beneficiary to one partner deposit address,
+  keeps that address off its recipient list (1067, 1068), and pays it only as
+  a bank payout for a beneficiary bound to it, so the partner can match
+  sender, amount and intent.
+- **Spending rules pay on Sui only.** A cross-chain payment is the owners'
+  multisig alone (`confirm_cross_chain_from_business_wallet`). No spending
+  rule can open, approve or pay one.
+- **Splash's KMS operator is an EXECUTOR.** It cannot open an intent, and it
+  pays only with an approval naming it: an owner's `approve_payout` naming
+  it, or the wallet's `delegate_execution` of an intent the wallet itself
+  opened. Staff cannot hand a payment to it. Each approval names the quote's
+  deadline (`settle_by_ms`) and `max_total`, the principal plus the Splash fee
+  the approver was shown, and dies when the policy removes anything.
+- **One `ComplianceConfig`**, created by consuming a ticket minted once at
+  publish. A PTB cannot pick a laxer config, and each spending policy pins its
+  config's ID (`E_WRONG_CONFIG`, 1028).
+- **Registry additions** (assets, settlement apps, bridge adapters) need
+  `AdminCap` and on-chain proof that the sender is a quorum multisig. Each one
+  gives 24 hours' notice, with every owner alerted, and lapses after 7 days.
+  Removals are immediate. The last asset cannot be removed. "Never by a single
+  key" means what the chain can prove: the sender holds `AdminCap` and is a
+  multisig that no single member can sign for. It does not prove that this is
+  the governance multisig, so the mainnet ceremony checks the registries
+  before the first business onboards (`docs/MAINNET-CHECKLIST.md`). Every
+  accepted asset is assumed to have 6 decimals; nothing on chain checks it,
+  so governance verifies it before proposing an asset.
+- **The upgrade delay.** `splash_core` upgrades additive-only through
+  `splash_upgrade_delay`, which holds the `UpgradeCap`. An upgrade gives 24
+  hours' notice, must be authorised within 7 days of it, and the wrapper itself
+  is immutable.
+- **Idempotency.** A v2 intent's UID is derived from the business's own
+  payment reference, so a second intent for the same reference can never exist.
+- **Bridge obligations name their coin.** A cross-chain settlement cannot keep
+  the business's coin and burn another.
+
+### Splash's fee, on chain (Amendment A1, 24 Oct 2026)
+
+The rules are in [`docs/v2/fees.md`](docs/v2/fees.md). What the chain
+enforces:
+
+- **No intent carries a fee.** The fee is computed at settlement by
+  `fee_config::splash_fee` from the kind the chain derives and the principal.
+  No PTB argument sets a rate.
+- **The kind is derived.** `address_registry::derive_kind` charges a
+  registered business wallet as a Splash business (free) and a partner
+  deposit address as a bank payout. Every settle path refuses a derived kind
+  that does not fit the declared one (1400), except a declared wallet or
+  exchange payment to a business wallet, so a partner address can never be
+  paid as a cheap wallet transfer that skips the bank floor and the
+  beneficiary.
+- **The ceiling is 100 bps.** No schedule rate or discount may exceed it, and
+  every fee is clamped to 1% of the principal. `splash_spend` checks the same
+  ceiling with its own constant on `max_fee` before (1037) and on the fee
+  core charged after (1032), so no core upgrade can make a spending rule pay
+  Splash more. `check:fees` holds the three constants equal.
+- **The payer bounds the fee.** Every money path takes `max_fee`, the fee the
+  payer was shown, and aborts above it (435; 1031 under a rule). An
+  approval's `max_total` bounds principal plus fee (1033). A raised schedule
+  can stop a payment, never make it pay more than it showed.
+- **The fee leg is inside Move.** It is split in core's settle path and sent
+  to `FeeConfig`'s fee recipient, never to an address in the PTB. Every
+  remainder (an overpayment, the unused part of `max_fee`) goes to the
+  business wallet, never to the sender. This replaces the original H-03 fix,
+  which refunded an overpayment to the caller.
+- **Fees are off until governance turns them on.** `FeeConfig` is published
+  with no fee recipient, and while it has none every fee is 0. The recipient
+  is proposed as a multisig's members, weights and threshold, and the address
+  is derived on chain; a multisig any one member can sign for is refused
+  (1304), so it can never be the KMS operator.
+- **Changes give 24 hours' notice and lapse after seven days.** Schedule and
+  recipient changes need `FeeAdminCap`, held by the governance multisig. The
+  only immediate change is a business's discount, at most 100 bps, which only
+  lowers what it pays.
+- **`OpsCap` only classifies.** It adds and removes partner deposit addresses
+  in Splash's registry, at once and with an event. The registry holds no
+  address any payment is sent to, so a stolen `OpsCap` can make a declared
+  bank payout to a removed address abort, or a wallet payment to an added one
+  abort. It cannot redirect funds or raise a fee.
+- **Each `SpendPolicy` pins Splash's `FeeConfig` and `Registry`** (1035,
+  1036), as it pins its `ComplianceConfig`.
+
+### What a freeze does and does not do
+
+A freeze, whether by an owner or by compliance, stops every Splash path:
+intents, the wallet path and staff allowances. **It does not
+and cannot freeze the business's own wallet.** The business holds its keys
+(D1) and can always move its own funds directly. Copy, evidence exports and
+partner material must never describe a freeze as a funds freeze.
+
+Once a wallet is registered, only the wallet lifts an owner freeze, and in the
+same transaction it can remove the owner who pulled it or add a replacement
+owner. Only `AdminCap` lifts a compliance freeze.
+
+### Accepted limits, stated plainly
+
+- **Address aliases.** `address_aliases` is on mainnet, and Move cannot see
+  whether a multisig has aliased itself to a single key. A wallet whose quorum
+  signs `0x2::address_alias` hands that key the wallet. The wallet transaction
+  builder refuses alias commands, and a watcher alerts if an alias object
+  appears for a wallet, the governance multisig or the operator (Phase 2).
+- **What an additive core upgrade can still do.** It could add a function that
+  writes an intent's fields, and so make a spender pay a verified recipient
+  twice, within caps. It can also change what core keeps: the tier ceilings,
+  the KYB flag and the freeze flags. It cannot change a spending rule
+  (spenders, recipients, beneficiaries, the policy's limits), point a policy
+  at another config, or create an allowance. This is why every proposal
+  alerts every owner 24 hours ahead. The alert gives the bytecode digest, the
+  upgrade policy and the eta; nothing rebuilds the source to show what
+  changes. An added `fee_config` function could rewrite the real
+  `FeeConfig`, its fee recipient for example; a rule payment is still bounded
+  by `splash_spend`'s own 1% ceiling, and an owners' payment by its
+  `max_fee`.
+- **Fee proposals reach every owner (Phase 2).** The governance alert cron
+  also reads the canonical `FeeConfig` (`SPLASH_FEE_CONFIG_ID`, typed
+  `<core original>::fee_config::FeeConfig`, shared), by its state, not the
+  event feed: each pending schedule slot (`FeeScheduleProposed`) and the
+  pending fee recipient (`FeeRecipientProposed`) is an alert to every owner
+  in the app, by email and on a verified WhatsApp number, with the proposed
+  schedule against the one in force, or the new recipient; a schedule or
+  recipient that took effect is told against the stored state. A withdrawn
+  or lapsed proposal stops being shown; the withdrawal itself is not a
+  separate message. A `FeeConfig` that is missing, of another type or not
+  shared answers 502 and pages a person. Discounts (`set_discount`) only
+  lower a fee and are not alerted. Without `SPLASH_FEE_CONFIG_ID` the cron
+  does not run at all.
+- **The fee is outside the principal's limits.** Tier ceilings and a
+  policy's limits and threshold count the principal; Splash's fee, at most
+  1%, comes on top. The allowance's caps count principal plus `max_fee`.
+- **Owners choose a recipient's tag.** An owner can tag an exchange's address
+  as a wallet and pay 2 bps instead of 5 to 15 (accepted in A1). Phase 2 KYT
+  attribution is to flag it.
+- **Fixed windows.** Allowance rate limits are fixed windows, so a limit can
+  move twice its size across a window boundary.
+- **Split payments.** The threshold now applies to a running total per payer
+  and recipient (above), so one spender splitting one invoice needs an
+  approval for the part over it. What remains: a split across several
+  spenders, each under the threshold, which the Phase 2 near-threshold
+  alert flags to the owners (detective only: `lib/server/near-threshold.ts`,
+  `/api/cron/spend-rule-alerts`, which also flags one spender paying one
+  recipient repeatedly at 80% or more of the threshold); and, with a fixed window, the
+  allowance's own rate limit can still move twice its size across a window
+  boundary. The allowance's own caps and the account's tier ceilings still
+  bound what moves.
+- **Bank payouts.** The chain proves the funds reached the partner deposit
+  address bound to a verified beneficiary. The partner then pays the bank
+  account in the instruction; Phase 2 recomputes the beneficiary commitment
+  from that instruction and refuses to send it if they differ. A partner
+  address receives nothing under a rule but bank payouts for its bound
+  beneficiaries. Several beneficiaries bound to one partner address keep
+  separate totals, so the Phase 2 partner payout-instruction API (keyed by
+  the intent id) must build each instruction strictly from the intent's
+  `beneficiary_ref`.
+- **Partner deposit model.** Decided by Sky (decision 2): fixed per business
+  per partner, verified once by a test deposit, bound by the wallet. Which
+  networks each partner deposits on is still a per-partner question
+  (`docs/mainnet-checks-2026-10.md`).
+
+### Decided by Sky (24 Oct 2026)
+
+- **The audit-anchor fee address.** It was open here: the stablecoin lane's
+  optional fee leg paid `SPLASH_FEE_ADDRESS_MAINNET`, a single address from
+  the environment, and review item B1 rates any Splash-owned receiving
+  address in a payout transaction as Critical. Amendment A1 decides it. On
+  the v2 settle paths the fee is computed and split inside Move to
+  `FeeConfig`'s fee recipient, a proven multisig changed only after 24
+  hours' notice. The Send USDC desk, a plain wallet transfer, charges the
+  WALLET schedule's fee only when `STABLECOIN_ANCHOR_FEE=on` (off by default)
+  and pays that same recipient, read from the mainnet `FeeConfig`; nothing is
+  charged while `FeeConfig` has none. `SPLASH_FEE_ADDRESS_MAINNET` is
+  retired. On that desk the fee leg is built by the server from the
+  `FeeConfig` it read, not split in Move.
+- **No penalty or late fees.** Splash is not a party to the supplier's
+  invoice, so none exists.
+
+## v2 Phase 3 — Team, the Finance lead, and who may Add funds and Withdraw — 2026-10-31
+
+The business's owners run their team, not Splash support
+(`docs/v2/phase3-team-roles.md`). What the code holds to:
+
+- **Default deny, one place.** Adding, changing and removing people, the
+  Finance lead and Add funds / Withdraw access are decided in
+  `lib/server/team-admin.ts` only. A caller who is not an owner or the
+  Finance lead is refused on every function before anything is read. The
+  routes (`app/api/team/**`) share one gate (`lib/server/team-route.ts`): the
+  business and the actor are the session's, never a field of the request, and
+  `tests/team-routes.test.mjs` fails if any other file calls a team-changing
+  function. Changes are rate limited per person and per business.
+- **The Finance lead is not a role.** It is an appointment on a membership (one
+  open row per business, a partial unique index), valid only while the person is
+  still an approver of the business. `memberships.role` gained no value, so every
+  `role === 'admin'` check means owner and the lead fails each. The lead can add,
+  change and remove viewers, staff and approvers; they cannot give the owner
+  role, touch an owner, appoint or take back the role, change or remove
+  themselves, grant or take away Add funds or Withdraw, or change anything on the
+  wallet beyond starting a request to add a signer. That request is signed by
+  the wallet's signers; the lead, who is not one, is refused `not_a_signer`. No
+  Move code changed.
+- **A business always has an owner.** Nobody changes or removes themselves; only
+  another owner can. That alone is not enough when two owners act on each other
+  at the same moment, so changing or removing a member runs in one transaction
+  that first locks the business's owner rows, reads again, and refuses a change
+  that would leave no owner (409 `last_owner`). Splash support's `revokeRole`
+  takes the same lock and refuses to remove a business's only owner.
+  `tests/team-roles-hardening.test.mjs` runs two owners demoting, removing and
+  mixing against each other. The in-process test database serialises
+  transactions, so the tests prove the rule and the rollback; it is the row
+  lock (`SELECT ... FOR UPDATE` on the owner rows) that protects a deployment
+  with several connections. A person who belongs to
+  another business, has no account or has not verified their email cannot be
+  added, and the answer is the same for all three, so the form tells no one who
+  has an account. The owner chooses how to add someone: directly (no step on the
+  person's side, so the owner confirms they have the right person and the route
+  refuses without it) or by invitation, below.
+- **Add funds and Withdraw are granted.** Owners have both; a staff member or
+  approver only with an owner's grant, kind by kind; a viewer never. Read from
+  the database on each request for the session's person and business, and a
+  stale row for a viewer or a person who left grants nothing. The old rule let
+  any non-viewer add funds and any staff member ask for a withdrawal. A top-up's
+  details are read only with Add funds; the funding options and the deposit
+  history are the wallet's record and are shown to every member who can read
+  the wallet. Sending USDC to the wallet from any wallet is unchanged and still
+  screened and held.
+- **What ends with a person.** A removal ends their place in charge, the
+  Finance lead role, their access grants and usable sign-offs, writes a
+  `member_offboarded` line, and records their passkey addresses so a spending
+  rule they hold shows as orphaned. A move to viewer or owner ends the same
+  holds but is a role change: no offboarding line and no orphaned-spender row,
+  because the person is still here and their rule already reads as a viewer's
+  (or an owner's) until the owners' quorum changes it. A viewer who holds a
+  passkey and a spending rule can still pay inside that rule on the chain; the
+  dialog and the Finance lead words say so. The Finance lead cannot end any of
+  that by moving or removing the person who holds it: someone in charge or
+  holding Add funds or Withdraw is an owner's to move. The change and its
+  clean-up commit together or not at all. Removing someone from the team does
+  not remove an owner from the multisig; a change of signers, signed by the
+  quorum, does.
+- **The trail.** Every grant, change and removal is a line in the append-only
+  `wallet_authority_events` (seven new actions, migration 0066), with the actor,
+  the person and the old and new role. Splash support's grant is a line under
+  `operator:<email>`. A retry writes nothing; two at once make one change.
+- **Invitations (1 Nov).** An owner, or the Finance lead for a role below owner,
+  invites an email; the person sees it after signing in and accepts or
+  declines, it ends 7 days after it was sent (to the millisecond), and its
+  sender can withdraw it. **There is no token, link or code**: the signed-in
+  account's own verified email finds the invitation, so there is nothing to put
+  in a URL or log or to replay (`team_invitations` has no such column, and a
+  test fails if the invitation code reads a token or a query string). The id is
+  random and grants nothing: for anyone else it reads as "not found". An
+  unverified account is shown nothing. Any email may be invited and the sender
+  hears the same whatever the address is, so inviting reveals no account or
+  business; a person already on a business is told plainly, naming none, and
+  can only decline. Accepting twice, declining twice and sending twice change
+  nothing and write one line; two businesses accepting at once leave one
+  membership. An invitation whose sender no longer manages the team is closed
+  on the trail, not honoured. The trail keeps a masked address only, because a
+  line can never be deleted. Routes: the business and sender are the session's
+  (`teamRoute`), the answering routes use a gate that needs a signed-in account
+  and nothing else (`inviteeRoute`, refusing with no database), every change is
+  rate limited, and `tests/team-routes.test.mjs` fails if anything else calls
+  the new functions.
+- **The invitation email (2 Nov; Sky's decision of 1 Nov).** The invited person
+  is also emailed, through Resend (`lib/server/invitation-email.ts`, migration
+  0082). What it does: tells a named person that a named inviter asked them to
+  join a named business, that it is open for 7 days, and links to one page. What
+  it does NOT do: it carries no token and grants nothing. The link is the app
+  address plus the invitation's id; opening it requires sign-in, shows the
+  invitation only to the account whose verified email it was sent to (anyone
+  else, and an unknown id, read the same "not found"), and accepts nothing; Accept
+  is a button. A forwarded or over-the-shoulder email therefore cannot be used to
+  join. It holds no amount, no other business and no other person, escapes every
+  inserted value (a name cannot add a header line or markup), and has no image,
+  so no tracking pixel. The send is claimed with one UPDATE on the invitation,
+  so a retry, a double click or two owners send once, and the provider gets an
+  idempotency key. A failed send never loses the invitation and is shown to the
+  owner in plain words with an owner-only "Send the email again" (one send per
+  click, never for a sent, ended or withdrawn invitation, other businesses'
+  invitations read as absent). With no real sender set up, or no link production
+  would allow, nothing is sent and the owner is told so in an alert; a console
+  sender never counts as sent. Logs hold the invitation's id and the kind of
+  failure, never the key, address or link. Splash sends this from its own
+  address with an owner's own words in it, so the inviter's and the business's
+  names are stripped of anything a mail client would link (web addresses, other
+  schemes, bare domains, email addresses, numeric hosts, in look-alike forms too)
+  and of invisible characters: the only link in the email is the invitation's.
+  A send whose outcome is unknown (a timeout, a lost connection, a server error)
+  stays "sending" and is retried with the same provider key, so it cannot become
+  a second email. No per-sender invitation limit exists for now; it is to be
+  revisited before launch. The only brakes left are 25 open invitations per
+  business and the team-change limit (60 an hour per person, 200 per business);
+  they do not stop an owner from inviting, withdrawing and inviting an address
+  again, so this is an abuse path to weigh before launch. Test:
+  `tests/invitation-email.test.mjs`.
+- **Leaving (1 Nov).** Any member can ask to leave; nothing changes until an
+  owner approves. Only an owner decides (review of 2 Nov: a Finance lead's
+  approval ended access but could not take the spending rule back, so it left a
+  live rule behind; the lead now sees requests and decides none). Nobody decides
+  their own request, so an owner's leaving needs another owner, and the only
+  owner cannot ask. Approving ends access, clears every hold and records the
+  person's addresses in one transaction under the owner lock; then the route runs
+  `runLeaveFollowUp`: it opens the existing spending-rules revoke
+  (`revokeOrphanedRules`), which the wallet's owners sign on their own devices,
+  reads whether the person is still one of the business wallet's signers
+  (leaving the team does not remove a signer; a change of signers is a separate
+  request the owners sign, and the answer and the approval dialog say so), and
+  writes both outcomes as one trail line (`leave_follow_up`, migration 0075). A
+  rule that outlives its holder also shows as orphaned on the wallet page and in
+  Settings, so a lost follow-up cannot hide it. The code signs nothing. A
+  declined request tells the person so in words on their own page for 14 days.
+  Every step is a trail line (ten new actions, migrations 0073 and 0075).
+- **One business per person (2 Nov review, High).** Two accepts, or an accept
+  and an add, for one person at the same moment could each pass the "not on a
+  business" check under READ COMMITTED and both commit, putting the person on two
+  businesses (authority resolution picks one by row order). `memberships(user_id)`
+  is now unique (migration 0074), and accepting or adding takes a per-person row
+  lock first (`lockPerson`). PGlite serialises transactions, so the race itself
+  is not reproduced in tests; the constraint, the lock order and the stale-read
+  refusal are. Still to do once: a two-connection run on a real Postgres.
+
+## v2 Phase 3 — Staff payments inside a rule — 2026-11-01
+
+A staff member whose spending rule covers a payment pays it alone, signed by
+their own passkey; anything outside the rule asks the owners
+(`docs/v2/phase3-staff-in-rule.md`). Sky's rule: anyone can fund the wallet,
+but they can only spend what the rule allows, and anything outside the rule
+needs the person in charge. No Move changed. What the code holds to:
+
+- **The rule is checked four times by four things.** The page, the server
+  before it builds (the same function, over a fresh chain read: a stale page
+  cannot claim a rule the chain does not show), the signing layer (the bytes
+  must be exactly open, no second approval, pay under the stored allowance,
+  anchor, delete; sent by the person the rule is for, to the stored payee, for
+  the stored amount and fee bound, drawing exactly amount plus fee), and the
+  chain (`splash_spend::pay_intent` and the allowance).
+- **An allowance withdrawal has one legal use.** The decoder allows a
+  `FundsWithdrawal` from an allowance only as the argument of
+  `splash_spend::pay_intent`, only for the one allowance and funder the
+  server read as that person's (`expect.staffPay`), and only for a request
+  opened with that expectation. `redeem_funds`, a send, another allowance, or
+  any other purpose refuses it.
+- **No second approval can be smuggled in.** The approval slot is an empty
+  `Option<PayoutApproval>` made in the same transaction and used once; a half
+  built or reused one is refused.
+- **No draw outside the rule.** Expired, not started, taken back, over the
+  limit, cap used up, recipient not verified (or an exchange, or verified for
+  another kind), over the threshold, another asset: each is a plain reason.
+  `via: 'rule'` turns it into a refusal with nothing stored; otherwise the
+  owners are asked.
+- **Fail closed.** No chain client for spending rules, an unreadable chain, no
+  gas sponsor, no policy, or a passkey that cannot sign here: nothing is built.
+  There is no stand-in rule, signer or sponsor, in production or out of it.
+- **Replay and races.** The intent id is unique per business; the payment
+  reference is claimed once on chain, and an intent id answers only the person
+  who made the payment (another member, owner or not, gets 409
+  `idempotency_key_reused` and sees nothing of it). The claim and the read of
+  what has already been asked for are one step under an advisory lock per
+  business, so two sends cannot both claim the last of a cap or of a
+  recipient's second-approval amount. Withdrawn, declined, expired and failed
+  requests hold nothing; a claim still being made holds for 15 minutes (a slow
+  bundle upload), then is let go of. The moment a rule is read is taken before
+  the chain is read.
+- **Staff cannot use up the owners' network-fee allowance (found by review,
+  High).** A staff payment is a sponsored transaction opened before anyone
+  signs it, and the business's 1 SUI per 24 hours counts every request. A
+  person holds at most three payments waiting to be signed (`too_many_open`),
+  and staff payments together may use 20% of the day's allowance
+  (`WALLET_SPONSOR_STAFF_SHARE_PERCENT`; past that the owners are asked,
+  `staff_gas_share_used`), so the owners always keep 80% for their own
+  payments. Tested: 45 one-USDC payments no longer lock an owner out.
+- **Funds on hold are never drawn**, and the recipient must be a fresh CLEAR
+  and a wallet the supplier has proven, as for the owners' own payment; the
+  signing layer checks both again before the signature.
+- **Same-recipient splitting across spenders is blocked off chain and
+  detected.** The chain checks the second-approval amount per payer and
+  recipient, so several spenders could each stay under it. The server and the
+  page count every spender's running total to that recipient, and every staff
+  payment still on its way to it, together: the payment that would cross the
+  amount goes to the owners (`above_threshold`). The near-threshold alerts
+  still read these payments (`RuleSpend`, running totals). The Move-level
+  recipient-wide total stays a decision for Sebastian's review (it needs a
+  republish of `splash_spend`).
+- **Open:** no testnet run of the PTB (`pay_intent` with an allowance
+  withdrawal input and an empty `Option<PayoutApproval>`); a passkey's
+  signature on a sponsored single-signer transaction is part of the owed
+  hardware check; an exchange account is not paid under a rule.
+
+## v2 Phase 3 — Batch payouts (brief 5.6) — 2026-10-31
+
+Up to 20 payments in one Sui transaction the owners' multisig signs once
+(`docs/v2/phase3-batch.md`). What the code holds to:
+
+- **A sheet is untrusted data.** A row can only name a recipient this business
+  already saved (or a Splash business by registered name); it can never add a
+  payee, an address or a fee, and text in a cell is never an instruction. The
+  server reviews the rows itself, at creation and again when the signatures are
+  started; a recipient changed, removed or no longer cleared stops the batch.
+- **The bytes are exactly the rows.** `assertPurposeShape('wallet_batch')` refuses
+  a transaction that is not the stored rows' payments in order, each tied to its
+  own withdrawal and intent, with the row's recipient, amount, kind and fee bound.
+  Each owner's device decodes the bytes itself and checks them against the batch
+  that was approved before the passkey is asked.
+- **Every payee is checked before every signature** (`batchBeforeSign`): a fresh
+  provider CLEAR (a sandbox verdict is no answer in production) and the saved
+  recipient's own rule; an exchange, a bank or another chain is never in a batch.
+- **The audit bundle fails closed** in production; no stand-in is anchored.
+- **Idempotent** by the batch's intent id, unique per business; each row's
+  payment reference is its own and unique per business; one key makes one batch
+  and one request.
+- **Tenant isolation** through the session's org on every route; another
+  business's batch, recipient or receipt reads as absent.
+- **Not carried out:** a scheduled batch (`splash_spend`, an executor named by an
+  owner) answers `schedule_not_wired` and schedules nothing. A full 20-payment
+  batch has not been dry-run against the protocol's per-transaction limits and the
+  sponsor's gas budget; only the model chain ran it.
+
+## v2 Phase 3 — Invoices: Get paid and Pay invoices (brief 5.8) — 2026-10-25
+
+Design: [`docs/v2/phase3-invoices.md`](docs/v2/phase3-invoices.md). Tests:
+`tests/pay-invoices.test.mjs`, `tests/invoices-page.test.mjs`,
+`tests/pay-invoices-review.test.mjs` (the independent review's findings),
+`tests/pay-invoices-review-paths.test.mjs` and
+`tests/pay-invoices-review-two.test.mjs` (the second review's findings).
+
+Second review (each pinned in `pay-invoices-review-two`):
+
+- **Splash's own addresses fail closed.** The operator and treasury addresses
+  are required; any configured address that is not a Sui address, a set but
+  malformed `SPLASH_FEE_CONFIG_ID`, or an unreadable FeeConfig throws, and
+  match and approve answer 503. The FeeConfig recipient proposed under the
+  24h notice is Splash's too. Addresses are normalised, not filtered.
+- **The hand-off key is versioned.** Invoice id, `payment_attempt` (0059) and
+  a hash of recipient, amount, currency and date; the contract says the same
+  key with another payload is a 409. Approve writes "approving" only onto
+  the invoice it handed off, and otherwise asks the flow to drop the intent.
+  "Approving" has a way out (`withdraw`), only through the flow's `cancel`.
+- **Self-custody wallets need the ownership proof** (D5, 4.7) before match and
+  hand-off (`ownership_unproven`). Nothing on this branch records the proof,
+  so no wallet recipient is paid from Invoices until 4.7 lands. The 5.4
+  contract asks the flow to check screening, the proof and Splash's
+  addresses again when it builds and signs.
+- **Names.** Only the same name needs no reason; generic words do not make
+  two names alike.
+- **Get paid.** The reference is given once, with "paid", kept as
+  `received_reference`; never rewritten after. The PATCH is a guarded UPDATE
+  on the status read (409 `changed`), closing the gap noted below. The pay
+  link's report is bounded, kept in `payer_reported_name`/`_email`, never
+  over the issuer's payer, and its email is not logged.
+
+- **A supplier's invoice is untrusted data.** What it says is a proposal; a
+  person confirms every field. The payee picks candidates among the
+  business's own verified recipients only (screening `CLEAR` or admin
+  `ATTESTED`); an account or wallet printed on the invoice is read only to
+  warn that it differs, never paid to. Zeke's reader has no tools, is told
+  the document is data, may answer only seven named fields, and its answer
+  is checked against the document text (a value it cannot point to is
+  "low"). Pinned with an invoice that tries to change the payee, the amount
+  and the recipient.
+- **No double payment.** One supplier invoice number is scheduled, waiting
+  for approval or paid once per org, by the supplier's name as typed (0057)
+  and by the recipient actually paid (0058), so a second spelling of the
+  supplier does not pay the same invoice again; the duplicate check runs
+  again before the hand-off. The same document is one invoice; the intake
+  key is unique per org; one invoice per payment intent; one invoice per Sui
+  digest. A step that checked the invoice and then writes (match, the
+  duplicate answer, schedule) is a guarded UPDATE on the invoice as it was
+  read, so a change in between is refused, not scheduled.
+- **Who is paid.** A recipient whose name the supplier's does not suggest
+  needs a written reason, kept with the invoice; changing the supplier
+  clears the match. A recipient whose wallet is one of Splash's own (the
+  operator, the treasury, the FeeConfig fee recipient) is never matched or
+  handed off, checked at both steps; when those addresses cannot be read the
+  answer is 503 and nothing changes. A PDF's printed account or wallet is
+  read by Zeke, kept only in the form of one, and compared; when Zeke did not
+  read them the page says the comparison did not run.
+- **Fees and rates.** The hand-off carries `feeRule:
+  quote_in_transfer_shown_fee_is_max_fee` (Amendment A1: the fee is quoted
+  in Transfer and the one shown is the payment's `max_fee`) and no fee of
+  its own. A non-USD invoice is not handed off without a rate quote
+  (`fx_quote_needed`); no rate is invented.
+- **Approval is not here.** Pay invoices hands a scheduled invoice to the
+  payment flow (brief 5.4) through `lib/bills/payment-hook.ts`, keyed by the
+  invoice id, its attempt and what is paid. That flow is not on this branch: the hook answers 501
+  `PAYMENT_FLOW_NOT_WIRED` and nothing changes. Only the server-side
+  `recordBillSettlement`, called by that flow, marks an invoice paid; no
+  client route reaches it. A paid or cancelled invoice never changes.
+- **Fail closed.** No model key: no model reader in any runtime, and a PDF
+  is refused rather than read by anything else. No database: the routes
+  answer 503. The self-billed e-invoice asks for the business's TIN,
+  contact number and the exchange rate, and is not made without them.
+- **Scope (WS2).** Every Pay invoices route goes through `billCaller`
+  (session org, membership role); another org's invoice is "not found" on
+  every handler. Viewers, auditors and developers read only.
+- **Get paid: forward-only status.** `PATCH /api/invoices/:id` took any
+  status (a settled invoice could go back to draft). It now refuses a
+  regression, a "paid" with no reference and a second transfer binding.
+  The public pay link no longer marks an invoice paid on the payer's word
+  (WS7-3's open note): it records "reported", never overwrites a payment on
+  record, and only the business or a USDC payment matched on Sui makes it
+  paid. What the payer reports is kept in its own columns (0058), never
+  replaces the issuer's reference and is never the evidence for Mark as
+  paid, which needs the reference the business typed from its statement; the
+  report is a guarded UPDATE on the statuses a payer may report from. Only
+  owners, finance admins, approvers and makers (the membership's role) may
+  PATCH an invoice, and a transfer it binds to must be the org's own. The
+  PATCH's write is guarded on the status it read (second review), so a
+  concurrent USDC sync between the two is not overwritten.
+
 ## WS4 — operator custody, the code half — 2026-10-23
 
 **Scope**: the hot operator signer — how it is held, how much it may hold, and
@@ -48,6 +1302,24 @@ AWS or a fullnode.
 | OC-3 | Medium | The operator address could hold any amount, and a payout larger than its balance failed only on chain, with an opaque abort. **Fixed**: `assertOperatorCanPay(amount)` runs before the operator-funded paths (`recordSingleTransferOnSui`, `confirmComposedPaymentOnSui`) build and sign. Below the payout it throws `OperatorTopUpNeededError` (`state: 'top-up-needed'`) and pays nothing — never a partial payment. Above `OPERATOR_HOT_BALANCE_CEILING_MICRO` (micro-USDC) it alerts with the excess to sweep to cold, and does not block the payout. bigint throughout. | Fixed |
 | OC-4 | High | No one would have noticed value leaving the operator address by any route other than Splash's own. **Fixed**: `/api/cron/operator-outflows` (bearer `CRON_SECRET`, every 15 minutes) reads what the address sent over Sui GraphQL and alerts on any outflow that is not `payment_intent::confirm_with_approval` in our core package, to a wallet beneficiary whose screening is CLEAR or ATTESTED. Gas is not an outflow. Value into an object rather than an address is flagged. A monitor that cannot read its inputs answers 502 rather than reporting all clear. | Fixed |
 | OC-5 | Info | Canon D-0004: the operator key must never enter 0xWal's process or any agent tool. **Enforced**: a test fails the build if anything under `lib/agent`, `lib/oxwal`, `lib/ai`, `lib/chain` or the agent and copilot routes imports the signer or settlement module, or names an operator key or AWS secret. The outflow monitor itself never builds a signer. | Guarded |
+
+**Revised for v2 (Amendment A1 review, 24 Oct 2026).** OC-4's approved path
+above is v1's: v2 core has no `confirm_with_approval`. The monitor's rule is
+now (`lib/server/operator-outflows.ts`): the operator is an EXECUTOR and pays
+only through `splash_spend::pay_intent` in our `splash_spend` package, with
+`audit_anchor::anchor` in our core package in the same transaction, from the
+business wallet's allowance and never from its own balance. On that path
+every address that gained value must be an approved wallet beneficiary, an
+address Splash's registry classifies (a partner deposit address or a business
+wallet), or `FeeConfig`'s fee recipient. Anything else is flagged:
+`not_approved_path` (value moved off that path, including the retired
+`confirm_with_approval`), `operator_paid_from_own_balance`,
+`recipient_not_approved`, or `outflow_without_recipient`. The monitor reads
+`SPLASH_SPEND_PACKAGE_ID`, `SPLASH_FEE_CONFIG_ID` and
+`SPLASH_ADDRESS_REGISTRY_ID` (`lib/server/operator-outflow-monitor.ts`). A
+read that fails fails the run rather than reporting all clear; with an id
+unset, payments that need it are flagged, not cleared. The bullets below are
+kept as written for v1.
 
 **Still open, and stated.**
 
@@ -366,7 +1638,7 @@ Reproduced first as ten tests that fail on the tree before the fix
 | WS7-1 | High | No Content-Security-Policy anywhere, so any injected inline script ran, and no `frame-ancestors`, so the approval screens could be framed. **Fixed**: `lib/security/csp.ts` builds the policy around a nonce that `proxy.ts` mints per page request from the CSPRNG — `script-src 'self' 'nonce-…' 'strict-dynamic'`, never `'unsafe-inline'` or `'unsafe-eval'` in production; `frame-ancestors 'none'`; `object-src 'none'`; `base-uri` and `form-action 'self'`; the only third party allowed is Sumsub (a frame and its API), for KYB. The policy rides the request (`x-nonce` and the header Next reads to nonce its own scripts) and the response. Because a nonce cannot be prerendered, `app/layout.tsx` renders every page per request — the marketing pages lose static prerendering, deliberately. Styles keep `'unsafe-inline'`: React `style={{}}` props render as inline style attributes across the app, and scripts are the surface that matters. | Fixed |
 | WS7-2 | Medium | No HSTS, no `nosniff`, no referrer policy, no frame header. **Fixed**: `next.config.ts` `headers()` sets five on every response, API routes included — `Strict-Transport-Security: max-age=63072000; includeSubDomains; preload`, `X-Content-Type-Options: nosniff`, `Referrer-Policy: strict-origin-when-cross-origin`, `X-Frame-Options: DENY`, and a `Permissions-Policy` that leaves only the camera and microphone on, for the Sumsub flow. `lib/security/headers.ts` is the single list the config and the test both read. | Fixed |
 | WS7-3 | High | The public pay link (marks an invoice paid and creates a recipient), the four `/api/copilot/*` routes (chat spends model credits per message; extraction feeds a document to the model), `/api/seal/access` (a key-server round trip), invoice creation and recipient creation had no limit of any kind. **Fixed**: `enforceRateLimit` in `lib/server/rate-limit.ts` in front of each, per user and/or per network, with the rules named in `RATE_LIMITS`. Without a database on a development machine the limits are skipped once, loudly; production cannot boot without one (`lib/env.ts`). | Fixed |
-| WS7-4 | Low | The login limiter was a second implementation on its own `login_attempts` table. **Fixed**: `lib/auth/login-rate-limit.ts` is now a thin layer over the one limiter — failures count, a success clears — with its public API unchanged. `login_attempts` is legacy, no longer written, and waits for a drop migration. | Fixed |
+| WS7-4 | Low | The login limiter was a second implementation on its own `login_attempts` table. **Fixed**: `lib/auth/login-rate-limit.ts` is now a thin layer over the one limiter — failures count, a success clears — with its public API unchanged. `login_attempts` was dropped by migration 0080 (v2 Phase 3), after nothing had written to it. | Fixed |
 
 **What it does not do.** The CSP allows inline *styles*; a hash-per-prop policy is not practical here. The rate limits are per address and per network, not per organisation; the tenant key arrives with the tenant-isolation patch. The public pay link still marks an invoice paid on the caller's word alone — that is a WS2/WS8 concern recorded in the report, not a limit problem.
 
@@ -656,7 +1928,8 @@ on chain.
 (business_account, payment_intent, audit_anchor, receipt_v2, compliance_config,
 peg_monitor) publishes to mainnet; `splash_custody` (settlement, smart_treasury,
 dual_treasury, liquidity_guard) publishes only when the Labuan e-money licence is
-granted. Non-custody stops being an assert someone can forget and becomes a
+granted (superseded in v2: D11 retires `splash_custody` from the mainnet path
+for good; testnet only). Non-custody stops being an assert someone can forget and becomes a
 property of the type system: **no struct in `splash_core` holds a `Balance<T>`**,
 enforced by `scripts/check-core-no-balance.mjs` in CI
 (`.github/workflows/core-invariant.yml`) and in `npm run lint`.
@@ -725,7 +1998,7 @@ what follows survived.
 | A-09 | Medium | `settle_batch` looped an unbounded caller vector (one event + one created Coin per row) under a flat 10,000,000 MIST budget. Above ~1,023 rows Sui's 1,024-event / 1,024-command ceilings make it unexecutable at any budget. **Fixed**: `MAX_BATCH_ROWS = 256` (abort 108), gas scales with row count. | Fixed |
 | A-10 | High | `ComplianceConfig.paused` gates `settle_payment`/`settle_batch`, but the live customer path is `payment_intent::confirm_payment_intent`, which imports neither `compliance_config` nor `peg_monitor` — pausing halted batches while transfers kept executing. **Mitigated off-chain** (both routes check `paused`); the chain-side guard needs the republish. | Mitigated |
 | A-11 | High | **Nothing bounds an `AdminCap` call.** `withdraw_fees`, `smart_treasury::withdraw`, `allocate` (whose `operating_minimum` is a caller-supplied `u64` — pass `0`) and `settle_batch` have no amount cap, velocity limit, cooldown or timelock. One PTB signed with the operator key drains the pool, the fees and the treasury. This is the Step Finance shape exactly. | **Mitigated** — `splash_meter` bounds pooled outflow per window with asymmetric limit changes; Phase 6 moved every value-out function off `AdminCap` onto `TreasuryCap` (five functions, enforced by `scripts/check-treasury-cap.mjs`) and gave each business account a 24h ceiling. Not closed: the ceilings are still parameters someone with the right cap can raise, and `allocate`'s caller-supplied floor is unchanged. |
-| A-12 | High | The S-10 cap split is **not in effect at runtime**: `anchorCapObjectId()` fell back to `adminCapId`, `.env.example` shipped the key empty, and `recordBatchSettlementOnSui` passed `SPLASH_ADMIN_CAP_ID` directly. The hot key is still the money authority until the ceremony runs. | **Open** — the fallback is gone (an unset `SPLASH_ANCHOR_CAP_ID` now stops the peg refresh rather than borrowing the money key), and Phase 6 removed the reason it mattered most by moving value out of `AdminCap` entirely. The batch PTB no longer takes `AdminCap`: it takes the anchor cap and a tenant's payout delegation (`lib/server/sui-settlement.ts:1528-1532`). Still open until the republish and the ceremony actually run. |
+| A-12 | High | The S-10 cap split is **not in effect at runtime**: `anchorCapObjectId()` fell back to `adminCapId`, `.env.example` shipped the key empty, and `recordBatchSettlementOnSui` passed `SPLASH_ADMIN_CAP_ID` directly. The hot key is still the money authority until the ceremony runs. | **Open** — the fallback is gone (an unset `SPLASH_ANCHOR_CAP_ID` now stops the peg refresh rather than borrowing the money key), and Phase 6 removed the reason it mattered most by moving value out of `AdminCap` entirely. The batch PTB this row described (`recordBatchSettlementOnSui`, which took the anchor cap and a tenant's payout delegation) was removed in v2 Phase 3 with the v1 custody payout run; batch payouts are now paid from the business's own wallet and signed by its owners (`docs/v2/phase3-batch.md`), so no batch path uses a Splash-held cap. Still open for the peg refresh until the republish and the ceremony actually run. |
 | A-13 | High | Seal enforces no per-tenant policy: one global allowlist object, and the operator key decrypts every blob ever sealed. Seal also falls open to a hardcoded AES key while Walrus publishes for real. `/api/audit/[intentId]` has no ownership check. | **Open**, in part. `/api/audit/[intentId]` now reads only the session org's transfer and receipt (`app/api/audit/[intentId]/route.ts:14-17, 58-62`, commit `50542610`). The stand-in AES key is used only outside `NODE_ENV=production`, or when `USE_MOCK_APIS` or `NEXT_PUBLIC_DEMO_MODE` is true (`lib/server/seal.ts:36-38, 186-203`; `lib/server/runtime-mode.ts:5-9, 27-29`); a production deployment with neither gets live Seal or a refusal. Still open: every seal id derives from one global policy object (`lib/server/seal.ts:132`), and live decryption signs with the operator key (`lib/server/seal.ts:160`). |
 | A-14 | Medium | Batch rows are USD micro-units passed as SUI MIST on a `SettlementPool<SUI>`. $100 becomes 100,000,000 MIST = 0.1 SUI. Recipients are underpaid and the on-chain minimum is effectively disabled on that path. Correct for 6-decimal USDC; wrong for the 9-decimal SUI pool. Needs a product decision on what the SUI pool represents. | **Open** |
 | A-15 | Medium | No beneficiary screening on either payout path — Elliptic is referenced but is a stub, and the compliance engine is wired only to the 0xWal proposal route. Batch pays unscreened, caller-supplied raw Sui addresses. | **Open**. The USDC wallet lane now screens: a wallet address is checked against a sanctions list when it is saved (`app/api/recipients/route.ts:92-116`, `lib/server/wallet-screening.ts`), and a send is refused unless the stored verdict is CLEAR or an admin's attestation (`lib/server/stablecoin-send.ts:141-142`). The batch path still pays unscreened addresses. |
@@ -871,6 +2144,8 @@ After init, `assert_pegged` passes immediately because (a) deviations are 0 and 
 
 The contract previously hardcoded `FEE_BPS = 150` (1.50%) while the off-chain quote engine, dashboards, and marketing all advertised 0.80%–1.10%. There was no way to align them without redeploying. Worse — any future change to the constant required a full upgrade.
 
+**v2 note (Amendment A1, 24 Oct 2026):** this finding is custody-era history. `splash_custody` is retired from the mainnet path, `lib/fx/corridors.ts` carries no fee any more, and the v1 testnet custody path is handed the A1 bank tier's rate (at most 100 bps). On the v2 paths no caller passes a rate: the fee is computed on chain by `splash_core::fee_config` under a 100 bps ceiling (`docs/v2/fees.md`).
+
 **Resolution**: `settle_payment` and `settle_batch` now take `fee_bps: u64` as a parameter, bounded by `MAX_FEE_BPS = 200` via `assert!(fee_bps <= MAX_FEE_BPS, E_FEE_EXCEEDED)`. Per-corridor fees are defined in `lib/fx/corridors.ts` and passed by the off-chain settlement layer. The contract emits `fee_bps` in `PaymentSettled` and `PaymentExecuted` for full auditability. See `lib/fx/corridors.ts`, `lib/server/sui-settlement.ts`, and `lib/sui/contracts.ts` for the off-chain pieces.
 
 ---
@@ -969,6 +2244,8 @@ Functions take `cap: &AdminCap` then do `let _ = cap;`. This works (the borrow s
 **Location**: `move/sources/settlement.move:23`
 
 Current corridor fees are 80–110 bps. The 200 bps (2%) ceiling is roughly 2× headroom — defensive but allows a misconfigured quote engine to charge double the highest legitimate fee without aborting.
+
+**v2 note (Amendment A1):** custody-only. The v2 fee ceiling is 100 bps, written into `splash_core::fee_config` and `splash_spend` and held equal by `check:fees`.
 
 **Recommendation**: Tighten to 150 bps if no genuine 1.5%+ corridors are planned. Or: emit a `HighFeeWarning` event when `fee_bps > 120` so off-chain monitors can alert on suspicious quotes.
 
@@ -1077,6 +2354,8 @@ Caller has to read `state` afterwards or parse the emitted event. Minor UX frict
 
 These are the items the security/ops team should **always** keep eyes on. Each has a recommended cadence and alert threshold.
 
+**v2 note (Amendment A1, 24 Oct 2026):** the rows that name `E_FEE_EXCEEDED`, `fee_bps`, `MAX_FEE_BPS`, `protocol_fees` or `lib/fx/corridors.ts` as the fee's source (1, 5, 7, 9, 15, 22, 25) describe the retired custody path. On v2 the fee comes from `FeeConfig` and its signals are its events: `FeeCharged` for revenue reconciliation, and `FeeScheduleProposed`, `FeeRecipientProposed`, their `…Applied` and `…ProposalCancelled` events and `FeeDiscountSet` for governance changes (alerting on them is Phase 2). Aborts 435, 1031 and 1033 mean a schedule rose after a quote was shown; 1032 should never fire.
+
 ### Hot signals (alert immediately)
 
 | # | Signal | Source | Action |
@@ -1145,3 +2424,437 @@ These are the items the security/ops team should **always** keep eyes on. Each h
 5. **Treat the four scaffold modules as deleted for production purposes** until rewritten. Move them under `move/sources/scaffolds/` and exclude from `Move.toml::[package].sources` until ready.
 
 This report should be re-run after any change to `move/sources/` and committed alongside the change.
+
+## v2 Phase 3 - Zeke never says money moved - 2026-10-31
+
+Design: `docs/v2/phase2-zeke.md` section 2a. Tests:
+`tests/zeke-completion-guard.test.mjs`,
+`tests/zeke-completion-guard-review.test.mjs`. Phrase tables:
+`lib/agent/zeke-claim-patterns.ts`.
+
+- **A model sentence cannot assert execution.** Zeke cannot send, approve or
+  sign, but a model can write "Paid!" about a draft (and a prompt-injected
+  invoice can ask it to). On any turn that proposes, prepares or discusses a
+  money movement, `guardCompletionClaims` (lib/agent/oxwal.ts) removes the
+  sentences that say money has been or is being sent, paid or done, and the
+  reply carries a fixed line instead: "Nothing has been sent. It is waiting
+  for approval." (or, when nothing was prepared, "I haven't sent anything.
+  I can't approve or send payments, so a person on your team does that.").
+- **Code, not prompt.** Deterministic, no model, no environment read. It reads
+  text as a person does (look-alike letters, hidden characters, spaced or
+  dotted letters, small caps, accents, stretched words) and in the languages
+  of the corridors and the common ones. Negated, conditional and fixed Splash
+  copy stay; turns that are not about money are never touched.
+- **The list of phrasings cannot be complete, so the reply always carries the
+  fixed line.** Recognising a claim is a denylist: a person can always find one
+  more way to say "sent", and an independent review found several (see below).
+  So the control that does not depend on it: on any turn that reached for a
+  money tool, proposed, or prepared a transfer, the model's words are always
+  followed by the fixed line, once, whether or not a claim was recognised. "Nothing has
+  been sent. It is waiting for approval." when a payment is waiting; "I
+  haven't sent anything. ..." when a tool ran and nothing was prepared; for a
+  question about whether a payment went through, "I can't tell you whether it
+  went through. Open History to see where it stands." A claim the list misses
+  is contradicted in the same reply by words only Splash writes. Splash's own
+  fixed replies (the planner, a hand-off) already say what is true and get no
+  second line. A turn that moved nothing and where nothing was recognised is
+  not touched, so a claim there is not caught by this control.
+- **Review hardening (2026-10-31).** Opening a sentence with "After", "When",
+  "If" or "Before", or a negation word nearby ("Do not worry it has been
+  sent"), no longer excuses a claim: a hypothesis ("if it had been sent")
+  excuses a past-tense claim only in its own clause, and a negation excuses it
+  only when it governs the verb. Matching is bounded (a sentence is read in
+  pieces of at most 1,200 characters, a reply of at most 24,000 characters and
+  300 sentences; a run of 100,000 commas takes milliseconds, where it took two
+  minutes). Invisible characters of every kind (Unicode default-ignorable and
+  format characters, Hangul fillers, Braille blank), more look-alikes, HTML
+  tags and comments, entities and link syntax are read through. True
+  statements of what a record shows ("Invoice INV-1 is paid"), and of what
+  Zeke did ("I sent the draft to Wallet for approval"), are kept. A reply that
+  talks of money on a turn the message did not mark as one is guarded as a
+  discussion of payments.
+
+## v2 Phase 3 - Scheduled batches and the scheduled payer - 2026-11-01
+
+Design and the honest account: `docs/v2/phase3-scheduled-batches.md`. Tests:
+`tests/scheduled-*.test.mjs`.
+
+**A trust change, said plainly.** Until now every payment had a person's passkey
+behind it. A schedule an owner sets to **pay automatically within my limits**
+(Mode B) is paid by a **Splash-held key**, the scheduled payer, with no one
+present. The owners' consent is an **allowance they signed** (a spending rule for
+that key), not each payment. "Ask me first" (Mode A, the default) is unchanged in
+authority: the batch is prepared and the owners' quorum signs it.
+
+- **The scheduled payer is its own AWS KMS key**, separate from the operator's
+  gas-sponsor key (`SCHEDULED_PAYER_KMS_KEY_ID`, `SCHEDULED_PAYER_SUI_ADDRESS`;
+  `lib/server/scheduled-payer-signer.ts`). It holds no funds and no SUI. Production
+  refuses it unless its KMS public key derives the named address and it is neither
+  the operator's key or address nor the sponsor's; the boot refuses an
+  environment that names the operator's key or address for it. With none
+  configured, automatic payments are off and every run is handed back to "ask me
+  first". No sandbox signer is reachable in production (the resolver never returns
+  one, and the executor refuses one again). Canon D-0004: nothing under the agent
+  code reaches it.
+- **What a stolen payer key can do** is what its allowance lets it: ask
+  `splash_spend` to pay a **recipient the owners verified on the policy**, up to the
+  allowance's per-payment maximum, its monthly cap (held by the network) and its
+  expiry, and never above the second-approval line (that needs an owner's
+  approval, which it can never have). It cannot pay another address, raise a
+  limit, add a recipient or touch the wallet. The owners revoke it. The key
+  serves every business that gave it an allowance, so the worst case across
+  businesses is the sum of their allowances.
+- **The daily limit is the server's, not the network's.** `0x2::allowance` carries
+  one recurring cap per allowance; the monthly cap is on chain and the daily one
+  is enforced by Splash against what automatic runs paid in the last 24 hours. A
+  limit asked for waits for the owners' signatures (0070) and applies when the
+  request executes; a run reserves its payments under a per-business lock, so
+  two runners cannot both pass a limit that fits one.
+- **Before Splash signs, it re-checks everything** (`lib/schedule/auto-check.ts`):
+  not paused; an owner's schedule by someone still an owner; payer and sponsor
+  present; the allowance readable, running and not ending; every payee unchanged,
+  a Splash business or wallet, **paid before** (never a first payment to a new
+  recipient automatically), screened clear and verified; every payment within the
+  per-payment limit and under the second-approval line, the run within the window,
+  the daily limit and the fee that was shown; the wallet funded. One failed check
+  hands the whole run to "ask me first" with the reason in plain words.
+- **At most once.** One run per schedule and due date (unique key); a run claimed
+  with a lease; each payment claimed with its digest written first and only while
+  its run is still `approved`, unique per business by its payment reference (the
+  on-chain idempotency key). An unknown outcome is read back from the chain by its
+  digest and never sent again. The bytes are decoded again and held to exactly the
+  stored payment (`assertPurposeShape('staff_rule_payment')`) before signing.
+- **Instant stops.** Skip, Stop, Edit, Delete, a switch to "ask me first" and the
+  kill switch (one owner pauses every automatic payment) take effect for the next
+  run and are read before **every** payment of a run in progress. Revoking the
+  allowance is a multisig request and takes effect when signed.
+- **The grace window (migration 0076), and what it does and does not protect.**
+  An automatic run says it is starting GRACE minutes before its first payment (10
+  by default; 0 to 60 per business, an owner's own change, instant, on the trail).
+  *Does:* nothing is claimed or paid inside the window (the payment claim's own
+  statement refuses an early claim, not just the runner); a Skip or Stop inside
+  it ends the run as skipped with nothing paid, and cannot race the first
+  payment (one statement under the per-business lock); every check is made again
+  at its end, so an allowance taken back, a pause, a lowered limit or a changed
+  schedule hands the run back instead of paying; stopping can only prevent a
+  payment, never cause one; a start that was announced is fixed for that run, so
+  the setting cannot be used to bring it forward. *Does not:* it gives the owners
+  time to notice and to press a button, not a guarantee that anyone will; a
+  stolen payer key does not wait for a window (the allowance's caps bound it, not
+  the window); a compromised server could skip the window (the claim's database
+  check and the allowance are what remain); it does not make the daily limit the
+  network's; and an owner can set it to 0. The notice carries Skip and Stop as
+  buttons in the app, which need an owner signed in: no link in an e-mail or a
+  WhatsApp message acts by itself, so a message that is read late or by someone
+  else can open the app but not stop or start anything.
+  *What happens when the notice is not delivered.* The window fails closed. The
+  notice is recorded as sent only if it reached at least one owner (the notifier
+  answers how many it reached: an e-mail or WhatsApp message the provider
+  accepted; no transport, no address or a refusing provider reaches no one). When
+  it reached no one the window is closed again and nothing is paid on it; the
+  next cron pass opens a fresh window with its full length, and if no owner can be
+  told for 24 hours the run lapses unpaid. A window that ends with no notice
+  recorded (the runner stopped between opening it and telling anyone) is never
+  paid on: the run is handed back to "ask me first" (`window_not_announced`). A
+  window still open with no notice recorded is opened afresh. Two limits remain:
+  "reached" means a provider accepted the message, not that a person read it, and
+  the first pass can come up to five minutes after the due time (the cron runs
+  every five), so the window is counted from the notice that went out, not from
+  the due time. An owner who sets the window to 0 has chosen no warning at all,
+  and a run then pays at its due time whether or not the day-before or running
+  notice was delivered. The day-before notice is best-effort: nothing waits on it.
+- **A summary the owners read before they sign** is built from the very values the
+  allowance request is built from (one parser, one rule, one summary function; tests
+  pin that the network holds the summary's figures after the owners sign). What the
+  server compares: the request carries a digest of the summary the owner saw (the
+  exact payments with their schedule, amount, fee and reference, how often each
+  schedule runs and how many runs fall before the end, the per-payment, daily and
+  monthly limits, the end day and the window, and what the limits would refuse). The
+  server builds its own from the schedules as they are now and asks nobody to sign
+  when the digests differ: it answers 409 `summary_changed` with the new summary and
+  the owner confirms again. A request with no digest is refused. So a payee added or
+  an amount changed after the page loaded cannot be confirmed unseen. The same text
+  is stored with the signing request and shown to every owner who signs, beside the
+  review decoded from the transaction itself on their device. It is the requester's
+  words and not a substitute for that review; when an allowance already exists the
+  change may be built as a bridge plus a new allowance, and the device's review is
+  what shows that. The end date is a whole UTC day, so a page and a server whose
+  clocks differ name the same end on the same day, and every date on the screen is
+  a UTC date and says so. The summary marks a payment above the most for one
+  payment, a payee never paid before, a run bigger than the daily or monthly limit
+  and a schedule that falls after the end, but it cannot predict how several
+  schedules together use the monthly limit in a month (it says so), and a run is
+  paid whole or handed back whole.
+- **Tenant isolation**: every route takes the business from the session; every
+  store read takes the org; the runner works each business with its own context;
+  the cross-tenant lists are `ForStaff` and return ids only.
+- **The cron** (`/api/cron/scheduled-payments`) is bearer-secret protected and fails
+  closed (no secret, nobody is authorised, in every environment).
+- **Notices carry no link that pays, skips or stops.** E-mail links open the
+  signed-in Scheduled tab.
+- **Not covered**: the outflow monitor watches the operator, not this key; there
+  is no testnet run; a daily limit that is on chain needs a Move change (see the
+  hand-off). Sebastian reviews the key policy and the default caps before mainnet.
+
+## v2 Phase 3 - Zeke reads payout sheets - 2026-11-01
+
+Design: `docs/v2/phase3-zeke-batches.md`. Tests: `tests/zeke-sheet-ingest.test.mjs`,
+`tests/zeke-sheet-review.test.mjs`, `tests/zeke-legacy-batch-removed.test.mjs`.
+
+- **A sheet is data, read by the server.** `POST /api/wallet/batches/sheet` reads a
+  CSV, pasted rows or an .xlsx by fixed rules (`lib/batch/ingest.ts`). Text in a cell
+  that talks to an assistant is ignored and cleared; formulas (also full-width
+  forms), commands, links and hidden characters of every kind (control and format
+  characters, variation selectors, fillers, the Unicode tag block, read first so
+  text hidden there is caught) are removed from what is shown back and passed on; each change is recorded on the row. A cell can
+  only NAME a recipient: the review matches it to the business's own saved,
+  screened recipients, so a sheet cannot introduce a payee, an address or a fee.
+- **Caps.** 256 KB, 200 rows scanned, 40 columns, 400 characters a cell, at most 20
+  payments (more is refused whole, never cut). A spreadsheet is a zip: its directory
+  is read first and one that would expand past 8 MB or 200 parts is refused before
+  it is opened. The route reads the body with a cap while reading it, not after.
+- **A model never sees a cell.** Only when the headers are unknown, it is given the
+  header names (instruction-like headers are replaced by "(column n)") to say which
+  is the recipient, amount, reference and currency. The answer is checked against
+  the headers and the data. With no key, a wrong answer or an error, nothing is
+  guessed. Pasted rows never go into the chat message.
+- **Preparing is the wallet batch flow, nothing else.** An owner's batch is one
+  signing request for the owners; nothing is drawn until the threshold has signed on
+  their devices. A staff member's batch waits for an owner. The sheet's intent id is
+  the Idempotency-Key, so a retry or a second tab makes one batch. Zeke's words say
+  "Nothing has been sent" and are fixed text, checked against the completion guard.
+- **Same gates as every wallet route.** Business from the session; accepted terms;
+  owner or staff, never a viewer; rate limit; a body that names a business, role or
+  user is a provenance violation. In production a sandbox screening is no
+  verification, and a row without one cannot be prepared.
+- **The old path is gone.** The `BATCH_PAYOUT` proposal kind, `proposeBatchPayout`,
+  the step-up purpose and the helpers only they used are removed; proposals of that
+  kind still open are closed once by migration `0072`; one that still reaches the
+  executor is recorded as not executed. The `step_up_codes` check constraint still
+  lists the old purpose (a superset is harmless).
+- **Not covered**: a staff member's batch is not paid inside their rule (the owners
+  sign every batch); the column mapper has no live-model test; the floating Zeke does
+  not carry a sheet card to the Zeke page. No Move change is needed or made.
+
+## v2 Phase 3 - Staff pay an exchange account alone, when an owner allows it - 2026-11-02
+
+Design: `docs/v2/phase3-team-roles.md` ("Can pay exchange accounts alone") and
+`docs/v2/phase3-staff-in-rule.md`. Tests: `tests/exchange-alone-switch.test.mjs`,
+`tests/exchange-alone-payment.test.mjs`, `tests/exchange-alone-ui.test.mjs`,
+`tests/exchange-alone-review-fixes.test.mjs`.
+
+- **Default deny, on the server, every time.** The owner's per-person switch is
+  read from the database before anything is built, again inside the payment's
+  claim (on the claim's own connection, under the business's lock), again
+  immediately before the Travel Rule message goes, and before every signature
+  (`exchangeAloneOf`, `staffExchangeHold`). An owner who turns it off after the
+  first read stops the message and the payment: the request just opened is
+  withdrawn and the owners are asked (or the person, who insisted on paying
+  alone, is told in words and nothing is kept). What is not covered: an owner's
+  change that lands after the message has already gone cannot recall it; it stops
+  the signature. A viewer, an owner, a stranger, another business's member and a
+  stale row all read as no. Only an owner can change it, instantly; every change
+  is an append-only trail line.
+- **It widens nothing but the payee kind.** The rule's maximum, cap, dates,
+  second-approval line (all spenders and payments on their way together) and
+  verified recipients still bind, and the recipient must be on the rule as an
+  exchange account. A bank payout and another chain stay the owners'.
+- **What was read is what was recorded, signed and sent.** The message is built
+  on the server; the payment is refused unless the person's confirmation hashes
+  the same as the server's own; the payload is stored append-only in the same
+  step as the payment's claim, bound to the intent id, and its hash is inside
+  the transaction's commitment. The gate re-reads it before each signature and
+  compares it with the decoded bytes: the stored text still hashes to its hash;
+  the account and the amount the transaction pays; the payment reference the
+  bytes carry (the one the message is bound to); and the commitment the bytes
+  carry, which the gate derives again from the business, the transfer, the
+  account, the amount, the fee bound, the kind and the stored hash
+  (`transferCommitmentHex`). A record that is gone, or a transaction that does
+  not carry the payment reference and the commitment, is refused. The
+  provider's message is made from the stored payload only.
+- **Fails closed.** Production without the Travel Rule provider refuses before
+  anything is built; a sandbox message is no answer in production; no verdict or
+  reference is invented; a business that is not verified, or a recipient missing
+  what the exchange needs, is refused in words.
+- **What the person is shown is what is sent.** The confirmation lists every
+  field of the message, the payment network the money goes over (not the
+  exchange's company: see "Whose name the exchange is told" below), and the
+  payment details exactly as the provider receives them ("Sent by NAME (Title):
+  purpose", or "Sent by COMPANY NAME: purpose" when the business or the person
+  chose not to share a name). The provider is told the exchange by its id. Sky
+  confirmed the name switches (see below). Nothing in the send
+  path (`lib/server/exchange-disclosure.ts`, `lib/server/travel-rule-transfers.ts`,
+  `lib/compliance/sumsub.ts`) logs it or sends it to analytics. A message that did not go is read from the
+  provider's own row each time the payment is shown (GET
+  `/api/wallet/transfers/:request/exchange-message`), so it can be sent again
+  after a reload; a replay that confirms another purpose says which purpose the
+  exchange was already told.
+- **Not covered**: nothing about the exchange's own decision is promised; the
+  live path (a real provider, a real passkey signing a sponsored kind-2 payment)
+  has not been run, only simulated on the model chain. No Move change is needed
+  or made.
+
+## v2 Phase 3 - Limits on automatic payments, and asking Splash for higher ones - 2026-11-02
+
+Spec: `docs/v2/phase3-limits.md`. No Move change.
+
+- **What it controls**: four per-business limits (one automatic payment, a day,
+  a month, how long an allowance lasts). A NEW business starts at 50,000 USDC a
+  payment and 100,000 a day, with the month and the lower figures worked out from
+  three answers it gives (`lib/limits/start.ts`); these are starting points, not
+  ceilings (Sky's decision of 2 Nov 2026, replacing round three's 2,000 / 5,000 /
+  20,000 USDC with 10,000 / 50,000 / 500,000 ceilings). `LIMIT_SANITY_MAX` only
+  refuses a typo; the length of an allowance keeps a ceiling of 366 days. The
+  second-approval line is never changed by this path, so an automatic payment above
+  it (10,000 USDC by default) still waits for an owner whatever the per-payment
+  limit says. **Migration 0086 gives every existing business the figures it runs on,
+  so nothing existing is lowered, raised or changed.**
+- **The answers**: owners only; the business and person are the session's; checked
+  and refused in words without being echoed (zero, negative, text, huge, missing,
+  control and direction characters); stored cleaned and at most 40 characters, shown
+  only as text; **never written to the trail, the logs or a request's reason**. A
+  new business is started at its proposal once (one claiming statement, so a double
+  click starts it once); an existing business is never moved by answering.
+  "Ask for higher limits" reads the figures from the stored answers, never from the
+  request, and is keyed by the answers so it asks once.
+- **Two people for a large grant**: a daily limit above 250,000 USDC or a monthly
+  limit above 2,500,000 USDC needs two different Splash staff, one compliance and one
+  operations (`LARGE_GRANT_LINES`, one place). The first approval starts nothing and
+  tells nobody; the 24 hour notice runs from the second; the same person twice is a
+  replay; the trail names both; CHECK constraints in the database hold the rule for a
+  statement that skips the service. With one configured staff login (operations) such
+  a grant cannot be finished until a compliance login exists.
+- **Controls**: the older per-transfer and daily USD guard-rails are a separate model
+  and are shown beside the Limits. No payment path reads both sets, so the page does
+  not claim the lower of the two applies; a test fails if that stops being true.
+- **Who**: only owners ask, cancel and lower; the Finance lead sees. Staff roles
+  compliance and operations decide; support is refused. The business and the
+  actor are the session's in every customer route.
+- **Timing**: an approval changes nothing for 24 hours (a table CHECK refuses a
+  shorter notice); a pending request changes nothing at all. The owners are told
+  when it is approved, declined and started, and can cancel until it starts.
+  Lowering is instant and cancels any open request for that limit.
+- **Replay**: one Idempotency-Key is one request; a decision made twice is one
+  decision; a cancel twice is one cancel; the change is applied by the single
+  statement that moves `approved` to `applied`.
+- **Audit**: every action is an append-only line with who did it (user id,
+  `operator:<email>`, or `system:limits`).
+- **Enforcement**: an allowance above a limit is refused; an automatic payment
+  above the per-payment limit hands the run back; the daily limit never exceeds
+  the business's; the last 30 days of automatic payments must fit the monthly
+  limit (checked again under the reservation lock). A run not given the
+  business's limits is handed back, never paid without them. The length of an
+  allowance holds for the next allowance an owner gives.
+- **Keeping what runs** (migration 0079): a business whose signed allowance or
+  daily limit was above the standard keeps it, never above a ceiling, with a
+  `system:migration` line on the trail, so automatic payments do not stop on
+  deploy.
+- **Restore**: an owner puts a limit they lowered back at once, up to the highest
+  figure the business has held (`held_max`); nothing above it without Splash and
+  the 24 hour notice. Trail action `limit_restored`.
+- **Not covered**: the monthly start (500,000 USDC), the formula's steps and the
+  minimums are Splash's and need Sky's review; the second-approval line (10,000 USDC)
+  was not moved and may need to move with the new per-payment figure; a network-held
+  daily cap still needs a `splash_spend` change.
+
+## v2 Phase 3 - Whose name the exchange is told, which partner the screen names, and what the audit proof always holds - 2026-11-02
+
+Design: `docs/v2/phase3-team-roles.md` ("Names sent to exchanges, the network on the screen, and the audit trail"). Tests:
+`tests/exchange-names.test.mjs`, `tests/exchange-names-payment.test.mjs`, `tests/payment-networks.test.mjs`,
+`tests/payment-trail.test.mjs`. No Move change.
+
+- **Two switches, both on by default, read on the server.** The business's (`organizations.share_names_with_exchange`,
+  owners only) and the person's own (`memberships.share_name_with_exchange`, that person only; an owner cannot change
+  another's). If either is off, the details read "Sent by COMPANY NAME: purpose" and no person's name or title is in the
+  message, in the confirmation, or in the stored copy of the message (only the internal user id is kept). The setting is read
+  from the database when the message is built, again when the payment is confirmed (a changed switch changes the message, so the
+  person reads it again and confirms again), and again when the message is finally sent: a person who stops sharing after
+  confirming is not named, and a switch turned on afterwards never adds a name that was not confirmed. The page cannot choose
+  it. A person's name or title is cleaned (control, hidden and direction-changing characters, and brackets, so a name cannot dress
+  itself as a title). An owner's change is instant with one append-only trail line; a person's own change writes none.
+- **The switches change only what the exchange is told and what the confirmation shows.** The audit proof is built by
+  `lib/server/payment-trail.ts` and never reads them.
+- **What the audit proof holds (added here, additive).** The sealed evidence record of a wallet payment held the payer, the payee,
+  the amount, the fee bound and the reference, and neither the actor nor any approver or decliner. It now carries, inside the
+  encrypted record, who started the payment (internal id, role, and the name and title as they were), when, the route
+  (owners sign, asked the owners, within a staff rule), the rule it was paid under, and the owners who could approve it
+  (`splash.payment-record.v2`; a record without a trail is byte for byte what it was). The record is made before anyone approves, so
+  each later signature, decline and owner's answer to an ask is one more sealed record (`splash.payment-decision.v1`) naming the
+  first by its hash (`payment_trail_events`, migration 0085; `wallet_transfers.record_hash`). The rows hold internal ids, times
+  and hashes only; the name and title are inside the sealed record. A decision is never stopped by a sealing failure: it is on
+  record, unsealed, until the cron sweep seals it. In production a demo Seal policy or Walrus blob seals nothing. A decision whose
+  row could not be written at all (the hook failed after the signature was saved) is derived by the same sweep from the signer's own
+  `signed_at` or `declined_at` or the ask's answer, with the time it was made (`sweepPaymentTrail`); a person who left the business
+  before then is counted as skipped, not invented. The sealed records hold the name and title as stored (they are encrypted evidence);
+  the user id is always in them.
+- **Names in evidence records are only as private as the key policy.** Sebastian: A-13 above (one operator key can decrypt every
+  sealed blob) applies to every name now inside an evidence record. Nothing is stored or anchored in plain text with a name.
+  Not covered: the decision records are sealed and stored on Walrus, but only the payment's own record is anchored on Sui (in the
+  payment transaction). Anchoring each decision record needs an operator-sent `audit_anchor::anchor_audit_hash` per decision or per
+  day (an existing AnchorCap function, no Move change), which is not built. If a payment falls back from a staff rule to the
+  owners after its record was made, the record says the route it was built under; the ask and its answer are in the decision records.
+  A batch the owners sign and a scheduled automatic payment now seal a record with a trail (who started it, when, the route, the
+  allowance, who could approve), but the owners' signatures on a batch are not separate decision records yet: that needs a later
+  migration (0086 or higher) so a decision can name a batch rather than a wallet transfer. Sebastian and Sky to decide.
+- **Which partner the confirmation names: the network, never the processor.** The words say the payment network the person
+  knows (`DuitNow` for Malaysia, `InstaPay or PESONet` for the Philippines, `BI-FAST`, `PromptPay`, and so on), never the
+  exchange's company or a processor ("Fiuu"), even after an agreement is signed, and still say plainly that the details are shared
+  with the exchange that holds the account, which pays out in that country over that network, through Splash's Travel Rule provider,
+  and what exactly is shared (including the payment reference, the date and the link to the business's verification). The corridor to network map is one module,
+  `lib/compliance/payment-networks.ts`. The Travel Rule message to the provider is unchanged: it carries the real counterparty
+  data.
+- **The exception: `mustNameReceivingInstitution`.** Per corridor, false by default, changed only in code by Splash compliance
+  (not an owner's setting, not a user switch, not read from the database, the environment or a request). Where it is true the
+  confirmation names the real institution next to the network ("DuitNow, received by Hata"), and the ban on naming partners has a
+  recorded, tested exception for exactly those corridors (`INSTITUTION_NAMING_EXCEPTIONS`; empty as shipped).
+- **For Sebastian and compliance, before launch: confirm the wording satisfies data-protection and Travel Rule disclosure.** That
+  is: the "Sent by" line and the sentence that says which details are shared, and with whom, in the Malaysia (DuitNow) and
+  other corridors; and whether any corridor needs `mustNameReceivingInstitution` set.
+- **Other confirmation screens.** Withdrawals and bank payouts still name their partners through `partnerLabel` (the role until
+  an agreement is signed, the name after). That is a separate screen and was not changed here; Sky to say whether it should
+  follow the same network-name rule.
+
+
+## v2 Phase 3 - When nobody who can approve answers - 2026-11-02
+
+Design: `docs/v2/phase3-team-roles.md` ("When nobody who can approve answers"). Tests: `tests/approval-wait-ladder.test.mjs`,
+`tests/approval-wait-scheduled.test.mjs`, `tests/approval-wait-wiring.test.mjs`. Migration 0087. No Move change.
+
+- **Money is never approved by default, by Splash, or by a timer.** A request that waits for people who can approve (a payment the
+  rules send to the owners, a second approval above the line, a batch, a withdrawal, a spending-rule change, a staff ask, and
+  an automatic run handed back to "ask me first") ends **unpaid** at its existing end. Nothing in `lib/server/approval-wait.ts`
+  signs, combines, submits, extends, re-opens or updates a signing request, a signer or an ask (a test reads the source for
+  it). Splash holds no key to a business wallet; the wallet is a multisig of the owners' own passkeys.
+- **Reminders are state, not timers.** The ladder (0, 10 minutes, 1 hour, 4 hours) is the constant `LADDER` in
+  `lib/approve/wait.ts`, read by the existing `/api/cron/wallet-signing` (every five minutes). No timer lives in any process.
+  Each step is one row (`approval_wait_steps`, primary key kind + request id + step) written in the same transaction as its
+  notices, so a second cron, two instances and a retry send nothing twice. A step arrives within one cron interval of its time:
+  that is the accuracy. The cron answers 502 if it could not read the waiting requests, so a ladder that stopped is seen.
+- **A notice carries words and one link, never an amount, a payee, an address or a secret.** The link is the signed-in Approve
+  page (`/dashboard/approve/<id>`, or `/dashboard/approve` for an ask): no token, no query, sign-in required, and opening it
+  approves nothing. Made only on https and a public name in production. E-mail is claimed before it is sent, tried three times at
+  most, through the one Splash sender; with none in production nothing is sent and the notice stays in the app. Logs name an
+  id and the kind of failure only.
+- **Who is told is decided at send time, per business.** The signers who have not signed or declined (or the owners, for an ask),
+  who are still members of **that** business. Every read takes the business from the session; the cron's cross-tenant reads are
+  `*ForStaff`. A signer row naming a person of another business is never told (tested).
+- **The lapse is one fact.** "Nobody approved in time. Nothing was paid. Ask again." goes once to the person who asked and the
+  owners, with one `approval_lapsed` trail line written in the same transaction as the step. A late signature (410) and a late
+  accept of an ask are refused with the same words, and keep nothing. An automatic run handed back and not approved lapses the
+  same way and the scheduled payer signs nothing.
+- **"Remind them now" is rate-limited in the database, not the browser.** Once per 10 minutes per request; two presses at once make
+  one (the step is a primary key); only the person who asked or an owner may press it (a signer who is neither: 403; any other
+  person or business: 404). It writes an `approval_reminded` trail line. A per-person route limit sits beside it.
+- **The "fewer than three approvers" warning counts people who can sign for the wallet that exists.** Owners with a working passkey on this site who are
+  signers of that wallet (a revoked passkey, one for another site, an owner added after the wallet was built, and every non-owner
+  role are not counted); a second line says how many owners are not yet signers. It is shown to owners only and blocks nothing.
+- **Failures are seen, and e-mail is bounded.** A request the ladder cannot tell is logged by id and the kind of failure and
+  makes the cron answer 502, as does an e-mail half that is not working (every try failed in the last hour, or no sender in
+  production). A lapse is told only for a request the ladder began on and that ended in the last 24 hours, so the first run after a
+  deploy tells nobody about old requests. A notice is e-mailed only to a person who is still a member, at most three times in every
+  state, under one idempotency key for its life; a call a person waits on gives the mail provider four seconds and then comes back.
+- **Known limits.** A reminder can be up to one cron interval late. A business whose owners are all away until a request ends
+  gets a lapse, not an approval by someone else: a backup approver who counts only after a delay would need a Move change
+  (`docs/v2/phase3-team-roles.md`, for Sebastian). An owner can get both the schedule's own lapse e-mail and this one for a
+  lapsed run. A staff ask whose accepted signing request lapsed returns to open but the ladder does not resume for it. Reminders
+  are in the app and by e-mail, not on WhatsApp.

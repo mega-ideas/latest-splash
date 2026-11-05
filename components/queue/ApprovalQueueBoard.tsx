@@ -1,12 +1,11 @@
 'use client';
 
-import { useMemo, useState } from 'react';
+import { useState } from 'react';
 import Link from 'next/link';
 import {
   AlertTriangle,
   CheckCircle2,
   CircleSlash,
-  Clock3,
   FileWarning,
   Loader2,
   RotateCw,
@@ -21,6 +20,7 @@ import {
   interpretSubmitResponse,
   isFinal,
   kindLabel,
+  proposalTitle,
   submitPath,
   submitRequestBody,
   type DecisionOutcome,
@@ -55,20 +55,11 @@ export type QueueLaneData = { key: QueueLaneKey; label: string; items: QueueItem
 
 type Decided = QueueItem & { outcome: DecisionOutcome };
 
-/* Lane tones + risk pills use semantic state tokens (W9.0 coral rule) —
-   coral stays a brand accent, never a risk/error signal. */
-const laneMeta: Record<QueueLaneKey, { label: string; icon: LucideIcon; tone: string }> = {
-  PENDING_APPROVALS: { label: 'Pending approvals', icon: ShieldCheck, tone: 'text-[var(--info)]' },
-  COMPLIANCE_HOLDS: { label: 'Compliance holds', icon: ShieldAlert, tone: 'text-[var(--warn)]' },
-  EXPIRING_QUOTES: { label: 'Expiring quotes', icon: Clock3, tone: 'text-[var(--pending)]' },
-  FAILED_SETTLEMENTS: { label: 'Failed settlements', icon: XCircle, tone: 'text-[var(--error)]' },
-  ANOMALY_HALTS: { label: 'Anomaly halts', icon: AlertTriangle, tone: 'text-[var(--error)]' },
-};
-
-/* The word carries the level; the border and tint carry its colour. The
-   tokens as text on their own tints are under 4.5:1 at 13px (--warn 3.72,
-   --ok 4.25); ink is 8.75:1 or more on every tint. */
-function riskClass(risk: QueueItem['risk']) {
+/* Risk pills use semantic state tokens (W9.0 rule): a brand accent is never
+   a risk/error signal. The word carries the level; the border and tint carry
+   its colour. The tokens as text on their own tints are under 4.5:1 at 13px
+   (--warn 3.72, --ok 4.25); ink is 8.75:1 or more on every tint. */
+export function riskClass(risk: QueueItem['risk']) {
   if (risk === 'HIGH') return 'border-[var(--error)] bg-[var(--error-bg)] text-[#1F4452]';
   if (risk === 'MEDIUM') return 'border-[var(--warn)] bg-[var(--warn-bg)] text-[#1F4452]';
   return 'border-[var(--ok)] bg-[var(--ok-bg)] text-[#1F4452]';
@@ -128,12 +119,9 @@ function OutcomeLine({ outcome }: { outcome: DecisionOutcome }) {
 
 export default function ApprovalQueueBoard({
   live,
-  examples,
 }: {
   /** This workspace's proposals waiting for a decision. */
   live: QueueItem[];
-  /** Fixtures that show what each lane looks like. Never actionable. */
-  examples: { pending: QueueItem[]; lanes: QueueLaneData[] };
 }) {
   const [openItems, setOpenItems] = useState<QueueItem[]>(live);
   const [decided, setDecided] = useState<Decided[]>([]);
@@ -141,18 +129,6 @@ export default function ApprovalQueueBoard({
   const [inFlight, setInFlight] = useState<Record<string, QueueDecision>>({});
   const [confirmingReject, setConfirmingReject] = useState<string | null>(null);
   const [status, setStatus] = useState('');
-
-  const exampleTotals = useMemo(() => {
-    const map: Record<QueueLaneKey, number> = {
-      PENDING_APPROVALS: examples.pending.length,
-      COMPLIANCE_HOLDS: 0,
-      EXPIRING_QUOTES: 0,
-      FAILED_SETTLEMENTS: 0,
-      ANOMALY_HALTS: 0,
-    };
-    for (const lane of examples.lanes) map[lane.key] = lane.items.length;
-    return map;
-  }, [examples]);
 
   /**
    * Send the decision and show what the server says came of it. Nothing on
@@ -182,7 +158,7 @@ export default function ApprovalQueueBoard({
       delete next[item.id];
       return next;
     });
-    setStatus(`${item.recommendation}: ${outcome.message}`);
+    setStatus(`${proposalTitle(item.kind)}: ${outcome.message}`);
 
     if (isFinal(outcome)) {
       setOpenItems((current) => current.filter((row) => row.id !== item.id));
@@ -205,9 +181,9 @@ export default function ApprovalQueueBoard({
       }
     }
 
-    if (outcome.kind === 'executed') toast.success('Payment sent', { description: item.recommendation });
+    if (outcome.kind === 'executed') toast.success('Payment sent', { description: `${proposalTitle(item.kind)}, ${item.amountLabel}` });
     else if (outcome.kind === 'recorded') toast.success('Approval recorded', { description: outcome.message });
-    else if (outcome.kind === 'rejected') toast('Payment rejected', { description: item.recommendation });
+    else if (outcome.kind === 'rejected') toast('Payment rejected', { description: `${proposalTitle(item.kind)}, ${item.amountLabel}` });
     else if (outcome.kind === 'closed') toast(outcomeTone.closed.label, { description: outcome.message });
     else toast.error(outcomeTone[outcome.kind].label, { description: outcome.message });
   }
@@ -264,8 +240,10 @@ export default function ApprovalQueueBoard({
                   <div className="min-w-0">
                     <div className="flex items-center gap-2">
                       <FileWarning className="h-4 w-4 shrink-0 text-[var(--pending)]" aria-hidden="true" />
-                      <strong className="text-sm text-[#1F4452]">{item.recommendation}</strong>
+                      <strong className="text-sm text-[#1F4452]">{proposalTitle(item.kind)}</strong>
                     </div>
+                    {/* The recommendation is free text (an x402 one quotes the seller), so it is a detail under a headline Splash wrote. */}
+                    <p className="mt-1 line-clamp-2 text-[13px] font-medium text-[#326273]/90">{item.recommendation}</p>
                     <p className="mt-1 truncate text-[13px] font-medium text-[#326273]/90">
                       {item.id} · maker {item.maker} · {item.expiryLabel}
                     </p>
@@ -282,7 +260,7 @@ export default function ApprovalQueueBoard({
                   {confirming ? (
                     <div
                       role="group"
-                      aria-label={`Confirm rejecting ${item.recommendation}`}
+                      aria-label={`Confirm rejecting this ${proposalTitle(item.kind).toLowerCase()}, ${item.amountLabel}`}
                       className="flex flex-wrap items-center gap-2"
                       onKeyDown={(event) => {
                         if (event.key === 'Escape') setConfirmingReject(null);
@@ -357,7 +335,8 @@ export default function ApprovalQueueBoard({
             {decided.map((item) => (
               <li key={`${item.id}-${item.outcome.kind}`} className="grid gap-2 px-4 py-3 md:grid-cols-[1fr_1.4fr] md:items-start">
                 <div className="min-w-0">
-                  <strong className="text-sm text-[#1F4452]">{item.recommendation}</strong>
+                  <strong className="text-sm text-[#1F4452]">{proposalTitle(item.kind)}</strong>
+                  <p className="mt-0.5 line-clamp-2 text-[13px] font-medium text-[#326273]/90">{item.recommendation}</p>
                   <p className="mt-0.5 truncate text-[13px] font-medium text-[#326273]/90">
                     {item.id} · {item.amountLabel}
                   </p>
@@ -368,101 +347,6 @@ export default function ApprovalQueueBoard({
           </ul>
         </section>
       )}
-
-      <section
-        aria-labelledby="queue-examples-heading"
-        className="rounded-lg border border-dashed border-[#326273]/30 bg-[#326273]/[0.03] p-4"
-      >
-        <div className="flex flex-wrap items-baseline justify-between gap-2">
-          <h2 id="queue-examples-heading" className="text-sm font-bold uppercase tracking-[0.14em] text-[#326273]">
-            Examples
-          </h2>
-          <p className="text-[13px] font-medium text-[#326273]/90">
-            Sample proposals that show what each lane holds. They are not payments in your workspace and cannot be approved.
-          </p>
-        </div>
-
-        <div className="mt-4 grid gap-3 sm:grid-cols-3 md:grid-cols-5">
-          {(Object.keys(laneMeta) as QueueLaneKey[]).map((lane) => {
-            const meta = laneMeta[lane];
-            const Icon = meta.icon;
-            return (
-              <div key={lane} className="rounded-lg border border-[#326273]/14 bg-white/60 p-4">
-                <div className="flex items-center justify-between gap-3">
-                  <Icon className={`h-5 w-5 ${meta.tone}`} aria-hidden="true" />
-                  <span className="text-2xl font-bold tabular-nums text-[#1F4452]">{exampleTotals[lane]}</span>
-                </div>
-                <p className="mt-3 text-sm font-bold text-[#326273]">{meta.label}</p>
-              </div>
-            );
-          })}
-        </div>
-
-        {examples.pending.length > 0 && (
-          <ul className="mt-4 divide-y divide-[#326273]/10 rounded-lg border border-[#326273]/14 bg-white/60">
-            {examples.pending.map((item) => (
-              <li key={`example-${item.id}`} className="flex flex-wrap items-center justify-between gap-3 px-4 py-3">
-                <div className="min-w-0">
-                  <div className="flex items-center gap-2">
-                    <span className="rounded border border-[#326273]/25 px-1.5 py-0.5 text-[12px] font-bold uppercase tracking-[0.1em] text-[#326273]/90">
-                      Example
-                    </span>
-                    <strong className="text-sm text-[#1F4452]">{item.recommendation}</strong>
-                  </div>
-                  <p className="mt-1 text-[13px] font-medium text-[#326273]/90">
-                    {kindLabel(item.kind)} · <span className="money">{item.amountLabel}</span> · {item.approvalsCollected} of{' '}
-                    {item.requiredApprovers} approvers · {item.expiryLabel}
-                  </p>
-                </div>
-                <span className={`w-fit rounded-md border px-2 py-1 text-[13px] font-bold ${riskClass(item.risk)}`}>{item.risk}</span>
-              </li>
-            ))}
-          </ul>
-        )}
-
-        <div className="mt-4 grid gap-4 lg:grid-cols-2">
-          {examples.lanes.map((lane) => {
-            const meta = laneMeta[lane.key];
-            const Icon = meta.icon;
-            return (
-              <div key={lane.key} className="rounded-lg border border-[#326273]/14 bg-white/60">
-                <div className="flex items-center justify-between border-b border-[#326273]/10 px-4 py-3">
-                  <div className="flex items-center gap-2">
-                    <Icon className={`h-4 w-4 ${meta.tone}`} aria-hidden="true" />
-                    <h3 className="text-sm font-bold text-[#1F4452]">{meta.label}</h3>
-                  </div>
-                  <span className="text-sm font-bold tabular-nums text-[#326273]">{lane.items.length}</span>
-                </div>
-                <ul className="divide-y divide-[#326273]/10">
-                  {lane.items.map((item) => (
-                    <li key={`${lane.key}-${item.id}`} className="grid gap-2 px-4 py-3 text-sm">
-                      <div className="flex items-center justify-between gap-3">
-                        <strong className="min-w-0 truncate text-[#1F4452]">{item.recommendation}</strong>
-                        <span className="shrink-0 text-[13px] font-bold tabular-nums text-[#326273]/90">{item.expiryLabel}</span>
-                      </div>
-                      <div className="flex flex-wrap items-center gap-2 text-[13px] font-medium text-[#326273]/90">
-                        <span>{kindLabel(item.kind)}</span>
-                        <span className="money">{item.amountLabel}</span>
-                        {item.reason && <span>{item.reason}</span>}
-                      </div>
-                    </li>
-                  ))}
-                  {lane.items.length === 0 && <li className="px-4 py-5 text-sm font-medium text-[#326273]/90">Clear</li>}
-                </ul>
-              </div>
-            );
-          })}
-        </div>
-      </section>
-
-      <div className="flex flex-wrap items-center gap-2 pt-1">
-        <Link
-          href="/dashboard"
-          className="rounded-md border border-[#326273]/20 px-3 py-2 text-sm font-bold text-[#326273] focus-ring"
-        >
-          Back to Zeke
-        </Link>
-      </div>
     </>
   );
 }

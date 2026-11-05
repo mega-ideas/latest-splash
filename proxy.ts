@@ -3,6 +3,7 @@ import { randomBytes } from 'node:crypto';
 import { NextResponse, type NextRequest } from 'next/server';
 
 import { isAdminHostname } from '@/lib/admin-routing';
+import { withReturnHeader } from '@/lib/approve/link';
 import { buildContentSecurityPolicy } from '@/lib/security/csp';
 
 /**
@@ -34,6 +35,11 @@ export function proxy(request: NextRequest) {
     requestHeaders.set('x-nonce', nonce);
     requestHeaders.set('Content-Security-Policy', policy);
   }
+  // The dashboard layout sends a signed-out visitor to sign in and back to the
+  // Approve screen they were linked to (lib/approve/link.ts). The header is
+  // set here, from the path, for that one shape only; whatever the browser
+  // sent under that name is dropped first, so it cannot name another place.
+  withReturnHeader(requestHeaders, pathname, rendersPage);
   const withPolicy = (response: NextResponse) => {
     if (policy) response.headers.set('Content-Security-Policy', policy);
     return response;

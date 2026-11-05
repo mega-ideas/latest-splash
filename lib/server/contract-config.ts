@@ -98,6 +98,27 @@ function readFileConfig(): Partial<ContractConfig> {
   }
 }
 
+/**
+ * v2 (D11): splash_custody and splash_meter are retired from the mainnet path.
+ * lib/env.ts refuses these two at boot on mainnet, but this file overrides the
+ * environment at runtime and staff can write it, so the rule is enforced here
+ * too, where every reader reads: on mainnet they read as unset whatever the
+ * file or the environment says, and a save that sets one is refused.
+ */
+const RETIRED_ON_MAINNET: readonly ContractConfigField[] = ['custodyPackageId', 'payoutDelegationId'];
+
+/** The same test lib/sui.ts makes for SUI_NETWORK. */
+function onMainnet(): boolean {
+  return process.env.SUI_NETWORK === 'mainnet';
+}
+
+function withoutRetired(config: ContractConfig): ContractConfig {
+  if (!onMainnet()) return config;
+  const out = { ...config };
+  for (const field of RETIRED_ON_MAINNET) out[field] = '';
+  return out;
+}
+
 export function getContractConfig(): ContractConfig {
   let mtimeMs = 0;
   try {
@@ -107,12 +128,12 @@ export function getContractConfig(): ContractConfig {
   }
 
   if (cached && cached.mtimeMs === mtimeMs) {
-    return cached.config;
+    return withoutRetired(cached.config);
   }
 
   const merged: ContractConfig = { ...envFallback(), ...readFileConfig() };
   cached = { config: merged, mtimeMs, readAt: Date.now() };
-  return merged;
+  return withoutRetired(merged);
 }
 
 export function getContractConfigMeta() {
@@ -197,6 +218,14 @@ export function validateContractConfig(input: Partial<ContractConfig>): { ok: tr
     if (!value) continue;
     if (!isMoveTypeLike(value)) {
       errors[field] = 'Must be a Move type, e.g. 0xpkg::module::TYPE.';
+    }
+  }
+
+  if (onMainnet()) {
+    for (const field of RETIRED_ON_MAINNET) {
+      if ((input[field] ?? '').trim()) {
+        errors[field] = 'Retired on mainnet in v2: splash_custody and splash_meter do not publish there. Leave it empty.';
+      }
     }
   }
 

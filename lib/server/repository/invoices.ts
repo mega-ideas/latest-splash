@@ -21,7 +21,7 @@
  * handed to a payer who has no account, the slug is unguessable, and it
  * resolves to exactly one invoice and nothing else. Every OTHER read is scoped.
  */
-import { and, desc, eq } from 'drizzle-orm';
+import { and, desc, eq, inArray } from 'drizzle-orm';
 import type { PgDatabase } from 'drizzle-orm/pg-core';
 
 import { invoices } from '../../db/schema.ts';
@@ -52,6 +52,18 @@ export type InvoiceRow = {
   /** Paid in USDC on Sui to the issuer's own wallet: the proving transaction. */
   usdcTxDigest?: string;
   usdcPaidAt?: string;
+  /** What the payer said from the pay link (0058): a report, never the
+   *  issuer's `paymentReference` and never the evidence that it was paid. */
+  payerReportedReference?: string;
+  payerReportedAt?: string;
+  /** Who the payer said they were (0059). `payerOrgName`/`payerOrgEmail` stay the issuer's. */
+  payerReportedName?: string;
+  payerReportedEmail?: string;
+  /** The reference on the business's statement, typed with "Mark as paid" (0059). */
+  receivedReference?: string;
+  /** The create dialog's key and the fingerprint of what it sent (0060). */
+  createKey?: string;
+  createFingerprint?: string;
   createdAt: string;
   updatedAt: string;
 };
@@ -103,12 +115,19 @@ function toRow(row: InvoiceSelect): InvoiceRow {
     demo: row.demo,
     usdcTxDigest: row.usdcTxDigest ?? undefined,
     usdcPaidAt: row.usdcPaidAt ? row.usdcPaidAt.toISOString() : undefined,
+    payerReportedReference: row.payerReportedReference ?? undefined,
+    payerReportedAt: row.payerReportedAt ? row.payerReportedAt.toISOString() : undefined,
+    payerReportedName: row.payerReportedName ?? undefined,
+    payerReportedEmail: row.payerReportedEmail ?? undefined,
+    receivedReference: row.receivedReference ?? undefined,
+    createKey: row.createKey ?? undefined,
+    createFingerprint: row.createFingerprint ?? undefined,
     createdAt: row.createdAt.toISOString(),
     updatedAt: row.updatedAt.toISOString(),
   };
 }
 
-export type NewInvoice = Omit<InvoiceRow, 'createdAt' | 'updatedAt'>;
+export type NewInvoice = Omit<InvoiceRow, 'createdAt' | 'updatedAt' | 'payerReportedReference' | 'payerReportedAt' | 'payerReportedName' | 'payerReportedEmail' | 'receivedReference'>;
 
 export async function insertInvoice(db: DrizzleDb, input: NewInvoice): Promise<InvoiceRow> {
   const [row] = await db
@@ -133,9 +152,26 @@ export async function insertInvoice(db: DrizzleDb, input: NewInvoice): Promise<I
       documentSha256: input.documentSha256 ?? null,
       transferIntentId: input.transferIntentId ?? null,
       demo: input.demo ?? false,
+      createKey: input.createKey ?? null,
+      createFingerprint: input.createFingerprint ?? null,
     })
     .returning();
   return toRow(row);
+}
+
+/** `orgId`'s invoice made under this create key, or null. Another org's reads as absent. */
+export async function findInvoiceByCreateKey(
+  db: DrizzleDb,
+  orgId: string,
+  createKey: string,
+): Promise<InvoiceRow | null> {
+  if (!orgId || !createKey) return null;
+  const rows = await db
+    .select()
+    .from(invoices)
+    .where(and(eq(invoices.orgId, orgId), eq(invoices.createKey, createKey)))
+    .limit(1);
+  return rows.length > 0 ? toRow(rows[0]) : null;
 }
 
 /** One invoice belonging to `orgId`. A foreign id reads as missing. */
@@ -211,16 +247,22 @@ export async function listInvoices(
  * `orgId` is in the WHERE clause, not checked beforehand: a read-then-write
  * leaves a window where the row could change owner between the two, and the
  * point of this change is that a write cannot cross the tenant boundary.
+ *
+ * With `expect`, only while the invoice is still in the status the caller
+ * read: a USDC sync that settled it in between is not overwritten with an
+ * older status. Null when nothing changed.
  */
 export async function patchInvoice(
   db: DrizzleDb,
   orgId: string,
   invoiceId: string,
   patch: Partial<InvoiceRow>,
+  expect?: { status: string },
 ): Promise<InvoiceRow | null> {
   const update: Record<string, unknown> = { updatedAt: new Date() };
   if (patch.status !== undefined) update.status = patch.status;
   if (patch.paymentReference !== undefined) update.paymentReference = patch.paymentReference;
+  if (patch.receivedReference !== undefined) update.receivedReference = patch.receivedReference;
   if (patch.transferIntentId !== undefined) update.transferIntentId = patch.transferIntentId;
   if (patch.payerOrgName !== undefined) update.payerName = patch.payerOrgName;
   if (patch.payerOrgEmail !== undefined) update.payerEmail = patch.payerOrgEmail;
@@ -233,7 +275,7 @@ export async function patchInvoice(
   const rows = await db
     .update(invoices)
     .set(update)
-    .where(and(eq(invoices.id, invoiceId), eq(invoices.orgId, orgId)))
+    .where(and(eq(invoices.id, invoiceId), eq(invoices.orgId, orgId), expect ? eq(invoices.status, expect.status) : undefined))
     .returning();
   return rows.length > 0 ? toRow(rows[0]) : null;
 }
@@ -247,6 +289,38 @@ export async function patchInvoiceForStaff(
 ): Promise<InvoiceRow | null> {
   const row = await getInvoiceForStaff(db, invoiceId);
   return row ? patchInvoice(db, row.orgId, invoiceId, patch) : null;
+}
+
+export type PaymentReport = { payerOrgName: string; payerOrgEmail: string; reference: string; at: Date };
+
+/**
+ * The payer says they paid, from the pay link. By id alone (the slug already
+ * established which invoice), and only while the invoice is in one of
+ * `from`: a guarded UPDATE, so a report never lands on an invoice that is
+ * already reported, paid or settled, and two reports racing cannot both
+ * land. The report is kept in its own columns; the issuer's
+ * `payment_reference`, payer name and payer email are never touched. Null
+ * when nothing changed.
+ */
+export async function reportPayment(
+  db: DrizzleDb,
+  invoiceId: string,
+  from: readonly string[],
+  report: PaymentReport,
+): Promise<InvoiceRow | null> {
+  const rows = await db
+    .update(invoices)
+    .set({
+      status: 'reported',
+      payerReportedName: report.payerOrgName,
+      payerReportedEmail: report.payerOrgEmail,
+      payerReportedReference: report.reference,
+      payerReportedAt: report.at,
+      updatedAt: report.at,
+    })
+    .where(and(eq(invoices.id, invoiceId), inArray(invoices.status, [...from])))
+    .returning();
+  return rows.length > 0 ? toRow(rows[0]) : null;
 }
 
 export const __testing = { toMinor, fromMinor };

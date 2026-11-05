@@ -59,10 +59,21 @@ export const RATE_LIMITS = {
   // A payer checking for their USDC payment: each check reads the issuer's
   // wallet from the Sui indexer. Public, so bounded by network.
   payLinkUsdcIp: { bucket: 'pay-link-usdc:ip', limit: 30, windowMs: 15 * MINUTE },
+  // A supplier opening or signing its wallet ownership proof (v2 §4.7).
+  // Public: the link's token is the capability, so bounded by network.
+  ownershipProofIp: { bucket: 'ownership-proof:ip', limit: 30, windowMs: 15 * MINUTE },
+  // A business making (and emailing) an ownership-proof link.
+  ownershipProofUser: { bucket: 'ownership-proof:user', limit: 20, windowMs: HOUR },
   // The issuer matching all open invoices against one read of its wallet.
   invoiceUsdcSyncUser: { bucket: 'invoice-usdc-sync:user', limit: 30, windowMs: 15 * MINUTE },
   // Each treasury quote asks the Cetus aggregator what Sui can fill.
   treasuryQuoteUser: { bucket: 'treasury-quote:user', limit: 30, windowMs: 15 * MINUTE },
+  // The Treasury page's overview (GET /api/treasury/wallet): two balance
+  // reads from Sui and the org's orders, on every visit and after each action.
+  treasuryOverviewUser: { bucket: 'treasury-overview:user', limit: 120, windowMs: 15 * MINUTE },
+  // Home's summary (GET /api/home) reads the org's transfers, wallet
+  // payments and approvals on every sign-in and every refresh.
+  homeSummaryUser: { bucket: 'home-summary:user', limit: 120, windowMs: 15 * MINUTE },
   /** Zeke chat spends model credits per message. */
   copilotChatUser: { bucket: 'copilot-chat:user', limit: 30, windowMs: HOUR },
   /** The read-only copilot surfaces (suggestions, summary), per user and per network. */
@@ -78,6 +89,32 @@ export const RATE_LIMITS = {
   // Each quote reserves allowance and reads the sender's coins from a fullnode.
   stablecoinQuoteUser: { bucket: 'stablecoin-quote:user', limit: 30, windowMs: 15 * MINUTE },
   stablecoinSubmitUser: { bucket: 'stablecoin-submit:user', limit: 30, windowMs: 15 * MINUTE },
+  // A business wallet request reads the chain, simulates, and asks the
+  // sponsor to pay; per person and per business (v2 §4.1). The sponsor's
+  // own 24-hour gas budget per business sits behind these.
+  walletRequestUser: { bucket: 'wallet-request:user', limit: 20, windowMs: HOUR },
+  walletRequestOrg: { bucket: 'wallet-request:org', limit: 60, windowMs: HOUR },
+  // Adding, changing and removing people, the Finance lead, and Add funds / Withdraw access: authority changes, so few per hour.
+  teamChangeUser: { bucket: 'team-change:user', limit: 60, windowMs: HOUR },
+  teamChangeOrg: { bucket: 'team-change:org', limit: 200, windowMs: HOUR },
+  // "Remind them now" on a waiting request: the real limit is once per 10 minutes per request (lib/server/approval-wait.ts); this only stops a person pressing it across many requests.
+  approvalRemindUser: { bucket: 'approval-remind:user', limit: 30, windowMs: HOUR },
+  // A person changing their own job title: every member may, and each change is a line on the trail, so a handful an hour is plenty.
+  memberTitleSelf: { bucket: 'member-title:self', limit: 6, windowMs: HOUR },
+  // Asking for, cancelling and lowering a limit: a handful a day is plenty; per person.
+  limitChangeUser: { bucket: 'limit-change:user', limit: 30, windowMs: HOUR },
+  // The Wallet page reads the balance and the funds in personal wallets from the chain on every load; per person, high enough that reloads are never refused.
+  walletReadUser: { bucket: 'wallet-read:user', limit: 300, windowMs: HOUR },
+  // A payment's controls evidence and sender declaration read the chain and
+  // write a PDF (v2 §4.6); per person. Opening a Sumsub verification asks a
+  // paid provider for a token; per business.
+  complianceReadUser: { bucket: 'compliance-read:user', limit: 120, windowMs: HOUR },
+  // One payment's evidence is a chain read and a PDF; an accountant exports a quarter's at once.
+  controlsEvidenceUser: { bucket: 'controls-evidence:user', limit: 600, windowMs: HOUR },
+  // Transfer: a search by registered name is a read of other businesses' names (capped so it cannot list them); a send is an email from Splash.
+  transferSearchUser: { bucket: 'transfer-search:user', limit: 60, windowMs: HOUR },
+  receiptSendUser: { bucket: 'receipt-send:user', limit: 30, windowMs: HOUR },
+  kybSessionOrg: { bucket: 'kyb-session:org', limit: 20, windowMs: HOUR },
   // Each request sends a WhatsApp message; the per-subject cooldown stops a
   // double-click, this stops a loop.
   stepUpRequestUser: { bucket: 'step-up-request:user', limit: 10, windowMs: 15 * MINUTE },
@@ -89,6 +126,13 @@ export const RATE_LIMITS = {
   stablecoinActivityUser: { bucket: 'stablecoin-activity:user', limit: 60, windowMs: 15 * MINUTE },
   // The records export reads every transfer the workspace ever quoted.
   stablecoinExportUser: { bucket: 'stablecoin-export:user', limit: 20, windowMs: HOUR },
+
+  /* ── The public landing (v2 Phase 4) ───────────────────────────────── */
+  // The calculator's quote asks the payout partner for a rate on every
+  // amount typed; the client waits for typing to pause, this bounds a script.
+  quotePreviewIp: { bucket: 'quote-preview:ip', limit: 120, windowMs: 15 * MINUTE },
+  // A request for pilot access writes a row; a few a day is a real company.
+  accessRequestIp: { bucket: 'access-request:ip', limit: 10, windowMs: HOUR },
 } as const satisfies Record<string, RateLimitRule>;
 
 /**

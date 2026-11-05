@@ -1,4 +1,4 @@
-import { eq } from 'drizzle-orm';
+import { and, eq } from 'drizzle-orm';
 import type { PgDatabase } from 'drizzle-orm/pg-core';
 
 import { organizations } from '../db/schema.ts';
@@ -7,6 +7,7 @@ import {
   assertTransition,
   coarseKybStatus,
   toKybLifecycleState,
+  KybTransitionError,
   type KybActor,
   type KybLifecycleState,
 } from './kyb-state.ts';
@@ -99,10 +100,16 @@ export async function setOrgKybState(
 
   const db = await resolveDb();
   if (db) {
-    await db
+    // Compare and set: the write lands only while the state is still the one
+    // the move was checked against. A provider's webhook and an admin's
+    // decision running together cannot overwrite each other; the one that
+    // lost is refused as any illegal move is, and reads the state again.
+    const written = await db
       .update(organizations)
       .set({ kybLifecycle: to, kybStatus: coarseKybStatus(to), updatedAt: new Date() })
-      .where(eq(organizations.id, orgId));
+      .where(and(eq(organizations.id, orgId), eq(organizations.kybLifecycle, from)))
+      .returning({ id: organizations.id });
+    if (written.length === 0) throw new KybTransitionError(from, to, actor, 'the business changed state while this was decided');
   }
 
   console.info('[org-kyb] transition', { orgId, from, to, actor });

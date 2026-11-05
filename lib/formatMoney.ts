@@ -1,5 +1,10 @@
 const moneyFormatters = new Map<string, Intl.NumberFormat>();
 
+/** How many places the currency's minor unit has (formatMoney's own rule). */
+export function currencyDecimals(currency: string) {
+  return decimalsFor(currency);
+}
+
 function decimalsFor(currency: string) {
   const code = currency.toUpperCase();
   if (code === 'JPY' || code === 'KRW' || code === 'VND' || code === 'IDR') return 0;

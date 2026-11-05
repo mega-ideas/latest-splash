@@ -197,6 +197,6 @@ account for, or a host compromise.
 
 - The cold multisig itself — `docs/KEY-CEREMONY-RUNBOOK.md`.
 - The CLI scripts under `scripts/` (`bootstrap-testnet.ts`, `e2e-testnet.mjs`,
-  `fund-settlement-pool.mjs`, `set-compliance-config.mjs`) still read a raw
+  `set-compliance-config.mjs`) still read a raw
   `OPERATOR_SUI_PRIVATE_KEY`. They are testnet and workstation tools, never
   run on the production host, and production refuses to boot with that key.

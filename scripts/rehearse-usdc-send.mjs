@@ -16,10 +16,12 @@
  *
  * What it rehearses, in the order the app tries them:
  *   1. the transfer as Send USDC quotes it today — gasless (no network fee,
- *      no SUI needed), with a fee leg only if the audit-anchor fee is on;
- *   2. the audit-anchor fee leg, paid to SPLASH_FEE_ADDRESS_MAINNET when it is
- *      set (loaded from .env.local), so the fee wallet is proven before the
- *      fee is switched on; otherwise to a placeholder (0x…fee);
+ *      no SUI needed), with a fee leg only if Splash's wallet fee is on;
+ *   2. the wallet fee leg (the WALLET schedule's fee), paid to the mainnet
+ *      FeeConfig's fee recipient when it can be read (SPLASH_FEE_CONFIG_ID
+ *      from .env.local, lib/server/stablecoin-fee.ts), so the recipient is
+ *      proven before the fee is switched on; otherwise to a placeholder
+ *      (0x…fee);
  *   3. the fallback, where the sending wallet pays gas in SUI (x402 uses this
  *      shape too) — skipped for a wallet with no SUI, which only it needs;
  *   4. what a wallet with no USDC is told.
@@ -38,6 +40,7 @@ import {
 } from '../lib/payments/stablecoin-lane.ts';
 import { verifyStablecoinTransfer } from '../lib/payments/stablecoin-verify.ts';
 import { buildTransferBytes, describeBuildError, digestOf, laneClient, senderOf, simulateTransfer } from '../lib/server/stablecoin-chain.ts';
+import { laneWalletFee } from '../lib/server/stablecoin-fee.ts';
 import { Transaction } from '@mysten/sui/transactions';
 
 const USDC = SUI_USDC_COIN_TYPE.mainnet;
@@ -46,7 +49,9 @@ const GRAPHQL = process.env.SUI_GRAPHQL_URL || 'https://graphql.mainnet.sui.io/g
 const RECIPIENT = `0x${'aa'.repeat(32)}`;
 // .env.local, as `next dev` reads it; a dry run needs no secret from it.
 try { process.loadEnvFile('.env.local'); } catch { /* no file: the defaults */ }
-const CONFIGURED_FEE = (process.env.SPLASH_FEE_ADDRESS_MAINNET ?? '').trim();
+// The FeeConfig's recipient, read as if the fee were on, so it is proven first.
+const walletFee = await laneWalletFee({ ...process.env, STABLECOIN_ANCHOR_FEE: 'on' });
+const CONFIGURED_FEE = walletFee.recipient ?? '';
 const FEE = /^0x[0-9a-fA-F]{64}$/.test(CONFIGURED_FEE) ? CONFIGURED_FEE : `0x${'0'.repeat(61)}fee`;
 const EMPTY_WALLET = `0x${'0'.repeat(62)}42`;
 
@@ -144,8 +149,8 @@ const principal = parseUsdcMinor(amount);
 const anchorOn = anchorFeeEnabled();
 const gaslessOn = gaslessEnabled();
 // As Send USDC quotes a transfer out of Splash (a Splash user's wallet is always free).
-const quote = quoteStablecoinTransfer(principal, { destination: 'EXTERNAL', anchorFeeOn: anchorOn });
-const anchorFee = stablecoinFeeMinor(principal, 'EXTERNAL', true);
+const quote = quoteStablecoinTransfer(principal, { destination: 'EXTERNAL', anchorFeeOn: anchorOn && walletFee.on, schedule: walletFee.schedule });
+const anchorFee = stablecoinFeeMinor(principal, 'EXTERNAL', true, walletFee.schedule);
 const appLegs = [
   { address: RECIPIENT, amountMinor: quote.principalMinor },
   ...(quote.feeMinor > 0n ? [{ address: FEE, amountMinor: quote.feeMinor }] : []),
@@ -153,8 +158,8 @@ const appLegs = [
 const anchorLegs = [{ address: RECIPIENT, amountMinor: principal }, { address: FEE, amountMinor: anchorFee }];
 
 console.log(`Rehearsing ${formatUsdc(principal)} USDC on Sui mainnet (${process.env.SUI_MAINNET_RPC_URL || 'fullnode.mainnet.sui.io'}). Nothing is signed or sent.`);
-console.log(`Splash fee today: ${quote.feeMinor > 0n ? `${formatUsdc(quote.feeMinor)} USDC audit-anchor fee (STABLECOIN_ANCHOR_FEE=on)` : 'free'}. Network fee: ${gaslessOn ? 'none (gasless)' : 'paid in SUI (STABLECOIN_GASLESS=off)'}.`);
-console.log(`Fee wallet: ${FEE === CONFIGURED_FEE ? `${FEE.slice(0, 6)}…${FEE.slice(-4)} (SPLASH_FEE_ADDRESS_MAINNET)` : 'a placeholder (SPLASH_FEE_ADDRESS_MAINNET is not set)'}\n`);
+console.log(`Splash fee today: ${quote.feeMinor > 0n ? `${formatUsdc(quote.feeMinor)} USDC wallet fee (STABLECOIN_ANCHOR_FEE=on)` : 'free'}. Network fee: ${gaslessOn ? 'none (gasless)' : 'paid in SUI (STABLECOIN_GASLESS=off)'}.`);
+console.log(`Fee recipient: ${FEE === CONFIGURED_FEE ? `${FEE.slice(0, 6)}…${FEE.slice(-4)} (the mainnet FeeConfig's)` : `a placeholder (${walletFee.reason ?? 'the FeeConfig has no fee recipient yet'})`}\n`);
 
 const sender = arg('sender') ?? await findHolder(client, principal + anchorFee);
 if (!sender) {
@@ -167,13 +172,13 @@ console.log(`Sender ${sender}: ${formatUsdc(before.usdc)} USDC, ${Number(before.
 // 1. The transfer Send USDC would hand the wallet today.
 if (!(await rehearse('Send USDC today', { sender, legs: appLegs, gas: gaslessOn ? 'GASLESS' : 'SENDER_PAYS' }))) process.exit(1);
 
-// 2. The audit-anchor fee leg, before it is switched on (already covered by 1
+// 2. The wallet fee leg, before it is switched on (already covered by 1
 // when it is on). It needs the fee on top, which a wallet funded for exactly
 // the transfer does not hold — that is not a failure of today's transfer.
 console.log('');
-if (quote.feeMinor > 0n) skip('Audit-anchor fee leg', 'already rehearsed above: the fee is on.');
-else if (before.usdc < principal + anchorFee) skip('Audit-anchor fee leg', `the wallet holds under ${formatUsdc(principal + anchorFee)} USDC (the amount plus the ${formatUsdc(anchorFee)} fee). Rehearse it with a smaller --amount.`);
-else await rehearse(`Audit-anchor fee leg (${formatUsdc(anchorFee)} USDC)`, { sender, legs: anchorLegs, gas: 'GASLESS' });
+if (quote.feeMinor > 0n) skip('Wallet fee leg', 'already rehearsed above: the fee is on.');
+else if (before.usdc < principal + anchorFee) skip('Wallet fee leg', `the wallet holds under ${formatUsdc(principal + anchorFee)} USDC (the amount plus the ${formatUsdc(anchorFee)} fee). Rehearse it with a smaller --amount.`);
+else await rehearse(`Wallet fee leg (${formatUsdc(anchorFee)} USDC)`, { sender, legs: anchorLegs, gas: 'GASLESS' });
 
 // 3. The fallback: the sending wallet pays gas in SUI.
 console.log('');

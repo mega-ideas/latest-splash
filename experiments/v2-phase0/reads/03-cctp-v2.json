@@ -1,0 +1,977 @@
+{
+  "source": "https://developers.circle.com/cctp/references/sui-packages",
+  "domain": 8,
+  "resolved": {
+    "mainnet": {
+      "MessageTransmitterV2 package": "package (v1, 18 modules)",
+      "TokenMessengerMinterV2 package": "package (v1, 18 modules)",
+      "StablecoinHandler package": "package (v1, 8 modules)",
+      "CctpExtensions package": "package (v1, 1 modules)",
+      "MessageTransmitterV2 state": "Shared object 0x16bcfcfc465f96281663a344641c017de84529370e11aa3879d0dce43ad6db87::state::State",
+      "TokenMessengerMinterV2 state": "Shared object 0xeb14978abfe93a37c5d5bf86a0623b923553a5f0e794daac7724f1e2fdbfb830::state::State",
+      "StablecoinHandler state": "Shared object 0x185ed207c4d64fc594882ab927f9f3c6ff957aad03df8a731ba64378faeeb2bf::state::State",
+      "USDC Treasury": "Shared object 0xecf47609d7da919ea98e7fd04f6e0648a0a79b337aaad373fa37aac8febf19c8::treasury::Treasury<0xdba34672e30cb065b1f93e3ab55318768fd6fef66c15942c9f7cb846e2f900e7::usdc::USDC>"
+    },
+    "testnet": {
+      "MessageTransmitterV2 package": "package (v1, 18 modules)",
+      "TokenMessengerMinterV2 package": "package (v1, 18 modules)",
+      "StablecoinHandler package": "package (v1, 8 modules)",
+      "CctpExtensions package": "package (v1, 1 modules)",
+      "MessageTransmitterV2 state": "Shared object 0xe9678cd42a81886e18e21361088071f275105636a4d3751e1d7f255211f73bbe::state::State",
+      "TokenMessengerMinterV2 state": "Shared object 0x267d3c0cb776eace2840f27e4d33da9c6d952f9749403f1fe6579f4962ed3c64::state::State",
+      "StablecoinHandler state": "Shared object 0xbe8479044396a45e07de2c7f14789c35b8338406eebc53b2527da56839a91561::state::State",
+      "USDC Treasury": "Shared object 0x346e3233f61eb0055713417bfaddda7dc3bf26816faad1f7606994a368b92917::treasury::Treasury<0xa1ec7fc00a6f40db9693ad1415d0c193ad3906494428cf252621037bd7117e29::usdc::USDC>"
+    }
+  },
+  "raw": {
+    "mainnet": {
+      "MessageTransmitterV2 package": {
+        "network": "mainnet",
+        "endpoint": "https://graphql.mainnet.sui.io/graphql",
+        "readAt": "2026-10-23T19:47:21.003Z",
+        "query": "{ object(address:\"0x16bcfcfc465f96281663a344641c017de84529370e11aa3879d0dce43ad6db87\") { owner { __typename } asMovePackage { version modules { nodes { name } } } asMoveObject { contents { type { repr } } } } }",
+        "response": {
+          "data": {
+            "object": {
+              "owner": {
+                "__typename": "Immutable"
+              },
+              "asMovePackage": {
+                "version": 1,
+                "modules": {
+                  "nodes": [
+                    {
+                      "name": "attestation"
+                    },
+                    {
+                      "name": "attester_manager"
+                    },
+                    {
+                      "name": "auth"
+                    },
+                    {
+                      "name": "deserialize"
+                    },
+                    {
+                      "name": "initialize"
+                    },
+                    {
+                      "name": "message"
+                    },
+                    {
+                      "name": "message_size"
+                    },
+                    {
+                      "name": "migration"
+                    },
+                    {
+                      "name": "pausable"
+                    },
+                    {
+                      "name": "receive_message"
+                    },
+                    {
+                      "name": "rescuable"
+                    },
+                    {
+                      "name": "role_management"
+                    },
+                    {
+                      "name": "roles"
+                    },
+                    {
+                      "name": "send_message"
+                    },
+                    {
+                      "name": "serialize"
+                    },
+                    {
+                      "name": "state"
+                    },
+                    {
+                      "name": "vector_utils"
+                    },
+                    {
+                      "name": "version_control"
+                    }
+                  ]
+                }
+              },
+              "asMoveObject": null
+            }
+          }
+        }
+      },
+      "TokenMessengerMinterV2 package": {
+        "network": "mainnet",
+        "endpoint": "https://graphql.mainnet.sui.io/graphql",
+        "readAt": "2026-10-23T19:47:22.053Z",
+        "query": "{ object(address:\"0xeb14978abfe93a37c5d5bf86a0623b923553a5f0e794daac7724f1e2fdbfb830\") { owner { __typename } asMovePackage { version modules { nodes { name } } } asMoveObject { contents { type { repr } } } } }",
+        "response": {
+          "data": {
+            "object": {
+              "owner": {
+                "__typename": "Immutable"
+              },
+              "asMovePackage": {
+                "version": 1,
+                "modules": {
+                  "nodes": [
+                    {
+                      "name": "burn_message"
+                    },
+                    {
+                      "name": "denylistable"
+                    },
+                    {
+                      "name": "deposit_for_burn"
+                    },
+                    {
+                      "name": "fee_controller"
+                    },
+                    {
+                      "name": "handle_receive_message"
+                    },
+                    {
+                      "name": "handler_registry"
+                    },
+                    {
+                      "name": "initialize"
+                    },
+                    {
+                      "name": "message_transmitter_authenticator"
+                    },
+                    {
+                      "name": "migration"
+                    },
+                    {
+                      "name": "pausable"
+                    },
+                    {
+                      "name": "remote_token_messenger"
+                    },
+                    {
+                      "name": "rescuable"
+                    },
+                    {
+                      "name": "role_management"
+                    },
+                    {
+                      "name": "roles"
+                    },
+                    {
+                      "name": "state"
+                    },
+                    {
+                      "name": "token_controller"
+                    },
+                    {
+                      "name": "token_utils"
+                    },
+                    {
+                      "name": "version_control"
+                    }
+                  ]
+                }
+              },
+              "asMoveObject": null
+            }
+          }
+        }
+      },
+      "StablecoinHandler package": {
+        "network": "mainnet",
+        "endpoint": "https://graphql.mainnet.sui.io/graphql",
+        "readAt": "2026-10-23T19:47:23.039Z",
+        "query": "{ object(address:\"0x185ed207c4d64fc594882ab927f9f3c6ff957aad03df8a731ba64378faeeb2bf\") { owner { __typename } asMovePackage { version modules { nodes { name } } } asMoveObject { contents { type { repr } } } } }",
+        "response": {
+          "data": {
+            "object": {
+              "owner": {
+                "__typename": "Immutable"
+              },
+              "asMovePackage": {
+                "version": 1,
+                "modules": {
+                  "nodes": [
+                    {
+                      "name": "handler"
+                    },
+                    {
+                      "name": "initialize"
+                    },
+                    {
+                      "name": "migration"
+                    },
+                    {
+                      "name": "mint_controller"
+                    },
+                    {
+                      "name": "role_management"
+                    },
+                    {
+                      "name": "roles"
+                    },
+                    {
+                      "name": "state"
+                    },
+                    {
+                      "name": "version_control"
+                    }
+                  ]
+                }
+              },
+              "asMoveObject": null
+            }
+          }
+        }
+      },
+      "CctpExtensions package": {
+        "network": "mainnet",
+        "endpoint": "https://graphql.mainnet.sui.io/graphql",
+        "readAt": "2026-10-23T19:47:23.318Z",
+        "query": "{ object(address:\"0x194c593691aed72b23b967cacad967a93c0b17ff98180d417e91ac503ce3597d\") { owner { __typename } asMovePackage { version modules { nodes { name } } } asMoveObject { contents { type { repr } } } } }",
+        "response": {
+          "data": {
+            "object": {
+              "owner": {
+                "__typename": "Immutable"
+              },
+              "asMovePackage": {
+                "version": 1,
+                "modules": {
+                  "nodes": [
+                    {
+                      "name": "rescuable"
+                    }
+                  ]
+                }
+              },
+              "asMoveObject": null
+            }
+          }
+        }
+      },
+      "MessageTransmitterV2 state": {
+        "network": "mainnet",
+        "endpoint": "https://graphql.mainnet.sui.io/graphql",
+        "readAt": "2026-10-23T19:47:23.587Z",
+        "query": "{ object(address:\"0x0c067f7d325e5b60e3179712e7783534ba1556cbb3d359d8161497e37689230c\") { owner { __typename } asMovePackage { version modules { nodes { name } } } asMoveObject { contents { type { repr } } } } }",
+        "response": {
+          "data": {
+            "object": {
+              "owner": {
+                "__typename": "Shared"
+              },
+              "asMovePackage": null,
+              "asMoveObject": {
+                "contents": {
+                  "type": {
+                    "repr": "0x16bcfcfc465f96281663a344641c017de84529370e11aa3879d0dce43ad6db87::state::State"
+                  }
+                }
+              }
+            }
+          }
+        }
+      },
+      "TokenMessengerMinterV2 state": {
+        "network": "mainnet",
+        "endpoint": "https://graphql.mainnet.sui.io/graphql",
+        "readAt": "2026-10-23T19:47:23.864Z",
+        "query": "{ object(address:\"0x06fb166941cd7bc095edc019d054a753ec3f1e4c25f28f2ecc4a6cfa0a9b1167\") { owner { __typename } asMovePackage { version modules { nodes { name } } } asMoveObject { contents { type { repr } } } } }",
+        "response": {
+          "data": {
+            "object": {
+              "owner": {
+                "__typename": "Shared"
+              },
+              "asMovePackage": null,
+              "asMoveObject": {
+                "contents": {
+                  "type": {
+                    "repr": "0xeb14978abfe93a37c5d5bf86a0623b923553a5f0e794daac7724f1e2fdbfb830::state::State"
+                  }
+                }
+              }
+            }
+          }
+        }
+      },
+      "StablecoinHandler state": {
+        "network": "mainnet",
+        "endpoint": "https://graphql.mainnet.sui.io/graphql",
+        "readAt": "2026-10-23T19:47:24.874Z",
+        "query": "{ object(address:\"0xa32de8a6dd0178fb05f662929d55cddb69a25c26bde4b83f89e36d17ead94c41\") { owner { __typename } asMovePackage { version modules { nodes { name } } } asMoveObject { contents { type { repr } } } } }",
+        "response": {
+          "data": {
+            "object": {
+              "owner": {
+                "__typename": "Shared"
+              },
+              "asMovePackage": null,
+              "asMoveObject": {
+                "contents": {
+                  "type": {
+                    "repr": "0x185ed207c4d64fc594882ab927f9f3c6ff957aad03df8a731ba64378faeeb2bf::state::State"
+                  }
+                }
+              }
+            }
+          }
+        }
+      },
+      "USDC Treasury": {
+        "network": "mainnet",
+        "endpoint": "https://graphql.mainnet.sui.io/graphql",
+        "readAt": "2026-10-23T19:47:25.153Z",
+        "query": "{ object(address:\"0x57d6725e7a8b49a7b2a612f6bd66ab5f39fc95332ca48be421c3229d514a6de7\") { owner { __typename } asMovePackage { version modules { nodes { name } } } asMoveObject { contents { type { repr } } } } }",
+        "response": {
+          "data": {
+            "object": {
+              "owner": {
+                "__typename": "Shared"
+              },
+              "asMovePackage": null,
+              "asMoveObject": {
+                "contents": {
+                  "type": {
+                    "repr": "0xecf47609d7da919ea98e7fd04f6e0648a0a79b337aaad373fa37aac8febf19c8::treasury::Treasury<0xdba34672e30cb065b1f93e3ab55318768fd6fef66c15942c9f7cb846e2f900e7::usdc::USDC>"
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "testnet": {
+      "MessageTransmitterV2 package": {
+        "network": "testnet",
+        "endpoint": "https://graphql.testnet.sui.io/graphql",
+        "readAt": "2026-10-23T19:47:26.218Z",
+        "query": "{ object(address:\"0xe9678cd42a81886e18e21361088071f275105636a4d3751e1d7f255211f73bbe\") { owner { __typename } asMovePackage { version modules { nodes { name } } } asMoveObject { contents { type { repr } } } } }",
+        "response": {
+          "data": {
+            "object": {
+              "owner": {
+                "__typename": "Immutable"
+              },
+              "asMovePackage": {
+                "version": 1,
+                "modules": {
+                  "nodes": [
+                    {
+                      "name": "attestation"
+                    },
+                    {
+                      "name": "attester_manager"
+                    },
+                    {
+                      "name": "auth"
+                    },
+                    {
+                      "name": "deserialize"
+                    },
+                    {
+                      "name": "initialize"
+                    },
+                    {
+                      "name": "message"
+                    },
+                    {
+                      "name": "message_size"
+                    },
+                    {
+                      "name": "migration"
+                    },
+                    {
+                      "name": "pausable"
+                    },
+                    {
+                      "name": "receive_message"
+                    },
+                    {
+                      "name": "rescuable"
+                    },
+                    {
+                      "name": "role_management"
+                    },
+                    {
+                      "name": "roles"
+                    },
+                    {
+                      "name": "send_message"
+                    },
+                    {
+                      "name": "serialize"
+                    },
+                    {
+                      "name": "state"
+                    },
+                    {
+                      "name": "vector_utils"
+                    },
+                    {
+                      "name": "version_control"
+                    }
+                  ]
+                }
+              },
+              "asMoveObject": null
+            }
+          }
+        }
+      },
+      "TokenMessengerMinterV2 package": {
+        "network": "testnet",
+        "endpoint": "https://graphql.testnet.sui.io/graphql",
+        "readAt": "2026-10-23T19:47:27.279Z",
+        "query": "{ object(address:\"0x267d3c0cb776eace2840f27e4d33da9c6d952f9749403f1fe6579f4962ed3c64\") { owner { __typename } asMovePackage { version modules { nodes { name } } } asMoveObject { contents { type { repr } } } } }",
+        "response": {
+          "data": {
+            "object": {
+              "owner": {
+                "__typename": "Immutable"
+              },
+              "asMovePackage": {
+                "version": 1,
+                "modules": {
+                  "nodes": [
+                    {
+                      "name": "burn_message"
+                    },
+                    {
+                      "name": "denylistable"
+                    },
+                    {
+                      "name": "deposit_for_burn"
+                    },
+                    {
+                      "name": "fee_controller"
+                    },
+                    {
+                      "name": "handle_receive_message"
+                    },
+                    {
+                      "name": "handler_registry"
+                    },
+                    {
+                      "name": "initialize"
+                    },
+                    {
+                      "name": "message_transmitter_authenticator"
+                    },
+                    {
+                      "name": "migration"
+                    },
+                    {
+                      "name": "pausable"
+                    },
+                    {
+                      "name": "remote_token_messenger"
+                    },
+                    {
+                      "name": "rescuable"
+                    },
+                    {
+                      "name": "role_management"
+                    },
+                    {
+                      "name": "roles"
+                    },
+                    {
+                      "name": "state"
+                    },
+                    {
+                      "name": "token_controller"
+                    },
+                    {
+                      "name": "token_utils"
+                    },
+                    {
+                      "name": "version_control"
+                    }
+                  ]
+                }
+              },
+              "asMoveObject": null
+            }
+          }
+        }
+      },
+      "StablecoinHandler package": {
+        "network": "testnet",
+        "endpoint": "https://graphql.testnet.sui.io/graphql",
+        "readAt": "2026-10-23T19:47:28.277Z",
+        "query": "{ object(address:\"0xbe8479044396a45e07de2c7f14789c35b8338406eebc53b2527da56839a91561\") { owner { __typename } asMovePackage { version modules { nodes { name } } } asMoveObject { contents { type { repr } } } } }",
+        "response": {
+          "data": {
+            "object": {
+              "owner": {
+                "__typename": "Immutable"
+              },
+              "asMovePackage": {
+                "version": 1,
+                "modules": {
+                  "nodes": [
+                    {
+                      "name": "handler"
+                    },
+                    {
+                      "name": "initialize"
+                    },
+                    {
+                      "name": "migration"
+                    },
+                    {
+                      "name": "mint_controller"
+                    },
+                    {
+                      "name": "role_management"
+                    },
+                    {
+                      "name": "roles"
+                    },
+                    {
+                      "name": "state"
+                    },
+                    {
+                      "name": "version_control"
+                    }
+                  ]
+                }
+              },
+              "asMoveObject": null
+            }
+          }
+        }
+      },
+      "CctpExtensions package": {
+        "network": "testnet",
+        "endpoint": "https://graphql.testnet.sui.io/graphql",
+        "readAt": "2026-10-23T19:47:29.272Z",
+        "query": "{ object(address:\"0x3cdb05f9a035c147410f5a9cfe2ccb741f4ab3cd59411e86714ce4b45e2c4d95\") { owner { __typename } asMovePackage { version modules { nodes { name } } } asMoveObject { contents { type { repr } } } } }",
+        "response": {
+          "data": {
+            "object": {
+              "owner": {
+                "__typename": "Immutable"
+              },
+              "asMovePackage": {
+                "version": 1,
+                "modules": {
+                  "nodes": [
+                    {
+                      "name": "rescuable"
+                    }
+                  ]
+                }
+              },
+              "asMoveObject": null
+            }
+          }
+        }
+      },
+      "MessageTransmitterV2 state": {
+        "network": "testnet",
+        "endpoint": "https://graphql.testnet.sui.io/graphql",
+        "readAt": "2026-10-23T19:47:30.270Z",
+        "query": "{ object(address:\"0xfee3a2b47f9ef2de2405fc63d79194307945f8ea768815cfc46083bc20fbe6ed\") { owner { __typename } asMovePackage { version modules { nodes { name } } } asMoveObject { contents { type { repr } } } } }",
+        "response": {
+          "data": {
+            "object": {
+              "owner": {
+                "__typename": "Shared"
+              },
+              "asMovePackage": null,
+              "asMoveObject": {
+                "contents": {
+                  "type": {
+                    "repr": "0xe9678cd42a81886e18e21361088071f275105636a4d3751e1d7f255211f73bbe::state::State"
+                  }
+                }
+              }
+            }
+          }
+        }
+      },
+      "TokenMessengerMinterV2 state": {
+        "network": "testnet",
+        "endpoint": "https://graphql.testnet.sui.io/graphql",
+        "readAt": "2026-10-23T19:47:31.262Z",
+        "query": "{ object(address:\"0x72cb55cd14d01e6361386d6ea93eecda9fa1efc3c202b8dd69c1e4683e4c0ca0\") { owner { __typename } asMovePackage { version modules { nodes { name } } } asMoveObject { contents { type { repr } } } } }",
+        "response": {
+          "data": {
+            "object": {
+              "owner": {
+                "__typename": "Shared"
+              },
+              "asMovePackage": null,
+              "asMoveObject": {
+                "contents": {
+                  "type": {
+                    "repr": "0x267d3c0cb776eace2840f27e4d33da9c6d952f9749403f1fe6579f4962ed3c64::state::State"
+                  }
+                }
+              }
+            }
+          }
+        }
+      },
+      "StablecoinHandler state": {
+        "network": "testnet",
+        "endpoint": "https://graphql.testnet.sui.io/graphql",
+        "readAt": "2026-10-23T19:47:32.253Z",
+        "query": "{ object(address:\"0xfbd9c0517c4f0e1817445ee2be598806e3c392a465d7e3d773d1055f3f0eed32\") { owner { __typename } asMovePackage { version modules { nodes { name } } } asMoveObject { contents { type { repr } } } } }",
+        "response": {
+          "data": {
+            "object": {
+              "owner": {
+                "__typename": "Shared"
+              },
+              "asMovePackage": null,
+              "asMoveObject": {
+                "contents": {
+                  "type": {
+                    "repr": "0xbe8479044396a45e07de2c7f14789c35b8338406eebc53b2527da56839a91561::state::State"
+                  }
+                }
+              }
+            }
+          }
+        }
+      },
+      "USDC Treasury": {
+        "network": "testnet",
+        "endpoint": "https://graphql.testnet.sui.io/graphql",
+        "readAt": "2026-10-23T19:47:33.247Z",
+        "query": "{ object(address:\"0x7170137d4a6431bf83351ac025baf462909bffe2877d87716374fb42b9629ebe\") { owner { __typename } asMovePackage { version modules { nodes { name } } } asMoveObject { contents { type { repr } } } } }",
+        "response": {
+          "data": {
+            "object": {
+              "owner": {
+                "__typename": "Shared"
+              },
+              "asMovePackage": null,
+              "asMoveObject": {
+                "contents": {
+                  "type": {
+                    "repr": "0x346e3233f61eb0055713417bfaddda7dc3bf26816faad1f7606994a368b92917::treasury::Treasury<0xa1ec7fc00a6f40db9693ad1415d0c193ad3906494428cf252621037bd7117e29::usdc::USDC>"
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  },
+  "depositForBurn": {
+    "network": "mainnet",
+    "endpoint": "https://graphql.mainnet.sui.io/graphql",
+    "readAt": "2026-10-23T19:47:33.573Z",
+    "query": "{ package(address:\"0xeb14978abfe93a37c5d5bf86a0623b923553a5f0e794daac7724f1e2fdbfb830\") { module(name:\"deposit_for_burn\") { functions { nodes { name visibility isEntry parameters { repr } return { repr } } } datatypes { nodes { name abilities } } } } }",
+    "response": {
+      "data": {
+        "package": {
+          "module": {
+            "functions": {
+              "nodes": [
+                {
+                  "name": "complete_burn",
+                  "visibility": "PUBLIC",
+                  "isEntry": false,
+                  "parameters": [
+                    {
+                      "repr": "0xeb14978abfe93a37c5d5bf86a0623b923553a5f0e794daac7724f1e2fdbfb830::deposit_for_burn::CompleteBurnTicket<$0, $1>"
+                    },
+                    {
+                      "repr": "&0xeb14978abfe93a37c5d5bf86a0623b923553a5f0e794daac7724f1e2fdbfb830::state::State"
+                    },
+                    {
+                      "repr": "&0x16bcfcfc465f96281663a344641c017de84529370e11aa3879d0dce43ad6db87::state::State"
+                    }
+                  ],
+                  "return": []
+                },
+                {
+                  "name": "create_burn_receipt",
+                  "visibility": "PRIVATE",
+                  "isEntry": false,
+                  "parameters": [
+                    {
+                      "repr": "0x0000000000000000000000000000000000000000000000000000000000000002::coin::Coin<$0>"
+                    },
+                    {
+                      "repr": "u32"
+                    },
+                    {
+                      "repr": "address"
+                    },
+                    {
+                      "repr": "address"
+                    },
+                    {
+                      "repr": "u256"
+                    },
+                    {
+                      "repr": "u32"
+                    },
+                    {
+                      "repr": "vector<u8>"
+                    },
+                    {
+                      "repr": "address"
+                    },
+                    {
+                      "repr": "&0xeb14978abfe93a37c5d5bf86a0623b923553a5f0e794daac7724f1e2fdbfb830::state::State"
+                    }
+                  ],
+                  "return": [
+                    {
+                      "repr": "0xeb14978abfe93a37c5d5bf86a0623b923553a5f0e794daac7724f1e2fdbfb830::deposit_for_burn::BurnReceipt<$0>"
+                    },
+                    {
+                      "repr": "0x0000000000000000000000000000000000000000000000000000000000000002::coin::Coin<$0>"
+                    }
+                  ]
+                },
+                {
+                  "name": "create_complete_burn_ticket",
+                  "visibility": "PUBLIC",
+                  "isEntry": false,
+                  "parameters": [
+                    {
+                      "repr": "0xeb14978abfe93a37c5d5bf86a0623b923553a5f0e794daac7724f1e2fdbfb830::deposit_for_burn::BurnReceipt<$0>"
+                    },
+                    {
+                      "repr": "$1"
+                    }
+                  ],
+                  "return": [
+                    {
+                      "repr": "0xeb14978abfe93a37c5d5bf86a0623b923553a5f0e794daac7724f1e2fdbfb830::deposit_for_burn::CompleteBurnTicket<$0, $1>"
+                    }
+                  ]
+                },
+                {
+                  "name": "create_deposit_for_burn_with_package_auth_ticket",
+                  "visibility": "PUBLIC",
+                  "isEntry": false,
+                  "parameters": [
+                    {
+                      "repr": "0x0000000000000000000000000000000000000000000000000000000000000002::coin::Coin<$0>"
+                    },
+                    {
+                      "repr": "u32"
+                    },
+                    {
+                      "repr": "address"
+                    },
+                    {
+                      "repr": "address"
+                    },
+                    {
+                      "repr": "u256"
+                    },
+                    {
+                      "repr": "u32"
+                    },
+                    {
+                      "repr": "vector<u8>"
+                    },
+                    {
+                      "repr": "$1"
+                    }
+                  ],
+                  "return": [
+                    {
+                      "repr": "0xeb14978abfe93a37c5d5bf86a0623b923553a5f0e794daac7724f1e2fdbfb830::deposit_for_burn::DepositForBurnWithPackageAuthTicket<$0, $1>"
+                    }
+                  ]
+                },
+                {
+                  "name": "deposit_for_burn",
+                  "visibility": "PUBLIC",
+                  "isEntry": false,
+                  "parameters": [
+                    {
+                      "repr": "0x0000000000000000000000000000000000000000000000000000000000000002::coin::Coin<$0>"
+                    },
+                    {
+                      "repr": "u32"
+                    },
+                    {
+                      "repr": "address"
+                    },
+                    {
+                      "repr": "address"
+                    },
+                    {
+                      "repr": "u256"
+                    },
+                    {
+                      "repr": "u32"
+                    },
+                    {
+                      "repr": "vector<u8>"
+                    },
+                    {
+                      "repr": "&0xeb14978abfe93a37c5d5bf86a0623b923553a5f0e794daac7724f1e2fdbfb830::state::State"
+                    },
+                    {
+                      "repr": "&mut 0x0000000000000000000000000000000000000000000000000000000000000002::tx_context::TxContext"
+                    }
+                  ],
+                  "return": [
+                    {
+                      "repr": "0xeb14978abfe93a37c5d5bf86a0623b923553a5f0e794daac7724f1e2fdbfb830::deposit_for_burn::BurnReceipt<$0>"
+                    },
+                    {
+                      "repr": "0x0000000000000000000000000000000000000000000000000000000000000002::coin::Coin<$0>"
+                    }
+                  ]
+                },
+                {
+                  "name": "deposit_for_burn_with_package_auth",
+                  "visibility": "PUBLIC",
+                  "isEntry": false,
+                  "parameters": [
+                    {
+                      "repr": "0xeb14978abfe93a37c5d5bf86a0623b923553a5f0e794daac7724f1e2fdbfb830::deposit_for_burn::DepositForBurnWithPackageAuthTicket<$0, $1>"
+                    },
+                    {
+                      "repr": "&0xeb14978abfe93a37c5d5bf86a0623b923553a5f0e794daac7724f1e2fdbfb830::state::State"
+                    },
+                    {
+                      "repr": "&mut 0x0000000000000000000000000000000000000000000000000000000000000002::tx_context::TxContext"
+                    }
+                  ],
+                  "return": [
+                    {
+                      "repr": "0xeb14978abfe93a37c5d5bf86a0623b923553a5f0e794daac7724f1e2fdbfb830::deposit_for_burn::BurnReceipt<$0>"
+                    },
+                    {
+                      "repr": "0x0000000000000000000000000000000000000000000000000000000000000002::coin::Coin<$0>"
+                    }
+                  ]
+                },
+                {
+                  "name": "get_burn_details",
+                  "visibility": "PUBLIC",
+                  "isEntry": false,
+                  "parameters": [
+                    {
+                      "repr": "&0xeb14978abfe93a37c5d5bf86a0623b923553a5f0e794daac7724f1e2fdbfb830::deposit_for_burn::BurnReceipt<$0>"
+                    }
+                  ],
+                  "return": [
+                    {
+                      "repr": "address"
+                    },
+                    {
+                      "repr": "u64"
+                    },
+                    {
+                      "repr": "address"
+                    }
+                  ]
+                },
+                {
+                  "name": "safe_get_burn_limit",
+                  "visibility": "PRIVATE",
+                  "isEntry": false,
+                  "parameters": [
+                    {
+                      "repr": "address"
+                    },
+                    {
+                      "repr": "&0xeb14978abfe93a37c5d5bf86a0623b923553a5f0e794daac7724f1e2fdbfb830::state::State"
+                    }
+                  ],
+                  "return": [
+                    {
+                      "repr": "u64"
+                    }
+                  ]
+                },
+                {
+                  "name": "safe_get_remote_token_messenger",
+                  "visibility": "PRIVATE",
+                  "isEntry": false,
+                  "parameters": [
+                    {
+                      "repr": "u32"
+                    },
+                    {
+                      "repr": "&0xeb14978abfe93a37c5d5bf86a0623b923553a5f0e794daac7724f1e2fdbfb830::state::State"
+                    }
+                  ],
+                  "return": [
+                    {
+                      "repr": "address"
+                    }
+                  ]
+                },
+                {
+                  "name": "send_burn_message",
+                  "visibility": "PRIVATE",
+                  "isEntry": false,
+                  "parameters": [
+                    {
+                      "repr": "u32"
+                    },
+                    {
+                      "repr": "address"
+                    },
+                    {
+                      "repr": "address"
+                    },
+                    {
+                      "repr": "u32"
+                    },
+                    {
+                      "repr": "&0xeb14978abfe93a37c5d5bf86a0623b923553a5f0e794daac7724f1e2fdbfb830::burn_message::BurnMessage"
+                    },
+                    {
+                      "repr": "&0x16bcfcfc465f96281663a344641c017de84529370e11aa3879d0dce43ad6db87::state::State"
+                    }
+                  ],
+                  "return": [
+                    {
+                      "repr": "0x16bcfcfc465f96281663a344641c017de84529370e11aa3879d0dce43ad6db87::message::Message"
+                    }
+                  ]
+                }
+              ]
+            },
+            "datatypes": {
+              "nodes": [
+                {
+                  "name": "BurnReceipt",
+                  "abilities": []
+                },
+                {
+                  "name": "CompleteBurnTicket",
+                  "abilities": []
+                },
+                {
+                  "name": "DepositForBurn",
+                  "abilities": [
+                    "COPY",
+                    "DROP"
+                  ]
+                },
+                {
+                  "name": "DepositForBurnWithPackageAuthTicket",
+                  "abilities": []
+                }
+              ]
+            }
+          }
+        }
+      }
+    }
+  }
+}

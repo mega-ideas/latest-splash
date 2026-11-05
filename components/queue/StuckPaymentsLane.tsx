@@ -5,7 +5,7 @@ import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { ArrowUpRight, CheckCircle2, CircleHelp, Loader2, XCircle } from 'lucide-react';
 
-import { kindLabel } from '@/lib/queue/queue-decision';
+import { kindLabel, proposalTitle } from '@/lib/queue/queue-decision';
 import {
   findingText,
   interpretReconcileResponse,
@@ -125,7 +125,9 @@ export default function StuckPaymentsLane({ items }: { items: StuckPaymentItem[]
             <div key={item.id} className="flex flex-col gap-3 px-4 py-4">
               <div className="flex flex-wrap items-start justify-between gap-x-6 gap-y-1">
                 <div className="min-w-0">
-                  <strong className="block text-sm text-[#1F4452]">{item.recommendation}</strong>
+                  <strong className="block text-sm text-[#1F4452]">{proposalTitle(item.kind)}</strong>
+                  {/* Free text (an x402 one quotes the seller): a detail, never the headline. */}
+                  <p className="mt-1 line-clamp-2 text-[13px] font-medium text-[#326273]/90">{item.recommendation}</p>
                   <p className="mt-1 text-[13px] font-medium text-[#326273]/90">
                     {item.id} · {kindLabel(item.kind)} · {item.waitingLabel}
                   </p>
@@ -218,7 +220,7 @@ export default function StuckPaymentsLane({ items }: { items: StuckPaymentItem[]
         {settled.map(({ item, result }) => (
           <div key={`recorded-${item.id}`} className="flex flex-wrap items-center justify-between gap-3 px-4 py-3">
             <div className="min-w-0">
-              <strong className="block truncate text-sm text-[#1F4452]">{item.recommendation}</strong>
+              <strong className="block truncate text-sm text-[#1F4452]">{proposalTitle(item.kind)}</strong>
               <p className="mt-0.5 truncate text-[13px] font-medium text-[#326273]/90">
                 {item.id} · {item.amountLabel}
               </p>

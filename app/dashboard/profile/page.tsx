@@ -176,7 +176,7 @@ export default function ProfilePage() {
         <div className={`rounded-xl border px-4 py-3 text-sm font-medium ${
           message.kind === 'ok'
             ? 'border-[#5C9EAD]/30 bg-[#5C9EAD]/10 text-[#1F4452]'
-            : 'border-[#E39774]/30 bg-[#E39774]/10 text-[#1F4452]'
+            : 'border-[var(--gold-light)] bg-[var(--gold-tint)] text-[#1F4452]'
         }`}>
           {message.text}
         </div>
@@ -197,9 +197,9 @@ export default function ProfilePage() {
 
       {/* ── Pending review ticket ────────────────────────────── */}
       {pending && (
-        <section className="overflow-hidden rounded-2xl border border-[#E39774]/40 bg-white shadow-[6px_7px_0_rgba(12,62,72,0.08)]">
-          <div className="flex flex-wrap items-center justify-between gap-3 border-b border-dashed border-[#326273]/20 bg-[#E39774]/10 px-5 py-3">
-            <div className="flex items-center gap-2 text-sm font-bold text-[#9b4e32]">
+        <section className="overflow-hidden rounded-2xl border border-[var(--gold-light)] bg-white shadow-[6px_7px_0_rgba(12,62,72,0.08)]">
+          <div className="flex flex-wrap items-center justify-between gap-3 border-b border-dashed border-[#326273]/20 bg-[var(--gold-tint)] px-5 py-3">
+            <div className="flex items-center gap-2 text-sm font-bold text-[var(--gold-ink)]">
               <Clock3 className="h-4 w-4" />
               Waiting for admin approval
             </div>
@@ -211,7 +211,7 @@ export default function ProfilePage() {
             {Object.entries(pending.changes).map(([field, next]) => (
               <div key={field} className="grid items-center gap-2 rounded-xl bg-[#F6F0ED] px-4 py-3 text-sm sm:grid-cols-[140px_1fr_auto_1fr]">
                 <span className="text-xs font-semibold uppercase tracking-[0.1em] text-[#326273]/90">{FIELD_LABELS[field] ?? field}</span>
-                <span className="font-medium text-[#326273]/90 line-through decoration-[#E39774]/60">
+                <span className="font-medium text-[#326273]/90 line-through decoration-[var(--gold-light)]">
                   {fieldValue(field, (pending.before as Record<string, unknown>)[field])}
                 </span>
                 <span aria-hidden="true" className="hidden text-[var(--info)] sm:block">→</span>
@@ -438,7 +438,7 @@ function TextField({ label, value, onChange, placeholder, className = '' }: {
 
 function StateBadge({ state }: { state: ChangeRequest['state'] }) {
   const styles: Record<ChangeRequest['state'], string> = {
-    PENDING: 'bg-[#E39774]/15 text-[#9b4e32]',
+    PENDING: 'bg-[var(--gold-tint)] text-[var(--gold-ink)]',
     APPROVED: 'bg-[#5C9EAD]/15 text-[#0d6370]',
     REJECTED: 'bg-red-100 text-red-700',
     CANCELLED: 'bg-[#326273]/10 text-[#1F4452]',

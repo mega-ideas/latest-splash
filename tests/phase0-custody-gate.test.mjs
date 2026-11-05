@@ -122,18 +122,25 @@ test('the treasury page shows no demo balance or transaction as confirmed, and s
   assert.doesNotMatch(page, /'Audited/, 'nothing is described as audited without a source');
   assert.doesNotMatch(page, /earns a floating T-bill rate/, 'no yield promise in the header');
 
-  assert.match(page, /Treasury arrives with our licence/, 'the Phase-0 state is plain about why');
-  assert.match(page, /custody_not_licensed/, 'the page recognises the gate response');
+  // v2 D9 (brief 5.7): Treasury is USDY in the business's own wallet, so the
+  // page waits on no custody. It reads the wallet treasury, never the
+  // custodial ledger, and has no custody gate to answer.
+  assert.doesNotMatch(page, /fetch\('\/api\/treasury'/, 'the custodial ledger is not read');
+  assert.doesNotMatch(page, /custody_not_licensed/, 'no custody gate in the page body');
+  assert.match(page, /\/api\/treasury\/wallet/, 'the wallet treasury is');
   assert.match(page, /<MoneyPathPanel \/>/, 'the money-path panel still mounts (pinned by tests/money-path.test.mjs)');
 });
 
 test('the overview card and the copilot stop presenting treasury numbers in Phase 0', async () => {
-  const overview = await source('app/dashboard/overview/page.tsx');
+  const overview = await source('app/dashboard/page.tsx');
   assert.doesNotMatch(overview, /useState\(24500\)/);
   assert.doesNotMatch(overview, /useState\(98\.72\)/);
   assert.doesNotMatch(overview, /\+\$3\.22/, 'no invented daily yield');
-  assert.match(overview, /Treasury arrives with our licence/);
-  assert.match(overview, /custody_not_licensed/);
+  // v2 brief 5.2: Home shows the wallet, approvals, this month's payments and
+  // recent payments. The treasury projection card (and its licence copy, which
+  // D9 made untrue) left Home; treasury figures live on Treasury alone.
+  assert.doesNotMatch(overview, /fetch\('\/api\/treasury'/, 'Home reads no treasury figure');
+  assert.doesNotMatch(overview, /Treasury arrives with our licence/);
 
   // The copilot used to answer treasury questions from a keyword matcher, so
   // this asserted the matcher consulted the phase. v14 deleted the matcher and

@@ -1,9 +1,11 @@
-import { runOxwalAgent, stringifyAgentJson, type OxwalAgentRequest } from '../../../lib/agent/oxwal';
+import { runOxwalAgent, sanitizeOxwalHistory, stringifyAgentJson } from '../../../lib/agent/oxwal';
 import { resolveAuthorityForSession } from '@/lib/auth/authority';
 import { assertCleanBody, ProvenanceViolationError, provenanceViolationResponse } from '@/lib/auth/provenance-guard';
 import { requireCustomerRequest } from '@/lib/server/customer-auth';
 import { readJsonBody } from '@/lib/server/http';
 import { RATE_LIMITS, clientIp, enforceRateLimit } from '@/lib/server/rate-limit';
+import { requireSessionAccount } from '@/lib/server/session-account';
+import { zekeSessionKey } from '@/lib/server/zeke-session-notices';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -13,7 +15,8 @@ export const dynamic = 'force-dynamic';
  *  provenance violation. */
 type OxwalRouteBody = {
   message?: string;
-  history?: OxwalAgentRequest['history'];
+  /** Untrusted: see sanitizeOxwalHistory. */
+  history?: unknown;
 };
 
 export async function POST(request: Request) {
@@ -36,6 +39,10 @@ export async function POST(request: Request) {
     throw error;
   }
   const body = rawBody as OxwalRouteBody;
+  // The org every tool acts for, from the session (WS2): a signed-in person
+  // with no membership is answered, not crashed.
+  const accountCheck = await requireSessionAccount(auth.session);
+  if (accountCheck.response) return accountCheck.response;
   const ctx = await resolveAuthorityForSession(auth.session);
 
   const message = (body.message ?? '').trim();
@@ -52,9 +59,14 @@ export async function POST(request: Request) {
 
       for await (const event of runOxwalAgent({
         message,
-        orgId: ctx.orgId,
+        orgId: accountCheck.account.orgId,
         actorId: ctx.userId,
-        history: Array.isArray(body.history) ? body.history.slice(-12) : [],
+        // What Zeke says once per sign-in (v2 §4.8) is keyed on the verified
+        // session, never on anything the body says.
+        sessionKey: zekeSessionKey(auth.session),
+        // Client state: only {role: user|assistant, content: string} turns,
+        // each capped, survive. A forged tool_result or system turn is dropped.
+        history: sanitizeOxwalHistory(body.history),
       })) {
         send(event);
       }

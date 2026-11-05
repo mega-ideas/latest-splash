@@ -1,15 +1,26 @@
 'use client';
 
 import { useEffect, useMemo, useState } from 'react';
-import { BrainCircuit, CheckCircle2, LockKeyhole } from 'lucide-react';
+import { BrainCircuit, CheckCircle2, Lightbulb, LockKeyhole } from 'lucide-react';
 
 import StatusBadge from '@/components/StatusBadge';
+import { ZEKE_CARD } from '@/components/oxwal/ZekeDeskCards';
 import { confidencePercent } from '@/lib/confidence';
 
 /** `confidence`: how closely a recalled memory matched, 0..1; null for demo memories and placeholders. */
 type Memory = { text: string; confidence: number | null; demo: boolean };
 
-export default function MemWalBehaviorCard({ compact = false }: { compact?: boolean }) {
+export default function MemWalBehaviorCard({
+  compact = false,
+  variant = 'default',
+  assistantName = 'Zeke',
+}: {
+  compact?: boolean;
+  /** `zeke`: the Zeke page's "What Zeke remembers" card. */
+  variant?: 'default' | 'zeke';
+  /** `zeke` only: the assistant's current name, which an owner can change. */
+  assistantName?: string;
+}) {
   const [memories, setMemories] = useState<Memory[]>([]);
   const [loadState, setLoadState] = useState<'loading' | 'ready' | 'error'>('loading');
 
@@ -58,6 +69,37 @@ export default function MemWalBehaviorCard({ compact = false }: { compact?: bool
         confidence: null,
         demo: false,
       }];
+
+  if (variant === 'zeke') {
+    // Board "Zeke page · start": the same memories, said as what Zeke remembers.
+    return (
+      <section aria-labelledby="zeke-remembers" className={`${ZEKE_CARD} p-5`}>
+        <div className="flex items-start gap-3">
+          <span className="grid h-9 w-9 shrink-0 place-items-center rounded-[10px] bg-[var(--zeke-tint)] text-[#0d6370]">
+            <Lightbulb className="h-[18px] w-[18px]" aria-hidden="true" />
+          </span>
+          <div className="min-w-0 flex-1">
+            <div className="flex items-start justify-between gap-2">
+              <h2 id="zeke-remembers" className="text-[15px] font-bold text-[#0c3e48]">What {assistantName} remembers</h2>
+              {displayMemories.some((memory) => memory.demo) && <StatusBadge status="demo" />}
+            </div>
+            <p className="mt-0.5 text-[13px] font-medium text-[#326273]">Habits that sharpen suggestions.</p>
+          </div>
+        </div>
+        <ul className="mt-4 grid gap-2">
+          {memoryCards.map((memory) => (
+            <li key={memory.text.trim().toLowerCase()} className="rounded-[10px] bg-[var(--zeke-bubble)] px-3 py-2.5">
+              <span className="text-[13px] font-bold text-[#0c3e48]">{memory.text}</span>
+              {confidencePercent(memory.confidence) !== null && (
+                <span className="ml-2 text-[12px] font-semibold text-[#326273]">{confidencePercent(memory.confidence)}% memory match</span>
+              )}
+            </li>
+          ))}
+        </ul>
+        <p className="mt-3 text-[12px] font-medium text-[#326273]">Patterns only. No amounts, account numbers or KYC data.</p>
+      </section>
+    );
+  }
 
   return (
     <section className="dash-surface p-5">

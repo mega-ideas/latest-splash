@@ -4,8 +4,13 @@ import Link from 'next/link';
 import FeeCalculator from '@/components/landing/FeeCalculator';
 import { BRAND } from '@/content/brand';
 import { publishedNumbers } from '@/content/sea-numbers';
-import { SPLASH_USD_PHP, formatBps } from '@/lib/fx/calculator';
-import { formatMinor } from '@/lib/money';
+import { FEES_OFF_NOTICE, pricingParts, scheduleToWire } from '@/lib/fees/copy';
+import { publishedFeeSchedule } from '@/lib/fees/fee-config';
+import imageManifest from '@/lib/landing/images.json';
+import { variantFor } from '@/lib/landing/images';
+
+/** The hero art from scripts/landing-images.mjs, never the PNG original. */
+const HERO_1600 = variantFor(imageManifest.hero.variants, 1600);
 
 /**
  * The landing page, straightforward: what a customer receives, what it
@@ -17,36 +22,17 @@ import { formatMinor } from '@/lib/money';
  * named that has not signed, no yield promised, and no jargon.
  */
 
-/** The questions, shared with the FAQ JSON-LD in app/page.tsx so both say the same thing. */
-export const LANDING_FAQ: Array<{ q: string; a: string }> = [
-  {
-    q: 'Does Splash hold a money-services licence?',
-    a: 'Not yet. Splash is not yet a licensed money-services business. Today it runs the software that prepares, approves and records a payment, and partners of record carry out the regulated steps. The trust page says who does what.',
-  },
-  {
-    q: 'What does a payment cost?',
-    a: `A flat US$${formatMinor(SPLASH_USD_PHP.flatUsdMinor, 2)} plus ${formatBps(SPLASH_USD_PHP.marginBps)} of the amount on the USD to PHP leg, shown as illustrative until your quote. The exchange rate is quoted when you send and written on the record.`,
-  },
-  {
-    q: 'How long does it take?',
-    a: 'The settlement step is final in under a second. Delivery to a Philippine bank or wallet depends on the local rail, and the quote shows the expected time before you approve.',
-  },
-  {
-    q: 'Does the assistant move money?',
-    a: 'No. The assistant can prepare a payment and suggest a batch. A person approves every payment, and nothing moves without that approval.',
-  },
-  {
-    q: 'Can Splash hold a balance for me or my supplier?',
-    a: 'Not yet. Holding customer funds needs a money-broking licence Splash does not hold. Today Splash pays out only: the supplier is paid, and nothing is kept on your behalf.',
-  },
-];
+/** The questions live in content/landing-faq.ts, shared with the FAQ JSON-LD in app/page.tsx. */
+import { landingFaq } from '@/content/landing-faq';
 
-export default function Landing() {
+export { LANDING_FAQ, landingFaq } from '@/content/landing-faq';
+
+export default async function Landing() {
+  const { schedule, feesOn } = await publishedFeeSchedule();
   const year = new Date().getFullYear();
   const numbers = publishedNumbers();
   const preview = process.env.NODE_ENV !== 'production';
-  const flatFee = `US$${formatMinor(SPLASH_USD_PHP.flatUsdMinor, 2)}`;
-  const margin = formatBps(SPLASH_USD_PHP.marginBps);
+  const prices = pricingParts(schedule);
 
   return (
     <div className="ld">
@@ -95,11 +81,12 @@ export default function Landing() {
             </div>
             <div className="ld-hero-art">
               <Image
-                src="/cinematic/hero-district-v5.png"
+                src={HERO_1600.src}
                 alt="Isometric illustration of the Splash building on a plinth, ringed by a gold delivery route with couriers on it"
-                width={1600}
-                height={1000}
+                width={HERO_1600.width}
+                height={HERO_1600.height}
                 sizes="(min-width: 900px) 48vw, 100vw"
+                unoptimized
                 priority
               />
             </div>
@@ -165,7 +152,7 @@ export default function Landing() {
               Splash prices one leg: US dollars to Philippine pesos. If you hold ringgit or another currency,
               you convert it to dollars at your own bank first, and that leg is not in these figures.
             </p>
-            <FeeCalculator />
+            <FeeCalculator schedule={scheduleToWire(schedule)} feesOn={feesOn} />
           </div>
         </section>
 
@@ -218,16 +205,17 @@ export default function Landing() {
 
         <section id="pricing" className="ld-section" aria-labelledby="pricing-title">
           <div className="ld-shell">
-            <h2 id="pricing-title">One price on one leg</h2>
+            <h2 id="pricing-title">Priced by where the payment goes</h2>
             <div className="ld-price">
-              <div>
-                <strong>
-                  {flatFee} + {margin}
-                </strong>
-                <p>of the amount, on the USD to PHP leg. Illustrative until your quote.</p>
-              </div>
+              {feesOn ? null : <p>{FEES_OFF_NOTICE} Then:</p>}
+              <ul>
+                {prices.map((part) => (
+                  <li key={part}>{part}</li>
+                ))}
+              </ul>
               <p>
-                The exchange rate is quoted when you send and written on the record. No monthly fee, no fee to
+                Payout-partner or Circle fees are shown separately before you approve. The exchange rate is
+                quoted when you send and written on the record. No monthly fee, no fee to
                 receive, and nothing charged on a payment that does not complete.
               </p>
               <p className="ld-price-note">
@@ -243,7 +231,7 @@ export default function Landing() {
           <div className="ld-shell">
             <h2 id="faq-title">Asked before signing up</h2>
             <div className="ld-faq">
-              {LANDING_FAQ.map((item) => (
+              {landingFaq(schedule, { feesOn }).map((item) => (
                 <details key={item.q}>
                   <summary>{item.q}</summary>
                   <p>{item.a}</p>
@@ -262,7 +250,7 @@ export default function Landing() {
               sides.
             </p>
             <p>
-              Sandbox on the Sui testnet. No customer funds move. Support:{' '}
+              Splash is software. It has no key to your Splash Wallet. Support:{' '}
               <a className="ld-link" href={`mailto:${BRAND.supportEmail}`}>
                 {BRAND.supportEmail}
               </a>

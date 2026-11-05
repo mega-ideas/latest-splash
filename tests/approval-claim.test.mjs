@@ -10,14 +10,17 @@ import { consumeApprovalRecord, upsertProposal } from '../lib/db/proposal-repo.t
 import { InMemoryProposalStore } from '../lib/queue/proposal-state.ts';
 import { replayThroughRoute } from '../lib/server/approval-replay.ts';
 import { closeApprovalClaim, resolveApprovalClaim } from '../lib/server/approved-proposal.ts';
-import { subjectDigest } from '../lib/server/step-up.ts';
-import {
-  batchPayoutSubstance,
-  batchTargetCurrency,
-  fiatPaymentSubstance,
-  payableBatchRows,
-  treasuryMoveSubstance,
-} from '../lib/server/step-up-subjects.ts';
+import { fiatPaymentSubstance, treasuryMoveSubstance } from '../lib/server/step-up-subjects.ts';
+
+/*
+ * A payout run is no longer a kind of proposal, and the code that bound its
+ * approval was removed with it. The claim itself is general: it binds an
+ * approval to WHAT was approved, by a digest of a substance the route names.
+ * The tests below call the real claim code with the retired kind and a plain
+ * stand-in substance (the rows and the currency, as written); they do not test
+ * any helper of their own.
+ */
+const batchPayoutSubstance = (payload) => ({ rows: payload.rows ?? [], targetCurrency: payload.targetCurrency ?? null });
 
 /**
  * The approved-proposal claim: `x-splash-approved-proposal: <id>`, which lifts
@@ -60,7 +63,7 @@ function batchBody(overrides = {}) {
 
 /** What the batch route puts on the proposal: the payable rows and the currency. */
 function approvedBatchPayload(body = batchBody()) {
-  return { rows: payableBatchRows(body.rows), targetCurrency: batchTargetCurrency(body) };
+  return { rows: body.rows, targetCurrency: body.targetCurrency ?? null };
 }
 
 /** A single payout as the transfer route stores it (the parsed body). */
@@ -80,7 +83,7 @@ function payoutBody(overrides = {}) {
   };
 }
 
-const batchScope = (body) => ({ kind: 'BATCH_PAYOUT', substance: batchPayoutSubstance, body, consumer: 'batches/authorize' });
+const batchScope = (body) => ({ kind: 'BATCH_PAYOUT', substance: batchPayoutSubstance, body, consumer: 'test-route' });
 const payoutScope = (body) => ({ kind: 'PAYMENT', substance: fiatPaymentSubstance, body, consumer: 'transfers/authorize' });
 const treasuryScope = (body) => ({
   kind: body.action === 'withdraw' ? 'TREASURY_REDEEM' : 'TREASURY_ALLOCATE',
@@ -90,7 +93,7 @@ const treasuryScope = (body) => ({
 });
 
 function claimRequest(proposalId) {
-  return new Request('http://splash.test/api/batches/authorize', {
+  return new Request('http://splash.test/api/transfers/authorize', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json', 'x-splash-approved-proposal': proposalId },
   });
@@ -156,77 +159,6 @@ function approvedProposal(store, { kind = 'BATCH_PAYOUT', payload, orgId = 'acme
   return store.transition(proposalId, { type: 'SUBMIT' });
 }
 
-const digest = (substance, payload) => subjectDigest(substance(payload));
-
-// ── What a batch approval covers ────────────────────────────────────────────
-
-test('a batch approval covers the rows the run pays and its currency, not the file around them', () => {
-  const approved = digest(batchPayoutSubstance, approvedBatchPayload());
-
-  // The full file the maker posted — blocked rows, the second factor, the
-  // columns settlement never reads — is the same run.
-  assert.equal(digest(batchPayoutSubstance, batchBody()), approved);
-  assert.equal(digest(batchPayoutSubstance, batchBody({ totp: '654321' })), approved);
-  const body = batchBody();
-  assert.equal(
-    digest(batchPayoutSubstance, {
-      ...body,
-      rows: body.rows.map((row) => ({ ...row, country: 'SG', purpose: 'bonus', memo: 'x' })),
-    }),
-    approved,
-  );
-  // And the approved payload is the same run after the replay's JSON round trip.
-  assert.equal(digest(batchPayoutSubstance, JSON.parse(JSON.stringify(approvedBatchPayload()))), approved);
-  // The route's default corridor is part of what was approved.
-  const noCurrency = batchBody();
-  delete noCurrency.targetCurrency;
-  assert.equal(digest(batchPayoutSubstance, noCurrency), approved);
-});
-
-test('changing who is paid, where, how much, how many or in what currency voids it', () => {
-  const approved = digest(batchPayoutSubstance, approvedBatchPayload());
-  const body = batchBody();
-  const [maria, jose, blocked, zero] = body.rows;
-  const variants = {
-    address: [{ ...maria, address: ADDR_C }, jose, blocked, zero],
-    amount: [{ ...maria, amount: '125000.00' }, jose, blocked, zero],
-    name: [{ ...maria, name: 'Someone Else' }, jose, blocked, zero],
-    'a blocked row made payable': [maria, jose, blocked, { ...zero, amount: '900.00' }],
-    'a payable row dropped': [maria, blocked, zero],
-    'a payable row paid twice': [maria, maria, jose],
-    order: [jose, maria, blocked, zero],
-    // Compared as settlement receives it, so a respelling is a new approval.
-    respelled: [{ ...maria, amount: '12500' }, jose, blocked, zero],
-  };
-  for (const [name, rows] of Object.entries(variants)) {
-    assert.notEqual(digest(batchPayoutSubstance, { ...body, rows }), approved, `${name} must void the approval`);
-  }
-  assert.notEqual(digest(batchPayoutSubstance, batchBody({ targetCurrency: 'MYR' })), approved, 'currency');
-});
-
-test('a payable row is one settlement can pay, and a malformed file never throws', () => {
-  const good = { name: 'Maria Santos', address: ADDR_A, amount: '10.00' };
-  const whole = { name: 'Jose Rizal', address: ADDR_B, amount: 800 };
-  const rows = [
-    null,
-    'row',
-    42,
-    [],
-    { name: 'A', address: ADDR_B, amount: '-5' },
-    { name: 'B', address: ADDR_B, amount: 'abc' },
-    // parseFloat read this as 1.2; settlement refuses it, after the approval.
-    { name: 'C', address: ADDR_B, amount: '1.2.3' },
-    // Rounds to nothing at the micro-USD settlement pays in.
-    { name: 'D', address: ADDR_B, amount: '0.0000001' },
-    // A fractional JSON number has been through a float; settlement refuses it.
-    { name: 'E', address: ADDR_B, amount: 100.5 },
-    good,
-    whole,
-  ];
-  assert.deepEqual(payableBatchRows(rows), [good, whole]);
-  assert.deepEqual(batchPayoutSubstance({ rows: 'not rows' }).rows, []);
-});
-
 // ── The claim, resolved against the store ───────────────────────────────────
 
 test('a batch approval lifts the second approver for its own run, once', async () => {
@@ -236,7 +168,7 @@ test('a batch approval lifts the second approver for its own run, once', async (
   const first = await resolveApprovalClaim(claimRequest(proposal.id), 'acme', batchScope(batchBody()));
   assert.equal(first.approved, true);
   assert.equal(first.proposalId, proposal.id);
-  assert.equal(store.get(proposal.id).approvalConsumedBy, 'batches/authorize');
+  assert.equal(store.get(proposal.id).approvalConsumedBy, 'test-route');
   assert.ok(store.get(proposal.id).approvalConsumedAt);
 
   // The same run again — a fresh Idempotency-Key gets it past the batch
@@ -397,7 +329,7 @@ test('a replay the route refused before reaching the claim still spends it', asy
   // it ever reads the header.
   const result = await replayThroughRoute(
     async () => Response.json({ error: 'Authentication required' }, { status: 401 }),
-    '/api/batches/authorize',
+    '/api/transfers/authorize',
     replayInput(proposal),
   );
   assert.deepEqual(result, { ok: false, error: 'Authentication required' });
@@ -412,12 +344,12 @@ test('a replay the route acted on is spent by the route, and a second replay pay
   const store = freshStore();
   const proposal = approvedProposal(store, { payload: approvedBatchPayload() });
 
-  const first = await replayThroughRoute(batchRoute, '/api/batches/authorize', replayInput(proposal));
+  const first = await replayThroughRoute(batchRoute, '/api/transfers/authorize', replayInput(proposal));
   assert.equal(first.ok, true);
-  assert.equal(store.get(proposal.id).approvalConsumedBy, 'batches/authorize', 'the close does not overwrite who spent it');
+  assert.equal(store.get(proposal.id).approvalConsumedBy, 'test-route', 'the close does not overwrite who spent it');
 
   // A settle path run twice, a retried webhook: the second replay is refused.
-  const second = await replayThroughRoute(batchRoute, '/api/batches/authorize', replayInput(proposal));
+  const second = await replayThroughRoute(batchRoute, '/api/transfers/authorize', replayInput(proposal));
   assert.deepEqual(second, { ok: false, error: 'needs a second approver' });
 });
 
@@ -425,7 +357,7 @@ test('a route that throws still leaves the claim closed', async () => {
   const store = freshStore();
   const proposal = approvedProposal(store, { payload: approvedBatchPayload() });
   await assert.rejects(
-    replayThroughRoute(async () => { throw new Error('boom'); }, '/api/batches/authorize', replayInput(proposal)),
+    replayThroughRoute(async () => { throw new Error('boom'); }, '/api/transfers/authorize', replayInput(proposal)),
     /boom/,
   );
   assert.equal(store.get(proposal.id).approvalConsumedBy, 'execution');
@@ -495,9 +427,9 @@ test('the migration: approvals already carried out start spent', async () => {
 test('the spend row: true exactly once, however many ask at once', async () => {
   const { client, db } = await migratedDb();
   const spend = (consumedBy) => consumeApprovalRecord(db, { proposalId: 'prop_row', orgId: 'acme', consumedBy });
-  const results = await Promise.all([spend('batches/authorize'), spend('transfers/authorize'), spend('execution')]);
+  const results = await Promise.all([spend('test-route'), spend('transfers/authorize'), spend('execution')]);
   assert.equal(results.filter(Boolean).length, 1);
-  assert.equal(await spend('batches/authorize'), false);
+  assert.equal(await spend('test-route'), false);
 
   const row = await client.query(`SELECT consumed_by FROM consumed_approvals WHERE proposal_id = 'prop_row'`);
   assert.equal(row.rows.length, 1);
@@ -532,7 +464,7 @@ test('two processes, one approval: the second is refused by the row, whatever it
     assert.equal(inB.reason, 'already used');
 
     const row = await client.query(`SELECT consumed_by FROM consumed_approvals WHERE proposal_id = 'prop_shared'`);
-    assert.deepEqual(row.rows, [{ consumed_by: 'batches/authorize' }]);
+    assert.deepEqual(row.rows, [{ consumed_by: 'test-route' }]);
   });
   await client.close();
 });
@@ -563,7 +495,6 @@ async function source(file) {
 
 test('each money route names the kind it makes and what an approval of it covers', async () => {
   const expected = {
-    'app/api/batches/authorize/route.ts': /resolveApprovalClaim\(request, orgId, \{\s*kind: 'BATCH_PAYOUT',\s*substance: batchPayoutSubstance,\s*body,/,
     'app/api/transfers/authorize/route.ts': /resolveApprovalClaim\(request, orgId, \{\s*kind: 'PAYMENT',\s*substance: fiatPaymentSubstance,\s*body: rawBody/,
     'app/api/treasury/route.ts': /resolveApprovalClaim\(request, orgId, \{\s*kind: treasuryProposalKind\(action\),\s*substance: treasuryMoveSubstance,\s*body,/,
   };
@@ -575,24 +506,14 @@ test('each money route names the kind it makes and what an approval of it covers
   }
 });
 
-test('the batch route pays exactly the rows the binding covers', async () => {
-  const route = await source('app/api/batches/authorize/route.ts');
-  assert.match(route, /const acceptedRows = payableBatchRows\(rows\);/);
-  assert.match(route, /const targetCurrency = batchTargetCurrency\(body\);/);
-  assert.match(route, /payload: \{ rows: acceptedRows, targetCurrency \}/);
-  assert.match(
-    route,
-    /recordBatchSettlementOnSui\(\{\s*batchId: batch\.id,\s*rows: acceptedRows,/,
-    'settlement is handed the same rows',
-  );
-});
-
 test('the replay closes what it presented, whatever the route did', async () => {
   const replay = await source('lib/server/approval-replay.ts');
   assert.match(replay, /finally \{\s*await closeApprovalClaim\(input\.approvedProposalId, input\.orgId\);\s*\}/);
   assert.match(replay, /return replayThroughRoute\(POST, '\/api\/transfers\/authorize', input\)/);
-  assert.match(replay, /return replayThroughRoute\(POST, '\/api\/batches\/authorize', input\)/);
-  assert.match(replay, /return replayThroughRoute\(POST, '\/api\/treasury', input\)/);
+  // The v1 custody payout-run route is removed: nothing replays into it.
+  assert.doesNotMatch(replay, /\/api\/batches/);
+  // The custodial treasury ledger is retired (v2 D9): nothing replays into it.
+  assert.doesNotMatch(replay, /'\/api\/treasury'/);
 
   // And the executor closes the ones no route saw: a Phase 0 treasury SKIP, a
   // failure before the replay ran.

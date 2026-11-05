@@ -12,10 +12,12 @@ import { getContractConfig } from './contract-config.ts';
  * "Money broking license: RM 1–1.5m paid-up capital"; the MFCA is a bank
  * account, not a licence, and is never described as one).
  *
- * The code cannot check a licence. It checks the custody package: the
- * `splash_custody` Move package is published only when the licence exists,
- * so `SPLASH_CUSTODY_PACKAGE_ID` (or `custodyPackageId` in
- * data/contract-config.json) being set IS the Phase-2 switch. Until then every
+ * The code cannot check a licence. It checks the custody package:
+ * `SPLASH_CUSTODY_PACKAGE_ID` (or `custodyPackageId` in
+ * data/contract-config.json) being set is the Phase-2 switch. v2 retired the
+ * `splash_custody` Move package from the mainnet path for good (D11), and
+ * production on mainnet refuses to boot with that id set, so on mainnet the
+ * switch stays off; it can be set on testnet only. While it is off every
  * fund-holding path refuses with the same plain reason, and the treasury
  * surfaces say when they arrive rather than showing a projection as if it
  * were a balance.

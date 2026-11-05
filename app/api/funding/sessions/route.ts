@@ -4,7 +4,7 @@ import { z } from 'zod';
 
 import { FundingRegistryError, type FundingSelection } from '@/lib/funding/registry';
 import { requireCustomerRequest } from '@/lib/server/customer-auth';
-import { createFundingSession } from '@/lib/server/funding-sessions';
+import { createFundingSession, DepositAddressRefusedError } from '@/lib/server/funding-sessions';
 import { readJsonBody } from '@/lib/server/http';
 import { isForeignAccountId, requireSessionAccount } from '@/lib/server/session-account';
 import { refuseOutsideLaunchScope } from '@/lib/server/launch-scope';
@@ -72,6 +72,11 @@ export async function POST(request: Request) {
       demoMode: process.env.NODE_ENV !== 'production' || process.env.USE_MOCK_APIS === 'true' || process.env.NEXT_PUBLIC_DEMO_MODE === 'true',
     }, { status: 201 });
   } catch (error) {
+    // On mainnet no deposit address is given out (D1, D3): a refusal, not an
+    // outage, so it is answered as one and names its code.
+    if (error instanceof DepositAddressRefusedError) {
+      return NextResponse.json({ error: error.message, code: error.code }, { status: 403 });
+    }
     const message = error instanceof Error ? error.message : 'Funding session could not be created';
     return NextResponse.json(
       { error: message },

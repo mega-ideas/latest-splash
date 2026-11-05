@@ -101,16 +101,25 @@ function scriptedChain({ buildError, gaslessBuildError, senderPaysBuildError, si
   };
 }
 
-async function setup({ kyb = 'REGISTERED', verdict = 'CLEAR', payoutMethod = 'WALLET', fee = FEE, approved = true, chainOpts, anchorFee = false, splashWallet = false, gasless = true } = {}) {
+async function setup({ kyb = 'REGISTERED', verdict = 'CLEAR', payoutMethod = 'WALLET', fee = FEE, approved = true, chainOpts, anchorFee = false, splashWallet = false, gasless = true, delivery = { deliveryKind: 'SELF_CUSTODY', ownershipStatus: 'proven' } } = {}) {
   const { client, db } = await migratedDb();
   await client.exec(`INSERT INTO organizations (id, name, kyb_lifecycle) VALUES ('org_s', 'S Co', '${kyb}')`);
   await client.exec(`INSERT INTO users (id, email, name) VALUES ('u_owner', 'owner@s.test', 'Owner')`);
-  await client.exec(`INSERT INTO suppliers (id, org_id, name, country, payout_method, wallet_address, wallet_provider)
-    VALUES ('rcpt_w', 'org_s', 'Maria', 'PH', 'WALLET', '${RECIPIENT}', 'SLUSH')`);
+  // The saved row the server's own gate reads (v2 §4.7), as the record below describes it.
+  if (payoutMethod === 'WALLET' && delivery?.deliveryKind === 'SELF_CUSTODY') {
+    await client.exec(`INSERT INTO suppliers (id, org_id, name, country, payout_method, wallet_address, wallet_provider, delivery_kind, ownership_status, legal_name, registration_number, address_line1, address_city, created_by, approved_by, approved_at)
+      VALUES ('rcpt_w', 'org_s', 'Maria', 'PH', 'WALLET', '${RECIPIENT}', 'SLUSH', 'SELF_CUSTODY', '${delivery.ownershipStatus}', 'Maria Trading', 'R-1', '1 Rizal St', 'Manila', 'u_owner', 'u_owner', now())`);
+    if (delivery.ownershipStatus === 'proven') {
+      await client.exec(`INSERT INTO wallet_ownership_proofs (org_id, address, method, evidence_sha256, verified_at) VALUES ('org_s', '${RECIPIENT}', 'test', '${'0'.repeat(64)}', now())`);
+    }
+  } else {
+    await client.exec(`INSERT INTO suppliers (id, org_id, name, country, payout_method, wallet_address, wallet_provider)
+      VALUES ('rcpt_w', 'org_s', 'Maria', 'PH', 'WALLET', '${RECIPIENT}', 'SLUSH')`);
+  }
   const recipient = {
     id: 'rcpt_w', orgId: 'org_s', name: 'Maria', country: 'PH', bank: '', swift: '', account: '', tier: 'PAYOUT_ONLY',
     kybStatus: 'none', createdVia: 'manual', createdAt: new Date(T0).toISOString(),
-    payoutMethod, walletAddress: payoutMethod === 'WALLET' ? RECIPIENT : undefined, walletProvider: 'SLUSH', screeningVerdict: verdict,
+    payoutMethod, walletAddress: payoutMethod === 'WALLET' ? RECIPIENT : undefined, walletProvider: 'SLUSH', screeningVerdict: verdict, delivery,
   };
   const chain = scriptedChain(chainOpts);
   let now = T0;
@@ -267,10 +276,14 @@ test('gas: gasless by default; the switch off, or a network that refuses gasless
   assert.equal(done.status, 'CONFIRMED');
   await s.client.close();
 
-  // The fee leg counts too: every leg must clear Sui's 0.01 floor (0.05 does).
+  // The fee leg counts too: every leg must clear Sui's 0.01 floor. The
+  // smallest fee, 1% of the 1 USDC minimum transfer, is exactly 0.01.
   s = await setup({ anchorFee: true });
   q = await quote(s.deps, '10');
-  assert.equal(q.feeMinor, '50000');
+  assert.equal(q.feeMinor, '100000');
+  assert.equal(q.gas, 'GASLESS');
+  q = await quote(s.deps, '1');
+  assert.equal(q.feeMinor, '10000');
   assert.equal(q.gas, 'GASLESS');
   await s.client.close();
 });
@@ -413,6 +426,18 @@ test('refusals before any reservation: role, bank recipient, unscreened on mainn
   assert.equal((await quote(s.deps)).code, 'recipient_not_sendable', 'mainnet wants CLEAR or ATTESTED');
   await s.client.close();
 
+  // v2 §4.7: a wallet the supplier holds only once proven; an exchange account only from the business wallet.
+  for (const [delivery, code] of [
+    [{ deliveryKind: 'SELF_CUSTODY', ownershipStatus: 'unproven' }, 'ownership_not_proven'],
+    [{ deliveryKind: 'SELF_CUSTODY', ownershipStatus: 'revoked' }, 'ownership_not_proven'],
+    [null, 'ownership_not_proven'],
+    [{ deliveryKind: 'EXCHANGE', exchangeId: 'pdax', depositNetwork: 'SUI' }, 'exchange_from_business_wallet'],
+  ]) {
+    s = await setup({ delivery });
+    assert.equal((await quote(s.deps)).code, code, JSON.stringify(delivery));
+    await s.client.close();
+  }
+
   s = await setup({ verdict: 'ATTESTED' });
   assert.equal((await quote(s.deps)).ok, true);
   await s.client.close();
@@ -426,7 +451,7 @@ test('refusals before any reservation: role, bank recipient, unscreened on mainn
   assert.equal((await quote(s.deps)).ok, true);
   await s.client.close();
 
-  // With the audit-anchor fee on, a transfer out of Splash needs one.
+  // With Splash's wallet fee on, a transfer out of Splash needs a recipient.
   s = await setup({ fee: null, anchorFee: true });
   const noFee = await quote(s.deps);
   assert.equal(noFee.code, 'fee_address_missing');
@@ -465,23 +490,23 @@ test('an approval is handed back when nothing moved, and the quote records who a
   await client.close();
 });
 
-test('with the audit-anchor fee on, a transfer out of Splash pays it on top, in the same transaction', async () => {
+test("with Splash's wallet fee on, a transfer out of Splash pays the WALLET schedule on top, in the same transaction", async () => {
   const { client, deps } = await setup({ anchorFee: true });
   const q = await quote(deps, '1000');
-  assert.equal(q.feeMinor, usdc('0.2').toString(), '0.02% of 1,000');
-  assert.equal(q.totalDebitMinor, usdc('1000.2').toString());
-  assert.equal(q.feeKind, 'AUDIT_ANCHOR');
+  assert.equal(q.feeMinor, usdc('0.25').toString(), '0.02% of 1,000 is 0.20: the 0.25 minimum');
+  assert.equal(q.totalDebitMinor, usdc('1000.25').toString());
+  assert.equal(q.feeKind, 'WALLET_FEE');
   assert.equal(q.feeAddress, FEE);
   const legs = JSON.parse(new TextDecoder().decode(fromBase64(q.transactionBytes))).legs;
-  assert.deepEqual(legs.map((l) => [l.address, l.amountMinor]), [[RECIPIENT, usdc('1000').toString()], [FEE, usdc('0.2').toString()]]);
+  assert.deepEqual(legs.map((l) => [l.address, l.amountMinor]), [[RECIPIENT, usdc('1000').toString()], [FEE, usdc('0.25').toString()]]);
   assert.equal((await submit(deps, q)).status, 'CONFIRMED', 'the dry run and the chain check the fee leg too');
 
   const small = await quote(deps, '10');
-  assert.equal(small.feeMinor, usdc('0.05').toString(), 'the 0.05 floor');
+  assert.equal(small.feeMinor, usdc('0.1').toString(), 'the 1% ceiling beats the minimum');
   await client.close();
 });
 
-test('to a Splash user wallet it stays free, even with the audit-anchor fee on', async () => {
+test("to a Splash user wallet it stays free, even with Splash's wallet fee on", async () => {
   const { client, deps } = await setup({ anchorFee: true, splashWallet: true });
   const q = await quote(deps, '1000');
   assert.equal(q.feeMinor, '0');
@@ -509,4 +534,17 @@ test('the chain reader takes the digest from effects when a dry run has none at 
   assert.equal(executed.digest, 'RealDigest');
   const failed = observe({ $kind: 'FailedTransaction', FailedTransaction: { digest: 'F', status: { success: false, error: { message: 'InsufficientCoinBalance' } } } });
   assert.deepEqual([failed.success, failed.error], [false, 'InsufficientCoinBalance']);
+});
+
+test('a proof withdrawn between the quote and the submission stops the transfer before its approval is spent (v2 §4.7)', async () => {
+  const s = await setup();
+  const q = await quote(s.deps);
+  assert.equal(q.ok, true, JSON.stringify(q));
+  await s.client.exec(`UPDATE wallet_ownership_proofs SET revoked_at = now()`);
+  await s.client.exec(`UPDATE suppliers SET ownership_status = 'revoked'`);
+  const r = await submit(s.deps, q);
+  assert.deepEqual([r.ok, r.code], [false, 'ownership_not_proven']);
+  assert.equal(s.approvals.consumed, 0, 'the approval is not spent');
+  assert.equal(s.chain.calls.execute, 0, 'nothing reached the chain');
+  await s.client.close();
 });

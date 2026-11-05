@@ -1,3 +1,4 @@
+import type { FeeQuoteWire } from '@/lib/fees/quote';
 import { suiScanTxUrl, suiVisionTxUrl } from '@/lib/explorer';
 import { getContractConfig } from '@/lib/server/contract-config';
 import { rememberForOrg } from '@/lib/server/memwal';
@@ -60,6 +61,14 @@ export type TransferIntentRecord = {
   fundingKytStatus?: string;
   fundingNormalizeVenue?: string;
   fundingEffectiveSlippageBps?: number;
+  /**
+   * Splash's fee on this payment, as quoted when it was authorized
+   * (Amendment A1 §4): the breakdown the receipt shows (Splash fee with its
+   * kind and tier, the payout partner's fee with its source, the total
+   * debited) and `maxFeeMinor`, the max_fee the payment is bounded by.
+   * Absent on a transfer authorized before A1.
+   */
+  fees?: FeeQuoteWire;
   verificationReference: string | null;
   receiptObjectId: string | null;
   suiTxDigest: string | null;
@@ -85,33 +94,6 @@ export type TransferIntentRecord = {
   demo?: boolean;
   createdAt: string;
   updatedAt: string;
-};
-
-export type BatchRecord = {
-  id: string;
-  /** The org this run belongs to. Required — `accountId` below is an
-   *  on-chain object id that falls back to a value shared across orgs, so it
-   *  cannot serve as the ownership boundary. */
-  orgId: string;
-  state: TransferIntentState;
-  rowCount: number;
-  acceptedRows: number;
-  blockedRows: number;
-  totalAmount: string;
-  digest: string | null;
-  packageId: string | null;
-  explorer: { suiVisionTxUrl: string | null; suiScanTxUrl: string | null };
-  demo?: boolean;
-  /** The on-chain BusinessAccount this run settles from. Recorded, not the
-   *  scoping key — see `orgId` above. */
-  accountId?: string;
-  /** The proposal that authorized this run, when it needed a second
-   *  approver. */
-  proposalId?: string;
-  /** Replay key. A repeat authorization with the same key returns this record
-   *  instead of paying every recipient a second time. */
-  idempotencyKey?: string;
-  createdAt: string;
 };
 
 export type RecipientRecord = {
@@ -143,12 +125,26 @@ export type RecipientRecord = {
     sweepDelaySeconds: number;
   };
   kybInviteSent?: boolean;
-  /** BANK (local currency via a partner rail) or WALLET (USDC on Sui). */
-  payoutMethod?: 'BANK' | 'WALLET';
+  /** BANK (local currency via a partner rail), WALLET (USDC on Sui) or
+   *  CROSS_CHAIN (USDC over CCTP V2, v2 §4.7). */
+  payoutMethod?: 'BANK' | 'WALLET' | 'CROSS_CHAIN';
+  /** How it is paid (v2 §4.7): the kind and that kind's own fields. */
+  delivery?: import('./repository/recipients.ts').RecipientDelivery;
+  /** When an owner approved it for payment (v2 §4.7); null until then. */
+  approvedAt?: string | null;
+  /** The member who saved it; the route tells the page only whether it was the viewer. */
+  createdBy?: string | null;
   /** Lower-cased Sui address; set only for WALLET recipients. */
   walletAddress?: string;
   /** 'SLUSH' | 'METAMASK_SUI_SNAP'. */
   walletProvider?: string;
+  /**
+   * When the supplier signed the ownership proof for `walletAddress` (brief
+   * 4.7: address, business name, nonce, expiry). Absent means not proven,
+   * and a self-custody wallet is not paid from Invoices until it is. Nothing
+   * on this branch sets it yet.
+   */
+  walletOwnershipProvenAt?: string | null;
   /** Sanctions screening outcome; null/absent = never screened. */
   screeningVerdict?: string | null;
   /**
@@ -192,7 +188,8 @@ export type TravelRuleBeneficiary = {
   bankAccountName?: string;
 };
 
-export type InvoiceStatusV2 = 'draft' | 'sent' | 'viewed' | 'paid' | 'settled' | 'overdue';
+/** 'reported': the payer says they paid by bank (lib/invoices/status.ts). */
+export type InvoiceStatusV2 = 'draft' | 'sent' | 'viewed' | 'reported' | 'paid' | 'settled' | 'overdue';
 export type InvoiceRecord = {
   id: string;
   /** The org this invoice belongs to.
@@ -218,6 +215,17 @@ export type InvoiceRecord = {
   /** Paid in USDC on Sui to the issuer's own wallet (lib/server/usdc-invoice-payments.ts). */
   usdcTxDigest?: string;
   usdcPaidAt?: string;
+  /** What the payer said from the pay link: a report, never the evidence it was paid. */
+  payerReportedReference?: string;
+  payerReportedAt?: string;
+  /** Who the payer said they were on the pay link (0059); the issuer's payer fields stay the issuer's. */
+  payerReportedName?: string;
+  payerReportedEmail?: string;
+  /** The reference on the business's own statement, typed when it marked the invoice paid (0059). */
+  receivedReference?: string;
+  /** The create dialog's key and a fingerprint of what it sent (0060): one invoice per key. */
+  createKey?: string;
+  createFingerprint?: string;
   createdAt: string;
   updatedAt: string;
 };
@@ -268,8 +276,9 @@ export type RateHold = {
    *  would have merged two tenants' holds back together. */
   orgId?: string;
   corridorCurrency: string;
+  /** The exchange rate held. A hold carries no fee: Splash's fee is the
+   *  schedule's on the payment it is used for (A1 §2.8). */
   rate: string;
-  feeBps: number;
   holdUntil: string;
   scheduledExecuteAt?: string;
   alertRule?: { direction: 'STRENGTHENS_PAST' | 'WEAKENS_PAST'; threshold: string };
@@ -317,7 +326,7 @@ export type AuditReceipt = {
 
 export type TransactionRecord = {
   id: string;
-  kind: 'transfer' | 'batch';
+  kind: 'transfer';
   state: TransferIntentState;
   module: string;
   functionName: string;
@@ -330,7 +339,6 @@ export type TransactionRecord = {
 
 type OperationStore = {
   transfers: Map<string, TransferIntentRecord>;
-  batches: Map<string, BatchRecord>;
   recipients: Map<string, RecipientRecord>;
   invoices: Map<string, InvoiceRecord>;
   ledgerEntries: Map<string, LedgerEntry>;
@@ -345,7 +353,6 @@ const globalStore = globalThis as typeof globalThis & { splashOperations?: Opera
 
 export const operations = globalStore.splashOperations ?? {
   transfers: new Map<string, TransferIntentRecord>(),
-  batches: new Map<string, BatchRecord>(),
   recipients: new Map<string, RecipientRecord>(),
   invoices: new Map<string, InvoiceRecord>(),
   ledgerEntries: new Map<string, LedgerEntry>(),
@@ -475,67 +482,6 @@ export function createTransferIntent(input: {
 // gone rather than deprecated: a scoped replacement beside an unscoped original
 // is a choice somebody makes wrongly at 2am. Use `lib/server/transfers-store.ts`,
 // where every read takes an orgId and cross-tenant reach is spelled `*ForStaff`.
-
-/**
- * Build a payout-run record. Does NOT decide where it lives — the caller
- * claims it through `lib/server/batches-store.ts`, where the replay key is
- * enforced by a unique index rather than a lookup that a restart empties.
- *
- * Nor does it put the record anywhere. It used to add it to the in-process
- * map, and with no database the claim then looked for a run holding the key
- * and found this one: every first submission came back as an idempotent
- * replay, and nothing settled.
- */
-export function buildBatch(input: {
-  orgId: string;
-  rowCount: number;
-  acceptedRows: number;
-  blockedRows: number;
-  totalAmount: string;
-  accountId?: string;
-  idempotencyKey?: string;
-  proposalId?: string;
-}) {
-  const record: BatchRecord = {
-    id: createId('batch'),
-    orgId: input.orgId,
-    state: 'QUEUED',
-    rowCount: input.rowCount,
-    acceptedRows: input.acceptedRows,
-    blockedRows: input.blockedRows,
-    totalAmount: input.totalAmount,
-    digest: null,
-    packageId: null,
-    explorer: explorerLinks(null),
-    accountId: input.accountId,
-    idempotencyKey: input.idempotencyKey,
-    proposalId: input.proposalId,
-    createdAt: new Date().toISOString(),
-  };
-  return record;
-}
-
-/**
- * Find a batch already created for this (account, idempotency key) pair.
- *
- * A batch pays every recipient out of the SHARED SettlementPool, so a replayed
- * authorization — a dropped response, a double-click, a proxy retry — pays
- * everyone twice. Returning the existing record makes the second call a no-op
- * rather than a second payroll run.
- */
-// `readBatch`, `readBatchFor`, `updateBatch`, `listBatches` and
-// `findBatchByIdempotencyKey` used to live here over a process-global map.
-//
-// `readBatch(id)` and `listBatches()` were unscoped — any tenant's payout run,
-// row counts, totals and settlement digest, to anyone signed in. And the
-// idempotency lookup, the guard that stops a re-submitted file paying every
-// recipient twice, was a read of that same map: a restart between the two
-// submissions emptied it, and restarts are exactly when an operator retries.
-//
-// They are gone rather than deprecated. Use `lib/server/batches-store.ts`,
-// where every read takes an orgId, cross-tenant reach is spelled
-// `listBatchesForStaff`, and the replay key is claimed by a unique index rather
-// than consulted by a lookup.
 
 /**
  * Build a beneficiary record. Does NOT decide where it lives — the caller
@@ -855,20 +801,10 @@ export async function listTransactions(): Promise<TransactionRecord[]> {
     explorer: explorerLinks(transfer.suiTxDigest),
     createdAt: transfer.createdAt,
   }));
-  const { listBatchesForStaff } = await import('./batches-store.ts');
-  const fromBatches: TransactionRecord[] = (await listBatchesForStaff()).map((batch) => ({
-    id: batch.id,
-    kind: 'batch',
-    state: batch.state,
-    module: 'settlement',
-    functionName: 'settle_batch',
-    amount: `$${batch.totalAmount}`,
-    digest: batch.digest,
-    packageId: batch.packageId,
-    explorer: batch.explorer,
-    createdAt: batch.createdAt,
-  }));
-  return [...fromTransfers, ...fromBatches].sort((a, b) => b.createdAt.localeCompare(a.createdAt));
+  // The v1 custody payout runs (settle_batch) that used to be listed here are
+  // gone with their route and store; wallet batches are the owners' own
+  // transactions and are read through /api/wallet/batches.
+  return fromTransfers.sort((a, b) => b.createdAt.localeCompare(a.createdAt));
 }
 
 function seedDemoData() {
@@ -987,7 +923,7 @@ function seedDemoData() {
   });
   Object.assign(invoice, { transferIntentId: transfer.id });
   createLedgerEntry({ accountId: cebu.id, direction: 'CREDIT', amountUsdcMicro: 5_000_000_000n, refType: 'SEED', refId: 'demo_seed', demo: true });
-  const hold = buildRateHold({ corridorCurrency: 'PHP', rate: '56.5', feeBps: 80, demo: true });
+  const hold = buildRateHold({ corridorCurrency: 'PHP', rate: '56.5', demo: true });
   operations.rateHolds.set(hold.id, hold);
 }
 

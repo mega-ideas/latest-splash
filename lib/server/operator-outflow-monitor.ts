@@ -10,13 +10,23 @@
  *     somebody else sent cannot be an outflow from it;
  *   - the allowlist: approved wallet beneficiaries from the recipients store;
  *   - our core package ids: SPLASH_CORE_PACKAGE_ID and the legacy
- *     SPLASH_PACKAGE_ID alias.
+ *     SPLASH_PACKAGE_ID alias, and our splash_spend package,
+ *     SPLASH_SPEND_PACKAGE_ID: the v2 executor path is splash_spend::pay_intent
+ *     with core's audit_anchor::anchor;
+ *   - Splash's fee recipient, from the FeeConfig (SPLASH_FEE_CONFIG_ID), for
+ *     the fee leg of a v2 payment; none while the fees are off;
+ *   - the address registry (SPLASH_ADDRESS_REGISTRY_ID), asked only about the
+ *     addresses that gained value on a pay_intent and that neither the
+ *     allowlist nor the fee recipient covers: a partner's deposit address or
+ *     a business wallet. Any of these that cannot be read fails the run.
  *
  * It looks back `sinceMs` (default two hours) over at most MAX_PAGES pages.
  * Alerts are de-duplicated within one process; a fresh process re-alerts on
  * a digest still inside the window, which is the safe direction, and the
  * alert carries the digest so the receiver can de-duplicate across runs.
  */
+import { feeConfigIdFromEnv, getFeeConfig } from '../fees/fee-config.ts';
+import { graphqlRegistryReader } from './address-registry-reader.ts';
 import { getContractConfig } from './contract-config.ts';
 import { sendOperatorAlert, type OperatorAlertSink } from './operator-alerts.ts';
 import {
@@ -163,6 +173,10 @@ export async function runOperatorOutflowMonitor(deps: {
   windowMs?: number;
   readTransactions?: OperatorTransactionReader;
   readAllowlist?: () => Promise<string[]>;
+  /** FeeConfig's fee recipient, or null while the fees are off. */
+  readFeeRecipient?: () => Promise<string | null>;
+  /** Which of these addresses Splash's registry classifies. */
+  readRegistered?: (addresses: string[]) => Promise<Set<string>>;
   alert?: OperatorAlertSink;
 } = {}): Promise<MonitorResult> {
   const cfg = getContractConfig();
@@ -170,19 +184,39 @@ export async function runOperatorOutflowMonitor(deps: {
   if (!operatorRaw) return { ok: false, reason: 'OPERATOR_SUI_ADDRESS is not configured, so there is no operator address to watch.' };
   const operator = normalizeSuiAddress(operatorRaw);
   const corePackageIds = [cfg.corePackageId, cfg.packageId].map((id) => (id ?? '').trim()).filter(Boolean);
+  const spendPackageIds = [process.env.SPLASH_SPEND_PACKAGE_ID ?? ''].map((id) => id.trim()).filter(Boolean);
 
   const readTransactions = deps.readTransactions ?? graphqlOperatorReader();
   const readAllowlist = deps.readAllowlist ?? (async () => {
     const { listApprovedWalletAddressesForStaff } = await import('./recipients-store.ts');
     return listApprovedWalletAddressesForStaff();
   });
+  const readFeeRecipient = deps.readFeeRecipient ?? (async () => (feeConfigIdFromEnv().ok ? (await getFeeConfig()).feeRecipient : null));
+  const registryId = (process.env.SPLASH_ADDRESS_REGISTRY_ID ?? '').trim();
+  const readRegistered = deps.readRegistered
+    ?? (registryId ? graphqlRegistryReader(registryId) : async () => new Set<string>());
   const alert = deps.alert ?? sendOperatorAlert;
   const sinceMs = (deps.now ?? Date.now()) - (deps.windowMs ?? DEFAULT_WINDOW_MS);
 
   let transactions: OperatorTransaction[];
   let allowlist: string[];
+  let feeRecipient: string | null;
+  let registered: Set<string>;
   try {
-    [transactions, allowlist] = await Promise.all([readTransactions(operator, sinceMs), readAllowlist()]);
+    [transactions, allowlist, feeRecipient] = await Promise.all([readTransactions(operator, sinceMs), readAllowlist(), readFeeRecipient()]);
+    // Look up only what nothing else covers: the addresses that gained value
+    // on a pay_intent, less the allowlist and the fee recipient.
+    const covered = new Set([...allowlist, ...(feeRecipient ? [feeRecipient] : [])].map(normalizeSuiAddress));
+    const candidates = new Set<string>();
+    for (const tx of transactions) {
+      if (!tx.moveCalls.some((call) => call.module === 'splash_spend' && call.function === 'pay_intent')) continue;
+      for (const change of tx.balanceChanges) {
+        if (!change.owner || change.amount <= 0n) continue;
+        const owner = normalizeSuiAddress(change.owner);
+        if (owner !== operator && !covered.has(owner)) candidates.add(owner);
+      }
+    }
+    registered = await readRegistered([...candidates]);
   } catch (error) {
     return { ok: false, reason: `the monitor could not read its inputs: ${error instanceof Error ? error.message : String(error)}` };
   }
@@ -190,7 +224,10 @@ export async function runOperatorOutflowMonitor(deps: {
   const report = classifyOperatorTransactions(transactions, {
     operator,
     corePackageIds,
+    spendPackageIds,
     approvedRecipients: new Set(allowlist),
+    registeredRecipients: registered,
+    feeRecipient,
   });
 
   const alerted: string[] = [];

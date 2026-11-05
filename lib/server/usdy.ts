@@ -1,4 +1,5 @@
 import { MICRO_DECIMALS, applyBps, applyRate, divideByRate, formatRate, type Rate } from '../money.ts';
+import { getEnv } from '../env.ts';
 import { readUsdyOracle } from './ondo-oracle.ts';
 /**
  * Ondo USDY — the yield instrument behind Smart Treasury.
@@ -213,7 +214,7 @@ export function getSwapVenue(): SwapVenue {
 export async function quoteSwap(
   direction: SwapDirection,
   amountInMicro: bigint,
-  slippageBps = Number(process.env.USDY_SWAP_SLIPPAGE_BPS ?? 30),
+  slippageBps = getEnv().USDY_SWAP_SLIPPAGE_BPS,
 ): Promise<SwapQuote> {
   const nav = await getUsdyRedemptionPrice();
   // A quote priced off a NAV nobody measured is the $1.00-fallback defect one

@@ -33,7 +33,7 @@ function sampleProposal(overrides = {}) {
       financialImpact: {
         amountOut: '5000000000',
         currencyOut: 'PHP',
-        feeBps: 80,
+        splashFeeMinor: 2_000_000n,
         fxRate: { value: '56.4200', pythPriceId: 'pyth_usdc_usd', observedAt: now },
         nettingSaved: '125000',
       },
@@ -56,7 +56,7 @@ test('ActionCard model exposes full proposal anatomy and trust treatment', () =>
   assert.deepEqual(model.impactRows.map((row) => row.label), [
     'Amount in',
     'Amount out',
-    'Fee',
+    'Splash fee',
     'FX',
     'Yield delta',
     'Netting saved',
@@ -70,8 +70,10 @@ test('ActionCard model exposes full proposal anatomy and trust treatment', () =>
   assert.equal(model.primaryActionLabel, 'Sign & approve');
 });
 
-test('default dashboard is the streaming Zeke surface and avoids browser money storage', async () => {
-  const page = await readFile(new URL('../app/dashboard/page.tsx', import.meta.url), 'utf8');
+test('the Zeke desk is the streaming Zeke surface and avoids browser money storage', async () => {
+  // v2 brief 5.1: Home is /dashboard; the desk moved to /dashboard/zeke.
+  const page = await readFile(new URL('../app/dashboard/zeke/page.tsx', import.meta.url), 'utf8');
+  const nav = await readFile(new URL('../lib/dashboard/nav.ts', import.meta.url), 'utf8');
   const layout = await readFile(new URL('../app/dashboard/layout.tsx', import.meta.url), 'utf8');
   const queue = await readFile(new URL('../app/queue/page.tsx', import.meta.url), 'utf8');
   const kybSettings = await readFile(new URL('../app/settings/kyb/page.tsx', import.meta.url), 'utf8');
@@ -101,8 +103,9 @@ test('default dashboard is the streaming Zeke surface and avoids browser money s
   // prop (e.g. the KYB gate state) does not fail a test about the desk surface.
   assert.match(layout, /<DashboardShell[^>]*session=\{session\}/);
   assert.match(layout, /\{children\}<\/DashboardShell>/);
-  assert.match(shell, /label: 'Zeke',\s+href: '\/dashboard'/);
-  assert.match(shell, /href: '\/dashboard\/overview'/);
+  assert.match(nav, /label: 'Zeke',\s+href: '\/dashboard\/zeke'/);
+  assert.match(nav, /label: 'Home',\s+href: '\/dashboard'/);
+  assert.match(shell, /dashboardNav\(/, 'the shell renders the nav data, not a private copy');
   assert.match(queue, /export const dynamic = 'force-dynamic'/);
   assert.match(queue, /getCustomerSession/);
   assert.match(queue, /redirect\('\/login'\)/);
@@ -153,28 +156,34 @@ test('landing is the v1 cinematic: hero district, five steps with manual entry, 
   const ogImage = await readFile(new URL('../app/opengraph-image.tsx', import.meta.url), 'utf8');
   const composer = await readFile(new URL('../components/oxwal/OxWalComposer.tsx', import.meta.url), 'utf8');
   const floating = await readFile(new URL('../components/FloatingCopilot.tsx', import.meta.url), 'utf8');
-  // The invoice loop lives inside the Invoices page now (Inspection loop tab).
-  const invoiceLoop = await readFile(new URL('../components/invoices/InvoiceLoop.tsx', import.meta.url), 'utf8');
+  // The invoice loop became Pay invoices, inside the Invoices page (v2 brief 5.8).
+  const invoiceLoop = await readFile(new URL('../components/invoices/PayInvoices.tsx', import.meta.url), 'utf8');
 
   assert.match(claims, /headline: 'Collect USD\. Pay Southeast Asia\. Keep cash working\.'/);
-  // The hero art is still the versioned district raster, owned by the
-  // cinematic; the landing keeps the loops and copilot sections and offers
-  // both ways into a payment — an invoice, or a hand-filled transfer.
-  assert.match(cinematic, /hero-district-v\d+\.png/);
+  // The hero art is the versioned district, owned by the cinematic and
+  // shipped as WebP through the image pipeline since v2 Phase 4 (the PNG is
+  // never requested); the landing keeps the loops and copilot sections, and
+  // how it works offers both ways into a payment: from an invoice, or typed
+  // in by hand.
+  assert.match(cinematic, /landingImage\('hero'\)/);
   assert.match(landing, /id="loops"/);
-  assert.match(landing, /Five steps/);
-  assert.match(landing, /Invoice in, or type it in/);
+  const how = await readFile(new URL('../components/landing/HowItWorks.tsx', import.meta.url), 'utf8');
+  assert.match(how, /Five steps/);
+  assert.match(how, /from an invoice or typed in by hand/);
   assert.doesNotMatch(landing, /Early Pay|id="supply"/);
   assert.match(page, /<IsometricLanding/);
-  assert.match(page, /LANDING_FAQ/, 'the FAQ JSON-LD is generated from the page copy, not duplicated');
+  assert.match(page, /landingFaq\(/, 'the FAQ JSON-LD is generated from the page copy, not duplicated');
   // Composer is now a payment-desk command bar (not a ChatGPT pill): no
   // "High" effort dropdown, a branded "Prepare" action, and a functional
-  // file-attach that prepares a batch for human approval.
-  assert.match(composer, /Prepare batch/);
-  assert.match(composer, /onFilePrepared/);
+  // file-attach that hands a payout sheet to the server reader, which Zeke
+  // shows as a table and prepares as a batch only when the person presses
+  // Prepare batch (components/oxwal/SheetCard.tsx).
+  assert.match(composer, /onSheet/);
+  assert.doesNotMatch(composer, /onFilePrepared/);
+  assert.match(await readFile(new URL('../components/oxwal/SheetCard.tsx', import.meta.url), 'utf8'), /Prepare batch|prepareButton/);
   assert.doesNotMatch(composer, /priorityLabel|bg-black/);
   assert.match(floating, /OxWalComposer/);
-  assert.match(invoiceLoop, /What should Zeke inspect\?/);
+  assert.match(invoiceLoop, /Bring in an invoice/);
   assert.match(claims, /footerLegal/);
   assert.match(copyCheck, /8 corridors/);
   assert.match(copyCheck, /Sui network live/);

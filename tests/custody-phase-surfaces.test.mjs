@@ -111,34 +111,40 @@ test('with no collection account the payer is told to pay the issuer, and why, i
 
 /* ── The landing ───────────────────────────────────────────────────────── */
 
-test('the landing ladder puts both fund-holding rungs in Phase 2, in the licence words', async () => {
+// v2 brief section 6 and D3: Splash never owns an account that receives
+// client money, so the sweep account and the stored balance leave the
+// landing rather than wait for a licence. Money waits in the business's own
+// Splash Wallet, which Splash has no key to.
+test('the landing ladder offers no Splash account that holds funds: a bank, a wallet, the Splash Wallet', async () => {
   const landing = await source('components/IsometricLanding.tsx');
   const start = landing.indexOf('const recipientLadder');
   assert.ok(start > 0, 'the ladder exists');
   const ladder = landing.slice(start, landing.indexOf('];', start));
-  // It sold the sweep account as a "Phase 1 launch" into "a Splash account",
-  // and stored balance as merely "Corridor gated".
-  assert.doesNotMatch(ladder, /Phase 1 launch|Corridor gated|sweep value into a Splash account/);
-  for (const title of ['Sweep account', 'Stored balance']) {
-    assert.match(ladder, new RegExp(`title: '${title}',\\s*status: 'Phase 2'`), `${title} is Phase 2`);
+  assert.doesNotMatch(ladder, /Sweep account|Stored balance|Phase 1 launch|Corridor gated|sweep value into a Splash account/);
+  for (const title of ['Bank payout', 'Wallet payout', 'Splash Wallet']) {
+    assert.match(ladder, new RegExp(`title: '${title}'`), title);
   }
-  assert.match(ladder, /\$\{CUSTODY_LICENCE\}/, 'the sweep rung names the licence it waits for');
+  assert.match(ladder, /Held by your business/);
+  assert.match(ladder, /Splash has no key to it/);
 });
 
 /* ── Settings ──────────────────────────────────────────────────────────── */
 
-test('the settings page stops presenting Treasury and the fund-holding rungs as running in Phase 0', async () => {
-  const page = await source('app/dashboard/settings/page.tsx');
-  assert.match(page, /const custodyOn = useCustodyPhaseOn\(\);/, 'the phase the shell resolved');
+test('the settings page presents no fund-holding rung at all, and Treasury is not custodial in any phase', async () => {
+  // v2 brief 5.9: the "Recipient ladder" card (payout, sweep, stored balance) is gone with the
+  // custody it described; Settings says what is true in lib/settings-page/about.ts.
+  const text = [await source('components/settings/SettingsPage.tsx'), await source('components/settings/AboutCard.tsx'), await source('components/settings/OperatingControls.tsx'), await source('lib/settings-page/about.ts')].join('\n');
+  assert.doesNotMatch(text, /useCustodyPhaseOn|custodyOn|Recipient ladder|payout\/sweep\/stored|sweep and stored balance/);
   // Nothing reads autoAllocateTreasuryPct, so "applied to treasury allocation" was never true.
-  assert.doesNotMatch(page, /treasury allocation, and account security/);
-  assert.match(page, /Phase 2 · Smart Treasury holds customer funds, which needs \$\{CUSTODY_LICENCE\}/);
-  assert.match(page, /custodyOn \? 'payout\/sweep\/stored' : 'payout today · sweep and stored balance in Phase 2/);
-  assert.match(page, /text\(custodyOn\)/, 'the phase-dependent cards are rendered with the phase');
+  assert.doesNotMatch(text, /treasury allocation, and account security/);
+  // v2 D9: Treasury is USDY in the business's own wallet, in any phase. No
+  // licence is cited for it and no issuer is named (the 5.7 review).
+  assert.doesNotMatch(text, /Smart Treasury holds customer funds|CUSTODY_LICENCE|Ondo/);
+  assert.match(text, /USDY in your own Splash Wallet/);
   assert.match(
-    page,
-    /label="Auto-allocate to treasury"[^\n]*disabled=\{!custodyOn\} note=\{custodyOn \? undefined : TREASURY_PHASE0\}/,
-    'the treasury control is not offered in Phase 0',
+    await source('components/settings/OperatingControls.tsx'),
+    /label="Auto-allocate to treasury"[^\n]*disabled note=\{AUTO_ALLOCATE_NOTE\}/,
+    'no allocation is offered automatically, in any phase: every swap is the wallet owners\' own',
   );
 });
 
@@ -159,9 +165,11 @@ test('a verified business still cannot get a treasury proposal in Phase 0', asyn
     await assert.doesNotReject(() => assertZekeLane(orgId, 'FIAT_OUT_LOCAL', 'PHP'));
   });
 
-  assert.match(TREASURY_CUSTODY_REFUSAL, /money-broking licence/);
-  assert.match(TREASURY_CUSTODY_REFUSAL, /does not hold/);
-  assert.doesNotMatch(TREASURY_CUSTODY_REFUSAL, /\blicensed\b/i);
+  // v2 D9: Treasury is USDY in the business's own wallet, so the refusal
+  // points there and cites no licence (brief 5.7).
+  assert.match(TREASURY_CUSTODY_REFUSAL, /own Splash Wallet/);
+  assert.match(TREASURY_CUSTODY_REFUSAL, /Treasury page/);
+  assert.doesNotMatch(TREASURY_CUSTODY_REFUSAL, /licen[cs]/i);
 });
 
 test('Zeke reads no Splash-held balance or treasury position in Phase 0', async () => {
@@ -176,12 +184,13 @@ test('Zeke reads no Splash-held balance or treasury position in Phase 0', async 
     for (const result of [balances, treasury]) {
       const json = JSON.stringify(result);
       for (const amount of FIXTURE_AMOUNTS) assert.ok(!json.includes(amount), `no fixture ${amount}`);
-      assert.match(json, /money-broking licence/, 'the read says why it is empty');
+      assert.match(json, /own Splash Wallet/, 'the read says where the treasury is');
+      assert.doesNotMatch(json, /licen[cs]/i, 'and cites no licence');
     }
   });
 });
 
-test('asking Zeke to move cash into Treasury is refused with the licence reason, before any proposal', async () => {
+test('asking Zeke to move cash into Treasury is refused, pointing at the wallet, before any proposal', async () => {
   const { resetOxwalFixtures, resetOxwalProposalStore } = await agent();
   resetOxwalFixtures();
   resetOxwalProposalStore();
@@ -192,7 +201,8 @@ test('asking Zeke to move cash into Treasury is refused with the licence reason,
       const events = await run({ message, orgId: 'org-verified' });
       assert.ok(events.some((e) => e.type === 'warning' && e.warning.code === 'LANE_LOCKED'), message);
       assert.equal(events.filter((e) => e.type === 'proposal').length, 0, message);
-      assert.match(text(events), /money-broking licence Splash does not hold yet/, message);
+      assert.match(text(events), /own Splash Wallet/, message);
+      assert.doesNotMatch(text(events), /licen[cs]/i, message);
     }
   });
 });
@@ -206,7 +216,8 @@ test('asking about treasury yield or balances gets the Phase 0 answer, not a Sma
       const events = await run({ message, orgId: 'org-verified' });
       const reply = text(events);
       assert.equal(events.filter((e) => e.type === 'proposal').length, 0, message);
-      assert.match(reply, /money-broking licence Splash does not hold yet/, message);
+      assert.match(reply, /own Splash Wallet/, message);
+      assert.doesNotMatch(reply, /licen[cs]/i, message);
       assert.doesNotMatch(reply, /Smart Treasury earns|allocate idle treasury|balances live on/, message);
     }
   });
@@ -283,14 +294,15 @@ test('the delivery executor refuses a fund-holding tier itself, before any ledge
   }
 });
 
-test('an approved treasury proposal records that nothing settles it in Phase 0', async () => {
+test('an approved treasury proposal records that nothing settles it, because the custodial ledger is retired', async () => {
   const { executeApprovedProposal } = await execution();
-  const { CUSTODY_PHASE_WHY } = await rules();
+  const { CUSTODIAL_TREASURY_RETIRED_REASON } = await import('../lib/server/custodial-treasury.ts');
   for (const kind of ['TREASURY_ALLOCATE', 'TREASURY_REDEEM']) {
     const outcome = await executeApprovedProposal({ kind }, {}, { cookie: '', origin: 'http://localhost' });
     assert.equal(outcome.state, 'SKIPPED');
     assert.match(outcome.detail, /not executed/);
-    assert.ok(outcome.detail.includes(CUSTODY_PHASE_WHY), 'with the licence-named reason');
+    assert.ok(outcome.detail.includes(CUSTODIAL_TREASURY_RETIRED_REASON), 'with where Treasury is now (v2 D9)');
+    assert.doesNotMatch(outcome.detail, /licen[cs]/i);
     assert.doesNotMatch(outcome.detail, /own path/, 'not the Phase 2 wording');
   }
 });

@@ -130,21 +130,3 @@ test('a ledger balance survives a cold start', async () => {
     assert.equal((await fresh.listMovements('acme')).length, 2);
   });
 });
-
-test('two payout runs racing with one idempotency key produce one row, and both answers agree', async () => {
-  await withDb(async ({ client }) => {
-    const { buildBatch } = await import('../lib/server/operations.ts');
-    const store = await import('../lib/server/batches-store.ts');
-    const draft = () =>
-      buildBatch({ orgId: 'acme', rowCount: 3, acceptedRows: 3, blockedRows: 0, totalAmount: '300.00', idempotencyKey: 'payroll-race' });
-
-    const [a, b] = await Promise.all([store.claimBatch(draft()), store.claimBatch(draft())]);
-    assert.equal([a, b].filter((r) => r.claimed).length, 1, 'exactly one submission pays');
-    assert.equal(a.batch.id, b.batch.id, 'the other is handed the same run');
-    const { rows } = await client.query(`SELECT count(*)::int AS n FROM batch_runs WHERE idempotency_key = 'payroll-race'`);
-    assert.equal(rows[0].n, 1);
-
-    const fresh = await coldStart('lib/server/batches-store.ts');
-    assert.equal(Number((await fresh.readBatch('acme', a.batch.id))?.totalAmount), 300);
-  });
-});

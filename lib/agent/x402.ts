@@ -33,7 +33,7 @@
 /** Networks the reference facilitators actually serve. */
 export const X402_KNOWN_NETWORKS = [
   // x402 v2 exact scheme on Sui (native USDC) — payable by a person, from
-  // the Send USDC page; never by Zeke.
+  // Wallet; never by Zeke.
   'sui:mainnet',
   'arbitrum-one',
   'arbitrum-sepolia',
@@ -141,7 +141,7 @@ export function x402SettlementAvailability(): { available: false; reason: string
   return {
     available: false,
     reason:
-      'Zeke can read this x402 request and price it, but Zeke never pays it: every release of value here is approved by a named human, and per-request agent spending waits for the capped, revocable, human-signed session mandate on-chain. If the seller accepts USDC on Sui mainnet, pay it yourself on the Send USDC page (x402): you approve it, sign it in your own wallet, and it counts against the same allowance as your transfers. Sellers that accept only EVM chains (Base, Arbitrum) are not payable from a Sui wallet.',
+      'Zeke can read this x402 request and price it, but Zeke never pays it: every release of value here is approved by a named human, and per-request agent spending waits for the capped, revocable, human-signed session mandate on-chain. If the seller accepts USDC on Sui mainnet, pay it yourself from Wallet (x402): you approve it, sign it in your own wallet, and it counts against the same allowance as your transfers. Sellers that accept only EVM chains (Base, Arbitrum) are not payable from a Sui wallet.',
   };
 }
 

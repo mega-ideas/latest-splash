@@ -25,7 +25,7 @@ const dashboardMeta: Array<[string, ContextMeta]> = [
 ];
 
 const adminMeta: Array<[string, ContextMeta]> = [
-  ['/admin/transactions', { eyebrow: 'Settlement monitor', title: 'Inspect live money movement', copy: 'Monitor peg health, transfer state, batches, and on-chain evidence.', icon: '/isometric/stats-icon.svg', signal: 'Live monitor' }],
+  ['/admin/transactions', { eyebrow: 'Settlement monitor', title: 'Inspect live money movement', copy: 'Monitor peg health, transfer state, and on-chain evidence.', icon: '/isometric/stats-icon.svg', signal: 'Live monitor' }],
   ['/admin/kyb', { eyebrow: 'Compliance review', title: 'Verify businesses with context', copy: 'Review identity evidence, risk posture, and corridor access.', icon: '/isometric/checklist-icon.svg', signal: 'Review controlled' }],
   ['/admin/support', { eyebrow: 'Service operations', title: 'Resolve cases with evidence', copy: 'Triage requests, assign ownership, and preserve the response trail.', icon: '/isometric/fast-icon.svg', signal: 'Queue monitored' }],
   ['/admin/contracts', { eyebrow: 'Contract controls', title: 'Configure the settlement boundary', copy: 'Review package references and operator-controlled Sui objects.', icon: '/isometric/blocks-icon.svg', signal: 'Sui configuration' }],

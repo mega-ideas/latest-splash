@@ -21,6 +21,10 @@ import { existsSync, mkdirSync } from 'node:fs';
 import { dirname, resolve } from 'node:path';
 
 const REPOSITORY = 'https://github.com/contract-hero/sui-pilot.git';
+/** The reviewed commit (2 Oct 2026). Sui Pilot is advisory only and nothing
+ *  in it is executed; pinning keeps what reviewers read the same for
+ *  everyone. Move the pin deliberately, after reading the new commit. */
+const PINNED_COMMIT = '280357025bfc414473b1a7656f8de555ad5e674a';
 
 function arg(name, fallback) {
   const i = process.argv.indexOf(name);
@@ -36,14 +40,15 @@ function git(args, cwd) {
 const installPath = resolve(process.cwd(), arg('--install-path', '.tools/sui-pilot'));
 
 if (existsSync(resolve(installPath, '.git'))) {
-  console.log(`Updating Sui Pilot at ${installPath}`);
-  git(['-C', installPath, 'pull', '--ff-only']);
+  console.log(`Updating Sui Pilot at ${installPath} to ${PINNED_COMMIT}`);
 } else if (existsSync(installPath)) {
   throw new Error(`${installPath} exists but is not a Sui Pilot git checkout.`);
 } else {
   mkdirSync(dirname(installPath), { recursive: true });
-  console.log(`Installing Sui Pilot at ${installPath}`);
-  git(['clone', '--depth', '1', REPOSITORY, installPath]);
+  console.log(`Installing Sui Pilot at ${installPath}, pinned to ${PINNED_COMMIT}`);
+  git(['clone', '--depth', '1', '--no-checkout', REPOSITORY, installPath]);
 }
+git(['-C', installPath, 'fetch', '--depth', '1', 'origin', PINNED_COMMIT]);
+git(['-C', installPath, 'checkout', '--detach', PINNED_COMMIT]);
 
-console.log('Sui Pilot is ready. See docs/sui-pilot.md for the Splash workflow.');
+console.log('Sui Pilot is ready (advisory only). See docs/sui-pilot.md for the Splash workflow.');

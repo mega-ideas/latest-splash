@@ -22,7 +22,7 @@
  * so that granting cross-tenant reach is a visible act at the call site rather
  * than a forgotten argument.
  */
-import { and, desc, eq, or, sql } from 'drizzle-orm';
+import { and, desc, eq, inArray, or, sql } from 'drizzle-orm';
 import type { PgDatabase } from 'drizzle-orm/pg-core';
 
 import { intentTransitions, paymentIntents } from '../../db/schema.ts';
@@ -313,6 +313,38 @@ export async function listTransitions(db: DrizzleDb, intentId: string) {
     .from(intentTransitions)
     .where(eq(intentTransitions.intentId, intentId))
     .orderBy(intentTransitions.createdAt);
+}
+
+/**
+ * When each of `orgId`'s transfers first reached one of `states`: the
+ * earliest matching transition, by intent id. One query for many transfers
+ * (Home's "Sent this month" counts a payment in the month it settled), joined
+ * to `payment_intents` so another org's id reads as absent.
+ */
+export async function listSettledAt(
+  db: DrizzleDb,
+  orgId: string,
+  intentIds: readonly string[],
+  states: readonly string[],
+): Promise<Map<string, Date>> {
+  const out = new Map<string, Date>();
+  if (intentIds.length === 0 || states.length === 0) return out;
+  const rows: Array<{ intentId: string; at: Date | string | null }> = await db
+    .select({ intentId: intentTransitions.intentId, at: sql<Date>`min(${intentTransitions.createdAt})` })
+    .from(intentTransitions)
+    .innerJoin(paymentIntents, eq(paymentIntents.id, intentTransitions.intentId))
+    .where(and(
+      eq(paymentIntents.orgId, orgId),
+      inArray(intentTransitions.intentId, [...intentIds]),
+      inArray(intentTransitions.toState, [...states]),
+    ))
+    .groupBy(intentTransitions.intentId);
+  for (const row of rows) {
+    if (row.at === null) continue;
+    const at = row.at instanceof Date ? row.at : new Date(row.at);
+    if (!Number.isNaN(at.getTime())) out.set(row.intentId, at);
+  }
+  return out;
 }
 
 export const __testing = { toMinor, fromMinor };

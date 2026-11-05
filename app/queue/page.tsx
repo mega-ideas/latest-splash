@@ -3,7 +3,20 @@ import Link from 'next/link';
 import { redirect } from 'next/navigation';
 
 import type { ProposalExplain, SimulationResult, UnsignedProposal } from '@/lib/agent/types';
+import { publishedFeeSchedule } from '@/lib/fees/fee-config';
+import { buildFeeQuote } from '@/lib/fees/quote';
+import { BANK_DESTINATION, destinationKind } from '@/lib/fees/destination';
+import type { FeeState } from '@/lib/fees/schedule';
+
+/**
+ * The preview's Splash fee: the published schedule's bank-payout fee on the
+ * amount (A1 §2.2), never a typed rate, and 0 while FeeConfig's fees are off.
+ */
+const previewFee = (fees: FeeState, principalMicro: bigint) =>
+  buildFeeQuote({ kind: destinationKind(BANK_DESTINATION), principalMinor: principalMicro, state: fees }).splashFee.minor;
 import { getOxwalProposalStore } from '@/lib/agent/oxwal';
+import { recallAssistantName } from '@/lib/agent/assistant-name';
+import { DEFAULT_ASSISTANT_NAME } from '@/lib/agent/assistant-name-shared';
 import { resolveAuthorityForSession, UnauthorizedError } from '@/lib/auth/authority';
 import { ensureProposalStoreHydrated } from '@/lib/queue/proposal-persistence';
 import { buildApprovalQueue, queueLanes, type QueueLane } from '@/lib/queue/approval-queue';
@@ -11,6 +24,7 @@ import { readyToSend, type QueueViewer } from '@/lib/queue/ready-to-send';
 import { getCustomerSession } from '@/lib/server/customer-auth';
 import ApprovalCodeCard from '@/components/queue/ApprovalCodeCard';
 import ApprovalQueueBoard, { type QueueItem, type QueueLaneData } from '@/components/queue/ApprovalQueueBoard';
+import QueueExamples from '@/components/queue/QueueExamples';
 import ReadyToSendLane, { type ReadyToSendItem } from '@/components/queue/ReadyToSendLane';
 import StuckPaymentsSection from '@/components/queue/StuckPaymentsSection';
 
@@ -29,7 +43,6 @@ const baseExplain: ProposalExplain = {
   financialImpact: {
     amountOut: BigInt(420_000_000_000),
     currencyOut: 'USD',
-    feeBps: 18,
   },
   evidence: [
     { source: 'COUNTERPARTY', ref: 'cp_acme_ph', observedAt: generatedAt.toISOString(), trusted: true },
@@ -55,8 +68,9 @@ function minutesFromNow(minutes: number) {
   return new Date(generatedAt.getTime() + minutes * 60 * 1000).toISOString();
 }
 
-function proposal(id: string, overrides: ProposalOverride = {}): UnsignedProposal {
-  const explain = { ...baseExplain, ...overrides.explain };
+function proposal(fees: FeeState, id: string, overrides: ProposalOverride = {}): UnsignedProposal {
+  const base = { ...baseExplain, financialImpact: { ...baseExplain.financialImpact, splashFeeMinor: previewFee(fees, BigInt(420_000_000_000)) } };
+  const explain = { ...base, ...overrides.explain };
   const simulation = { ...baseSimulation, ...overrides.simulation };
   return {
     id,
@@ -77,30 +91,31 @@ function proposal(id: string, overrides: ProposalOverride = {}): UnsignedProposa
   };
 }
 
-const demoProposals: UnsignedProposal[] = [
-  proposal('prop_dual_threshold', {
+/** The example rows, their Splash fee under `fees`, the schedule in force. */
+const exampleProposals = (fees: FeeState): UnsignedProposal[] => [
+  proposal(fees, 'prop_dual_threshold', {
     explain: {
       recommendation: 'Approve dual-control supplier payout',
       // Micro units, like a real proposal. These were display-scale, which is
       // what hid the formatting bug above.
-      financialImpact: { amountOut: BigInt(1_250_000_000_000), currencyOut: 'USD', feeBps: 14 },
+      financialImpact: { amountOut: BigInt(1_250_000_000_000), currencyOut: 'USD', splashFeeMinor: previewFee(fees, BigInt(1_250_000_000_000)) },
       requiredApprovers: 2,
       risk: 'MEDIUM',
       confidence: 0.86,
     },
     approvals: [{ userId: 'approver_ops_1', role: 'APPROVER', signedAt: generatedAt.toISOString() }],
   }),
-  proposal('prop_expiring_quote', {
+  proposal(fees, 'prop_expiring_quote', {
     kind: 'FX_CONVERT',
     expiresAt: minutesFromNow(11),
     explain: {
       recommendation: 'Convert corridor float before quote expiry',
-      financialImpact: { amountIn: BigInt(300_000_000_000), amountOut: BigInt(299_240_000_000), currencyIn: 'USD', currencyOut: 'USD', feeBps: 9 },
+      financialImpact: { amountIn: BigInt(300_000_000_000), amountOut: BigInt(299_240_000_000), currencyIn: 'USD', currencyOut: 'USD', splashFeeMinor: previewFee(fees, BigInt(300_000_000_000)) },
       requiredApprovers: 1,
       risk: 'LOW',
     },
   }),
-  proposal('prop_compliance_hold', {
+  proposal(fees, 'prop_compliance_hold', {
     explain: {
       recommendation: 'Hold payout pending compliance review',
       evidence: [
@@ -111,7 +126,7 @@ const demoProposals: UnsignedProposal[] = [
       confidence: 0.58,
     },
   }),
-  proposal('prop_failed_relay', {
+  proposal(fees, 'prop_failed_relay', {
     status: 'FAILED',
     simulation: { ok: false, balanceChanges: [], error: 'settlement relay failed' },
     explain: {
@@ -120,7 +135,7 @@ const demoProposals: UnsignedProposal[] = [
       confidence: 0.7,
     },
   }),
-  proposal('prop_anomaly_halt', {
+  proposal(fees, 'prop_anomaly_halt', {
     status: 'FAILED',
     simulation: { ok: false, balanceChanges: [], error: 'anomaly velocity halt' },
     explain: {
@@ -131,7 +146,6 @@ const demoProposals: UnsignedProposal[] = [
   }),
 ];
 
-const queueView = buildApprovalQueue(demoProposals, { now: generatedAt, expiringWithinMs: 20 * 60 * 1000 });
 
 /**
  * `financialImpact` amounts are MICRO units — `lib/agent/oxwal.ts` builds
@@ -218,6 +232,9 @@ export default async function QueuePage() {
     if (!(error instanceof UnauthorizedError)) throw error;
   }
 
+  // What this workspace calls the assistant, as everywhere else it is named.
+  const assistantName = orgId ? await recallAssistantName(orgId) : DEFAULT_ASSISTANT_NAME;
+
   // Proposals waiting for a decision: over-threshold payments from the money
   // routes, and what Zeke drafted and nobody approved in the chat. With
   // DATABASE_URL set (W1), the store writes through to Postgres and rehydrates
@@ -261,6 +278,10 @@ export default async function QueuePage() {
     }),
   );
 
+  // The seeded rows are fixtures, not anyone's payments, priced under the
+  // schedule in force and whether its fees are on.
+  const queueView = buildApprovalQueue(exampleProposals(await publishedFeeSchedule()), { now: generatedAt, expiringWithinMs: 20 * 60 * 1000 });
+
   // The seeded rows are fixtures, not anyone's payments. They go to the board
   // as examples, which it shows apart and never offers to approve. Mixed into
   // the pending list, their Approve changed only the screen: an approval that
@@ -303,21 +324,35 @@ export default async function QueuePage() {
           <div className="flex items-center gap-3">
             <Image src="/splash-main-icon.png" alt="Splash" width={40} height={39} className="h-10 w-10 object-contain" />
             <div>
-              <p className="text-xs font-semibold uppercase tracking-[0.18em] text-[var(--info)]">Zeke control room</p>
+              <p className="text-xs font-semibold uppercase tracking-[0.18em] text-[var(--info)]">{assistantName} control room</p>
               <h1 className="text-3xl font-bold tracking-normal text-[#1F4452]">Approval queue</h1>
             </div>
           </div>
           <nav className="flex flex-wrap items-center gap-2 text-sm font-semibold">
-            <Link className="rounded-md border border-[#326273]/20 px-3 py-2 text-[#326273]" href="/dashboard">Zeke</Link>
+            <Link className="rounded-md border border-[#326273]/20 px-3 py-2 text-[#326273]" href="/dashboard/zeke">{assistantName}</Link>
             <Link className="rounded-md bg-[#1F4452] px-3 py-2 text-white" href="/dashboard">Dashboard</Link>
           </nav>
         </header>
 
+        {/* v2 brief 5.3: the code entry, then what waits for this viewer's
+            decision, then the exceptions (payments that may be stuck), then
+            what is approved and waiting to be sent. The examples come last,
+            collapsed. */}
         <ApprovalCodeCard />
+        <ApprovalQueueBoard live={liveProposals} />
         <StuckPaymentsSection viewer={viewer} />
         <ReadyToSendLane items={readyItems} />
 
-        <ApprovalQueueBoard live={liveProposals} examples={{ pending: examplePending, lanes: exampleLanes }} />
+        <QueueExamples pending={examplePending} lanes={exampleLanes} />
+
+        <div className="flex flex-wrap items-center gap-2 pt-1">
+          <Link
+            href="/dashboard/zeke"
+            className="inline-flex min-h-11 items-center rounded-md border border-[#326273]/20 px-3 text-sm font-bold text-[#326273] focus-ring"
+          >
+            Back to {assistantName}
+          </Link>
+        </div>
       </div>
     </main>
   );

@@ -168,7 +168,7 @@ test('every route that spends something is limited before it does the work', asy
     'app/api/copilot/suggest/route.ts': ['getCopilotSuggestions('],
     'app/api/copilot/summary/route.ts': ['listInvoicesFor('],
     'app/api/seal/access/route.ts': ['sealAdapter.canDecrypt('],
-    'app/api/invoices/route.ts': ['persistInvoice('],
+    'app/api/invoices/route.ts': ['readInvoiceByCreateKey('],
     'app/api/recipients/route.ts': ['persistRecipient('],
   };
   for (const [route, work] of Object.entries(routes)) {
@@ -221,10 +221,12 @@ test('the login limiter is the same limiter: failures count, success clears, and
   await clearLoginFailures(db, 'x@example.com');
   assert.equal((await checkLoginRateLimit(db, { email: 'x@example.com', ip: '10.0.0.1' })).allowed, true);
 
-  const { rows: legacy } = await client.query('select count(*)::int as n from login_attempts');
-  assert.equal(legacy[0].n, 0, 'login_attempts is legacy; the hits live in rate_limit_hits');
-  const { rows: hits } = await client.query("select count(*)::int as n from rate_limit_hits where bucket like 'login-failure:%'");
-  assert.ok(hits[0].n >= 0);
+  // The old table is gone (migration 0080); the hits live in rate_limit_hits.
+  const { rows: legacy } = await client.query("select count(*)::int as n from information_schema.tables where table_name = 'login_attempts'");
+  assert.equal(legacy[0].n, 0, 'login_attempts no longer exists');
+  const { rows: hits } = await client.query("select bucket, count(*)::int as n from rate_limit_hits where bucket like 'login-failure:%' group by bucket");
+  assert.deepEqual(hits.map((r) => r.bucket), ['login-failure:ip'], 'a success cleared the email failures; the address ones stay in the one table');
+  assert.equal(hits[0].n, EMAIL_LIMIT);
 
   const loginSource = await source('lib/auth/login-rate-limit.ts');
   assert.doesNotMatch(loginSource, /loginAttempts/, 'one implementation, not two');

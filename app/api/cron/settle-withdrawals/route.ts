@@ -13,6 +13,7 @@
 import { timingSafeEqual } from 'node:crypto';
 import { NextResponse } from 'next/server';
 
+import { CUSTODIAL_TREASURY_LEDGER_ON, custodialTreasuryRetiredResponse } from '@/lib/server/custodial-treasury';
 import { custodyPhaseEnabled, custodyPhaseResponse } from '@/lib/server/custody-phase';
 import { readJsonBody } from '@/lib/server/http';
 import { settleDueWithdrawals } from '@/lib/server/treasury';
@@ -42,9 +43,12 @@ async function handleSettlement(request: Request) {
   if (!isAuthorized(request)) {
     return NextResponse.json({ success: false, error: 'unauthorized' }, { status: 401 });
   }
+  // v2 D9: the custodial Smart Treasury ledger is retired, whatever the
+  // custody phase, so there are no withdrawal notices to settle: 410, as
+  // /api/treasury answers.
   const outOfScope = refuseOutsideLaunchScope();
   if (outOfScope) return outOfScope;
-  // Phase 0: no treasury, so no withdrawal notices to settle.
+  if (!CUSTODIAL_TREASURY_LEDGER_ON) return custodialTreasuryRetiredResponse();
   if (!custodyPhaseEnabled()) return custodyPhaseResponse();
 
   const body = (request.method === 'POST' ? await readJsonBody(request).catch(() => ({})) : {}) as { force?: boolean };

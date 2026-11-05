@@ -3,7 +3,8 @@
  *
  * Both money routes already detected the case. Neither did anything with it:
  *
- *   `/api/transfers/authorize` and `/api/batches/authorize` answered 409 with
+ *   `/api/transfers/authorize` and the v1 payout-run route (since removed)
+ *   answered 409 with
  *   "It needs a second approver — submit it through the approval queue", and
  *   nothing put anything in the approval queue. The operator was told where to
  *   go and given no way to get there. A control that stops work without
@@ -66,7 +67,7 @@ export type PendingApproval = {
   createdBy: string;
   /** Decides which path carries the approval out (lib/server/approval-execution.ts):
    *  a treasury move proposed as a PAYMENT was replayed into the transfer route. */
-  kind: Extract<ProposalKind, 'PAYMENT' | 'BATCH_PAYOUT' | 'TREASURY_ALLOCATE' | 'TREASURY_REDEEM'>;
+  kind: Extract<ProposalKind, 'PAYMENT' | 'TREASURY_ALLOCATE' | 'TREASURY_REDEEM'>;
   amountUsd: string;
   targetCurrency: string;
   /** What the operator sees in the queue, in their words. */

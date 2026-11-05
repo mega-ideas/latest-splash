@@ -3,7 +3,9 @@
 import { forwardRef } from "react";
 import { ShieldCheck, Check, ArrowRight, Landmark, Clock, ChevronDown } from "lucide-react";
 
+import FeeBreakdown from "@/components/fees/FeeBreakdown";
 import LocalTime from "@/components/LocalTime";
+import type { FeeQuoteWire } from "@/lib/fees/quote";
 
 /**
  * W9.2 — settlement receipt with a business face and a proof layer.
@@ -22,7 +24,14 @@ export type ReceiptProps = {
   recipient: string;
   amount: string;
   currency: string;
-  fee: string;
+  /**
+   * Splash's fee as it was charged (Amendment A1 §4, §2.7): Splash fee with
+   * its kind and tier, the partner's or Circle's fee with its source, the
+   * total debited. Recorded on the transfer when it was authorized.
+   */
+  fees?: FeeQuoteWire;
+  /** A receipt from before A1, whose fee was inside the amount. Ignored when `fees` is given. */
+  fee?: string;
   feeTier?: 'STANDARD' | 'DISCOUNT';
   fundingSource?: string;
   timestamp: string;
@@ -87,15 +96,17 @@ function formatTimestamp(iso: string | undefined) {
 
 const SettlementReceipt = forwardRef<HTMLDivElement, ReceiptProps>(function SettlementReceipt(props, ref) {
   const {
-    amount, fee, currency, status = 'Settled',
+    amount, fee = '0.00', fees, currency, status = 'Settled',
     recipientName, txDigest, explorerUrl, fxRate, targetCurrency,
     amountToPayee, invoiceRef, invoiceClosedOnDelivery, approvedBy, sentAt, deliveredAt,
     walrusBlobId, sealedState, networkLine,
   } = props;
 
   const amountNum = toNumber(amount);
-  const feeNum = toNumber(fee) ?? 0;
-  const totalCost = amountNum !== null ? amountNum + 0 : null; // total cost = amount sent (fee is inside)
+  // Before A1 the fee was inside the amount sent; since A1 Splash's fee is
+  // charged on top and `fees` says so.
+  const feeNum = fees ? 0 : toNumber(fee) ?? 0;
+  const totalCost = amountNum !== null ? amountNum + 0 : null;
   const net = amountNum !== null ? amountNum - feeNum : null;
   const delivered = status === 'Settled';
   const isPendingDigest = !txDigest || txDigest === 'Pending';
@@ -177,17 +188,32 @@ const SettlementReceipt = forwardRef<HTMLDivElement, ReceiptProps>(function Sett
               <span className="font-medium">{money(fxRate)}</span>
             </Field>
           )}
-          <Field label="Total cost">
-            <span className="font-medium">
-              {totalCost !== null ? `${money(totalCost)} ${currency}` : '—'}
-              <span className="ml-1 text-[13px]" style={{ color: MUTE }}>incl. {money(fee)} fee</span>
-            </span>
-          </Field>
+          {fees ? (
+            <Field label="Amount sent">
+              <span className="font-medium">{amountNum !== null ? `${money(amountNum)} ${currency}` : '—'}</span>
+            </Field>
+          ) : (
+            <Field label="Total cost">
+              <span className="font-medium">
+                {totalCost !== null ? `${money(totalCost)} ${currency}` : '—'}
+                <span className="ml-1 text-[13px]" style={{ color: MUTE }}>incl. {money(fee)} fee</span>
+              </span>
+            </Field>
+          )}
           <Field label="Approved by">
             <span className="font-medium">{approvedBy ?? 'Operator'}</span>
             <span className="mt-0.5 block text-[13px] font-medium" style={{ color: MUTE }}>maker-checker</span>
           </Field>
         </dl>
+
+        {fees ? (
+          <section className="mt-6 rounded-xl px-4 py-4" style={{ border: `1px solid ${LINE}` }} aria-labelledby="receipt-fees">
+            <h3 id="receipt-fees" className="mb-3 text-[12px] font-medium uppercase tracking-[0.12em]" style={{ color: MUTE }}>
+              Fees and total
+            </h3>
+            <FeeBreakdown quote={fees} label="Fees on this payment" />
+          </section>
+        ) : null}
 
         {/* Delivery strip */}
         <div className="mt-6 flex items-center justify-between rounded-xl px-4 py-3" style={{ background: '#E7EEF1' }}>

@@ -30,7 +30,7 @@ export default function AuditPage({ params }: { params: Promise<{ intentId: stri
 
   if (!view) return <div className="mx-auto max-w-5xl py-20 text-center text-foreground">Loading audit chain...</div>;
   const rows = [
-    { icon: ClipboardCheck, label: 'Funding', value: view.receipt.funding ? `${view.receipt.funding.method} / ${view.receipt.funding.asset ?? view.receipt.funding.provider ?? 'bank'} / ${view.receipt.funding.feeTier}` : 'Legacy USD / STANDARD' },
+    { icon: ClipboardCheck, label: 'Funding', value: view.receipt.funding ? `${view.receipt.funding.method} / ${view.receipt.funding.asset ?? view.receipt.funding.provider ?? 'bank'}` : 'Legacy USD' },
     { icon: FileText, label: 'Invoice', value: view.invoice?.id ?? 'Not linked' },
     { icon: Database, label: 'Walrus blob', value: view.receipt.walrusBlobId ?? 'Not stored' },
     { icon: Lock, label: 'Seal policy', value: view.receipt.sealPolicyId ?? 'Not encrypted' },

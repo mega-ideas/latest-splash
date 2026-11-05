@@ -2,8 +2,10 @@
  * Operator outflow monitor (WS4).
  *
  * Reads the transactions the operator address sent in the look-back window
- * and alerts on any that moved value other than through
- * `payment_intent::confirm_with_approval` to an approved recipient. The rule
+ * and alerts on any that moved value other than through the v2 executor path
+ * (`splash_spend::pay_intent`, its receipt anchored by
+ * `audit_anchor::anchor`) to an approved beneficiary, a registered partner
+ * deposit address or business wallet, or Splash's fee recipient. The rule
  * lives in lib/server/operator-outflows.ts; this route is the schedule's
  * entry point. Run it at least as often as the window (default two hours) —
  * every fifteen minutes is the intended cadence.

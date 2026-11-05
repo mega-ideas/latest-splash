@@ -115,12 +115,6 @@ test('policy BLOCKS an outbound payment below the minimum', () => {
   assert.match(decision.reason, /below minimum/i);
 });
 
-test('policy BLOCKS a batch payout whose total is below the minimum', () => {
-  const decision = evaluate(proposal('BATCH_PAYOUT', 60));
-  assert.equal(decision.outcome, 'BLOCK');
-  assert.match(decision.reason, /below minimum/i);
-});
-
 test('policy allows the same payment once it clears the minimum', () => {
   const decision = evaluate(proposal('PAYMENT', 100));
   assert.notEqual(decision.outcome, 'BLOCK');

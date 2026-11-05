@@ -1,0 +1,123 @@
+# Build and test every Move package, with the Sui CLI the packages are pinned
+# to, on every pull request.
+#
+# Some properties are checked only by `sui move test`: that
+# splash_core::multisig::derive_address agrees with the SDK's vectors
+# (tests/multisig-vectors.test.mjs only checks the vectors are written into
+# multisig_tests.move), the 24-hour upgrade delay, that no spender can be
+# rotated. Until this workflow, no CI job installed a Sui CLI, so they ran
+# only when someone typed the command.
+#
+# The CLI is the official MystenLabs/sui release archive for the exact tag
+# every move/*/Move.toml names, for ubuntu x86_64, checked against the
+# SHA-256 GitHub publishes for that release asset before it is unpacked.
+# Change SUI_TAG and SUI_SHA256 together; tests/move-ci.test.mjs holds the tag
+# to Move.toml.
+#
+# `-e testnet` builds against the environment Move.lock pins. The CLI asks
+# to create a client config on first run; stdin is /dev/null, so it takes the
+# default and writes one under $RUNNER_TEMP. Nothing here talks to a network
+# beyond fetching the archive and the git dependencies Move.lock names, and
+# nothing is published.
+name: move
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  build-and-test:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
+    env:
+      SUI_TAG: mainnet-v1.82.3
+      # sha256 of sui-mainnet-v1.82.3-ubuntu-x86_64.tgz, as GitHub reports it
+      # for the release asset (gh release view mainnet-v1.82.3 -R MystenLabs/sui --json assets).
+      SUI_SHA256: d616d63d90309926cf7f544633c8dd4132f762fdbba555a35c4842cfa4129379
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version-file: '.nvmrc'
+
+      - name: cache the Sui CLI
+        id: sui-cache
+        uses: actions/cache@v4
+        with:
+          path: ~/.sui-bin
+          key: sui-${{ env.SUI_TAG }}-ubuntu-x86_64-${{ env.SUI_SHA256 }}
+
+      - name: install the Sui CLI from the official release, checksum verified
+        if: steps.sui-cache.outputs.cache-hit != 'true'
+        run: |
+          set -euo pipefail
+          archive="$RUNNER_TEMP/sui.tgz"
+          curl --fail --location --retry 3 --silent --show-error --output "$archive" \
+            "https://github.com/MystenLabs/sui/releases/download/${SUI_TAG}/sui-${SUI_TAG}-ubuntu-x86_64.tgz"
+          echo "${SUI_SHA256}  ${archive}" | sha256sum --check --strict -
+          mkdir -p "$RUNNER_TEMP/sui-unpacked" "$HOME/.sui-bin"
+          # Only the `sui` binary; the archive also carries sui-node, sui-debug and others.
+          tar -xzf "$archive" -C "$RUNNER_TEMP/sui-unpacked" --wildcards '*sui'
+          binary="$(find "$RUNNER_TEMP/sui-unpacked" -type f -name sui -print -quit)"
+          test -n "$binary"
+          install -m 0755 "$binary" "$HOME/.sui-bin/sui"
+
+      - name: put the CLI on PATH and check it is the pinned version
+        run: |
+          set -euo pipefail
+          echo "$HOME/.sui-bin" >> "$GITHUB_PATH"
+          echo "SUI_CONFIG_DIR=$RUNNER_TEMP/sui-config" >> "$GITHUB_ENV"
+          version="$("$HOME/.sui-bin/sui" --version)"
+          echo "$version"
+          case "$version" in
+            "sui ${SUI_TAG#mainnet-v}-"*) ;;
+            *) echo "expected Sui CLI ${SUI_TAG}, got: $version"; exit 1 ;;
+          esac
+
+      - name: splash_core — build
+        working-directory: move/splash_core
+        run: sui move build -e testnet < /dev/null
+
+      - name: splash_core — the core invariant, cross-checked against the compiled modules
+        run: node scripts/check-core-no-balance.mjs --require-build
+
+      - name: splash_core — test
+        working-directory: move/splash_core
+        run: sui move test -e testnet < /dev/null
+
+      - name: splash_spend — build
+        working-directory: move/splash_spend
+        run: sui move build -e testnet < /dev/null
+
+      - name: splash_spend — test
+        working-directory: move/splash_spend
+        run: sui move test -e testnet < /dev/null
+
+      - name: splash_upgrade_delay — build
+        working-directory: move/splash_upgrade_delay
+        run: sui move build -e testnet < /dev/null
+
+      - name: splash_upgrade_delay — test
+        working-directory: move/splash_upgrade_delay
+        run: sui move test -e testnet < /dev/null
+
+      - name: splash_meter — build
+        working-directory: move/splash_meter
+        run: sui move build -e testnet < /dev/null
+
+      - name: splash_meter — test
+        working-directory: move/splash_meter
+        run: sui move test -e testnet < /dev/null
+
+      - name: splash_custody — build
+        working-directory: move/splash_custody
+        run: sui move build -e testnet < /dev/null
+
+      - name: splash_custody — test
+        working-directory: move/splash_custody
+        run: sui move test -e testnet < /dev/null

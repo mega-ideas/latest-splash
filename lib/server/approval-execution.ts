@@ -27,16 +27,15 @@
  *
  * An approval says "this payment is authorised", not "skip the checks". It
  * removes the requirement for a second approver, because that is precisely
- * what it supplied, and the maker's second factor, which was spent proposing
- * the payment and cannot be presented again (lib/server/batch-approval.ts).
+ * what it supplied. (A payout-run approval is no longer replayed at all: the
+ * v1 custody batch route is removed, see RETIRED_KIND_REASON.)
  */
 import 'server-only';
 
-import type { UnsignedProposal } from '@/lib/agent/types';
+import { PROPOSAL_KINDS, type UnsignedProposal } from '@/lib/agent/types';
 import { x402SettlementAvailability } from '@/lib/agent/x402';
-import { CUSTODY_PHASE_WHY } from '@/lib/custody-phase-rules';
 import { closeApprovalClaim } from '@/lib/server/approved-proposal';
-import { custodyPhaseEnabled } from '@/lib/server/custody-phase';
+import { CUSTODIAL_TREASURY_RETIRED_REASON } from '@/lib/server/custodial-treasury';
 import { kindInScope, launchScope, LAUNCH_SCOPE_NOT_SENT } from '@/lib/server/launch-scope';
 
 export type ExecutionOutcome =
@@ -60,6 +59,18 @@ export const APPROVAL_NOT_SAVED = {
   state: 'FAILED',
   detail: 'The approval could not be saved, so the payment was not sent and nothing moved.',
 } as const satisfies ExecutionOutcome;
+
+/**
+ * What an approval of a proposal of a kind that no longer exists records. A
+ * payout run used to be one (Zeke drafted it, and the v1 custody route that
+ * carried it out is removed); a sheet now goes to the wallet batch flow, which
+ * the owners sign once. Said in the outcome itself, so the queue and Zeke show
+ * it rather than a made-up success, and never as "re-authorize" through a
+ * route that no longer exists.
+ */
+export const RETIRED_KIND_REASON =
+  'Approved and recorded, not executed. Payout runs are no longer carried out from an approval: ' +
+  'use Batch payouts, which pays from your business wallet once its owners sign. Nothing was sent.';
 
 /**
  * Carry out the payment an approved proposal describes.
@@ -100,6 +111,15 @@ async function carryOut(
   payload: Record<string, unknown> | null,
   context: ExecutionContext,
 ): Promise<ExecutionOutcome> {
+  // First, before the payload is looked at. Every proposal of a retired kind (a payout run) has
+  // none (only the removed route ever wrote one; Zeke's drafts carry none), so
+  // asking for the payload first sent each of them to "re-authorize the
+  // payment", which there is no longer a route to do. In every launch scope the
+  // answer is the same: recorded, not carried out, and where to pay it.
+  if (!(PROPOSAL_KINDS as readonly string[]).includes(proposal.kind)) {
+    return { state: 'SKIPPED', detail: RETIRED_KIND_REASON };
+  }
+
   if (!payload) {
     return {
       state: 'FAILED',
@@ -120,8 +140,6 @@ async function carryOut(
     switch (proposal.kind) {
       case 'PAYMENT':
         return await executeTransfer(proposal, payload, context);
-      case 'BATCH_PAYOUT':
-        return await executeBatch(proposal, payload, context);
       case 'X402_PAYMENT':
         // There is no path that settles x402, so the default's "settles
         // through their own path" would be a lie. Recorded, named, not paid.
@@ -131,16 +149,11 @@ async function carryOut(
         };
       case 'TREASURY_ALLOCATE':
       case 'TREASURY_REDEEM':
-        // Same honesty in Phase 0: /api/treasury refuses every treasury move,
-        // so no "own path" exists to settle this one.
-        if (!custodyPhaseEnabled()) {
-          return { state: 'SKIPPED', detail: `Approved and recorded, not executed. ${CUSTODY_PHASE_WHY}` };
-        }
-        // With custody on, /api/treasury IS that path: these proposals come
-        // from its approval branch, and are replayed through it as a payment
-        // is through the transfer route. They used to be proposed as PAYMENT,
-        // and replayed into the transfer route, which refused them.
-        return await executeTreasuryMove(proposal, payload, context);
+        // v2 D9: the custodial Smart Treasury ledger is retired, custody phase or
+        // not (lib/server/custodial-treasury.ts). An approval for it is recorded
+        // and moves nothing into a Splash-held position: Treasury is USDY in the
+        // business's own wallet, signed by its owners there.
+        return { state: 'SKIPPED', detail: `Approved and recorded, not executed. ${CUSTODIAL_TREASURY_RETIRED_REASON}` };
       default:
         // An agent-drafted FX, netting or internal-transfer proposal has its
         // own settlement path and is not replayed through the money routes.
@@ -184,50 +197,4 @@ async function executeTransfer(
   return result.ok
     ? { state: 'EXECUTED', detail: 'Payment sent.', ref: result.ref }
     : { state: 'FAILED', detail: result.error };
-}
-
-async function executeBatch(
-  proposal: UnsignedProposal,
-  payload: Record<string, unknown>,
-  context: ExecutionContext,
-): Promise<ExecutionOutcome> {
-  const { authorizeBatchForApproval } = await import('./approval-replay.ts');
-  const result = await authorizeBatchForApproval({
-    orgId: proposal.orgId,
-    approvedProposalId: proposal.id,
-    body: payload,
-    ...context,
-  });
-  return result.ok
-    ? { state: 'EXECUTED', detail: 'Payout run started.', ref: result.ref }
-    : { state: 'FAILED', detail: result.error };
-}
-
-/**
- * Replay a treasury move through `/api/treasury`. The route resolves the
- * approval under the treasury kind for the move's direction and amount, and it
- * stands in for the second factor and the second approver
- * (lib/server/treasury-approval.ts); the pause and the ceilings run again as
- * they would for any move.
- */
-async function executeTreasuryMove(
-  proposal: UnsignedProposal,
-  payload: Record<string, unknown>,
-  context: ExecutionContext,
-): Promise<ExecutionOutcome> {
-  const { authorizeTreasuryForApproval } = await import('./approval-replay.ts');
-  const result = await authorizeTreasuryForApproval({
-    orgId: proposal.orgId,
-    approvedProposalId: proposal.id,
-    body: payload,
-    ...context,
-  });
-  if (!result.ok) return { state: 'FAILED', detail: result.error };
-  return {
-    state: 'EXECUTED',
-    detail:
-      proposal.kind === 'TREASURY_REDEEM'
-        ? 'Withdrawal from Smart Treasury requested. It reaches Available after the notice window.'
-        : 'Moved into Smart Treasury.',
-  };
 }

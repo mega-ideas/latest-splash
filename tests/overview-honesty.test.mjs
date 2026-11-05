@@ -26,7 +26,7 @@ import test from 'node:test';
  */
 
 const page = () =>
-  readFile(new URL('../app/dashboard/overview/page.tsx', import.meta.url), 'utf8');
+  readFile(new URL('../app/dashboard/page.tsx', import.meta.url), 'utf8');
 
 /** Comments describe what was removed, so assertions run against code only. */
 const codeOnly = (text) => text.replace(/\/\*[\s\S]*?\*\//g, '').replace(/\/\/.*/g, '');
@@ -82,36 +82,34 @@ test('compliance is read, not asserted', async () => {
 test('the badge and the workspace name belong to the reader', async () => {
   const source = await page();
   assert.match(source, /status=\{kyb \? \(kyb\.blocked \? 'pending' : 'verified'\) : 'pending'\}/);
-  assert.match(source, /workspace \? `\$\{workspace\} · Updated just now`/);
+  // "Updated just now" was printed before anything had been read. The time
+  // shown is when the server built the summary.
+  assert.doesNotMatch(source, /Updated just now/);
+  assert.match(source, /summary\.generatedAt/);
 });
 
-test('the numbers come from one read, so three panels cannot disagree', async () => {
+test('the numbers come from one read, so the panels cannot disagree', async () => {
   const source = await page();
-  assert.match(source, /fetch\('\/api\/transfers\?filter=all'/);
-  // Pipeline, recent list and 30-day volume all derive from `rows`.
-  assert.match(source, /const pipeline = useMemo\(/);
-  assert.match(source, /const recent = useMemo\(/);
-  assert.match(source, /const volume30d = useMemo\(/);
-
-  // Volume counts settled transfers only. An authorized transfer is money that
-  // has not moved, and counting it would overstate what the business did.
-  assert.match(source, /SETTLED_STATES\.has\(t\.state\) && new Date\(t\.createdAt\)/);
+  // v2 brief 5.2: Sent this month, Needs approval and Recent payments all
+  // come from GET /api/home, which builds them from this org's records in one
+  // pass (lib/dashboard/home.ts, tested in tests/dashboard-home.test.mjs).
+  assert.match(source, /fetch\('\/api\/home'/);
+  assert.doesNotMatch(source, /fetch\('\/api\/transfers\?filter=all'/);
 });
 
 test('an empty desk says it is empty', async () => {
   const source = await page();
   // Six invented rows is how a demo becomes a claim. The honest alternative is
   // a sentence, and it has to be distinguishable from still-loading.
-  assert.match(source, /No transfers yet\./);
-  assert.match(source, /Loading transfers…/);
-  assert.match(source, /transfers !== null && recent\.length === 0/);
+  assert.match(source, /No payments yet\./);
+  assert.match(source, /Loading payments…/);
 });
 
-test('what is still modeled is labelled modeled', async () => {
+test('the modeled corridor table is gone, not relabelled', async () => {
   const source = await page();
-  // The corridor table keeps its figures, because its column headers already
-  // say "Model volume" and "Test success". Labelled projection is not a lie;
-  // an unlabelled one is. This test exists so the labels cannot quietly go.
-  assert.match(source, /Model volume/);
-  assert.match(source, /Test success/);
+  // It kept "Model volume" and "Test success" columns of constants. v2 brief
+  // 5.2 deletes it: Home shows only figures read from the business's records.
+  assert.doesNotMatch(source, /Model volume/);
+  assert.doesNotMatch(source, /Test success/);
+  assert.doesNotMatch(source, /INITIAL_CORRIDORS/);
 });

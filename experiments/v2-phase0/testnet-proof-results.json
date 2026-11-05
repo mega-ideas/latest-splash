@@ -1,0 +1,222 @@
+{
+  "network": "testnet",
+  "steps": {
+    "publish": {
+      "digest": "9JqE2kAvwfPTzdrQvM4xVXXwgkUcsQwZjugoRmhBmGnT",
+      "packageId": "0xa21e6a5c70d2069ce13b57ace0f69cdf273550312ee306a9729f1010d8a4e82c"
+    },
+    "fundMultisig": {
+      "digest": "F7wFkVvRW4XEySdC1whfPGgkgMHXopdcHXzBAK3WqKRV",
+      "balanceChanges": [
+        {
+          "coinType": "0x0000000000000000000000000000000000000000000000000000000000000002::sui::SUI",
+          "address": "0xafea5352bb6313c6af89594eac518d24049e5bc6dfd4bbc18a14bf191f82b6b5",
+          "amount": "300000000"
+        },
+        {
+          "coinType": "0xa1ec7fc00a6f40db9693ad1415d0c193ad3906494428cf252621037bd7117e29::usdc::USDC",
+          "address": "0xafea5352bb6313c6af89594eac518d24049e5bc6dfd4bbc18a14bf191f82b6b5",
+          "amount": "5000000"
+        },
+        {
+          "coinType": "0x0000000000000000000000000000000000000000000000000000000000000002::sui::SUI",
+          "address": "0xbf0e26d068caf355e9fb0767e33d33920b2e525b3b9351b24d30a2811dc3f872",
+          "amount": "-301000231"
+        },
+        {
+          "coinType": "0xa1ec7fc00a6f40db9693ad1415d0c193ad3906494428cf252621037bd7117e29::usdc::USDC",
+          "address": "0xbf0e26d068caf355e9fb0767e33d33920b2e525b3b9351b24d30a2811dc3f872",
+          "amount": "-5000000"
+        }
+      ]
+    },
+    "allowanceNew": {
+      "digest": "5Gek4T33LPFTTbDUYTMtrpiaDon8uTYXy283wumgnnG2",
+      "allowance": {
+        "id": "0x6c69059110c99da4566fa077c6447009c6388214952d310cb2c326875f37a359",
+        "type": "0x0000000000000000000000000000000000000000000000000000000000000002::allowance::Allowance<0x0000000000000000000000000000000000000000000000000000000000000002::balance::Balance<0xa1ec7fc00a6f40db9693ad1415d0c193ad3906494428cf252621037bd7117e29::usdc::USDC>>",
+        "owner": {
+          "$kind": "Shared",
+          "Shared": {
+            "initialSharedVersion": "956806606"
+          }
+        }
+      },
+      "cap": {
+        "id": "0xa2acb6f3fde3d38c024325046211bcb4649e56fd864d30cb6f7167748a8d31f0",
+        "type": "0x0000000000000000000000000000000000000000000000000000000000000002::allowance::AllowanceCap<0x0000000000000000000000000000000000000000000000000000000000000002::balance::Balance<0xa1ec7fc00a6f40db9693ad1415d0c193ad3906494428cf252621037bd7117e29::usdc::USDC>>",
+        "owner": {
+          "AddressOwner": "0xafea5352bb6313c6af89594eac518d24049e5bc6dfd4bbc18a14bf191f82b6b5",
+          "$kind": "AddressOwner"
+        }
+      }
+    },
+    "proposeForApp": {
+      "digest": "FKWDnEqCqrQniDzU97KqibTcuedyPTNVyiQZF3Wt8Kp7",
+      "allowance": {
+        "id": "0x084e9078fafff0246443e2362e7f7fe3eedcacfd8fc636a9eb6103432bd61d80",
+        "type": "0x0000000000000000000000000000000000000000000000000000000000000002::allowance::Allowance<0x0000000000000000000000000000000000000000000000000000000000000002::balance::Balance<0xa1ec7fc00a6f40db9693ad1415d0c193ad3906494428cf252621037bd7117e29::usdc::USDC>>",
+        "owner": {
+          "$kind": "Shared",
+          "Shared": {
+            "initialSharedVersion": "956806607"
+          }
+        }
+      },
+      "cap": {
+        "id": "0xd6b8b3f80457a16989ae5bb868e028010990d32fb8751ad647f6e7d2f78775b6",
+        "type": "0x0000000000000000000000000000000000000000000000000000000000000002::allowance::AllowanceCap<0x0000000000000000000000000000000000000000000000000000000000000002::balance::Balance<0xa1ec7fc00a6f40db9693ad1415d0c193ad3906494428cf252621037bd7117e29::usdc::USDC>>",
+        "owner": {
+          "AddressOwner": "0xafea5352bb6313c6af89594eac518d24049e5bc6dfd4bbc18a14bf191f82b6b5",
+          "$kind": "AddressOwner"
+        }
+      }
+    },
+    "appSpend": {
+      "digest": "87vbod26w7b2n7hpcJEbdtwwZBmZbvsAXi4B9pe2Jguf",
+      "balanceChanges": [
+        {
+          "coinType": "0xa1ec7fc00a6f40db9693ad1415d0c193ad3906494428cf252621037bd7117e29::usdc::USDC",
+          "address": "0xafea5352bb6313c6af89594eac518d24049e5bc6dfd4bbc18a14bf191f82b6b5",
+          "amount": "-250000"
+        },
+        {
+          "coinType": "0x0000000000000000000000000000000000000000000000000000000000000002::sui::SUI",
+          "address": "0xbf0e26d068caf355e9fb0767e33d33920b2e525b3b9351b24d30a2811dc3f872",
+          "amount": "-1000381"
+        },
+        {
+          "coinType": "0xa1ec7fc00a6f40db9693ad1415d0c193ad3906494428cf252621037bd7117e29::usdc::USDC",
+          "address": "0xbf0e26d068caf355e9fb0767e33d33920b2e525b3b9351b24d30a2811dc3f872",
+          "amount": "250000"
+        }
+      ]
+    },
+    "redeem": {
+      "digest": "FgdEj3r9zHFfzHdhj6pdrNmMkVz7dkBdWNNDtTNkd6eP",
+      "balanceChanges": [
+        {
+          "coinType": "0xa1ec7fc00a6f40db9693ad1415d0c193ad3906494428cf252621037bd7117e29::usdc::USDC",
+          "address": "0xafea5352bb6313c6af89594eac518d24049e5bc6dfd4bbc18a14bf191f82b6b5",
+          "amount": "-100000"
+        },
+        {
+          "coinType": "0xa1ec7fc00a6f40db9693ad1415d0c193ad3906494428cf252621037bd7117e29::usdc::USDC",
+          "address": "0xbf0e26d068caf355e9fb0767e33d33920b2e525b3b9351b24d30a2811dc3f872",
+          "amount": "100000"
+        }
+      ]
+    },
+    "singleSignerRefused": {
+      "refused": "Invalid user signature: Signature is not valid: Insufficient weight=1 threshold=2"
+    },
+    "overCapAborts": {
+      "outcome": "refused before execution: Transaction resolution failed: MoveAbort in 1st command, 'EExceedsLifetimeCap': Spend would exceed the lifetime cap, in '0x0000000000000000000000000000000000000000000000000000000000000002::allowance::consume' (line 415)"
+    },
+    "revoke": {
+      "digest": "FEHNwcQ2XxxdDsnfHozUenySGyKsPBngQJjFYUByDuWo"
+    },
+    "coinRedeem": {
+      "digest": "39Ek28cf5N212aBm9HvQHk3f6fZk5xAVC3ja24dw7DAL",
+      "balanceChanges": [
+        {
+          "coinType": "0xa1ec7fc00a6f40db9693ad1415d0c193ad3906494428cf252621037bd7117e29::usdc::USDC",
+          "address": "0xafea5352bb6313c6af89594eac518d24049e5bc6dfd4bbc18a14bf191f82b6b5",
+          "amount": "-50000"
+        },
+        {
+          "coinType": "0xa1ec7fc00a6f40db9693ad1415d0c193ad3906494428cf252621037bd7117e29::usdc::USDC",
+          "address": "0xbf0e26d068caf355e9fb0767e33d33920b2e525b3b9351b24d30a2811dc3f872",
+          "amount": "50000"
+        }
+      ]
+    },
+    "staffAllowance": {
+      "digest": "Hmf9T53uPCrsNZVfAGny4hP3D6VnD6gCpdLongjtY95Q",
+      "allowance": {
+        "id": "0xf9d52daabeaf3ea2651e8b5566e7caca72f8661e64f1a8572e2489f2585b7d6f",
+        "type": "0x0000000000000000000000000000000000000000000000000000000000000002::allowance::Allowance<0x0000000000000000000000000000000000000000000000000000000000000002::balance::Balance<0xa1ec7fc00a6f40db9693ad1415d0c193ad3906494428cf252621037bd7117e29::usdc::USDC>>",
+        "owner": {
+          "$kind": "Shared",
+          "Shared": {
+            "initialSharedVersion": "956806609"
+          }
+        }
+      },
+      "cap": {
+        "id": "0x77dd904eeb0159cd96b0183cc9b4410a9d8c142b82833b44f727c3d5f2b79b4c",
+        "type": "0x0000000000000000000000000000000000000000000000000000000000000002::allowance::AllowanceCap<0x0000000000000000000000000000000000000000000000000000000000000002::balance::Balance<0xa1ec7fc00a6f40db9693ad1415d0c193ad3906494428cf252621037bd7117e29::usdc::USDC>>",
+        "owner": {
+          "AddressOwner": "0xafea5352bb6313c6af89594eac518d24049e5bc6dfd4bbc18a14bf191f82b6b5",
+          "$kind": "AddressOwner"
+        }
+      }
+    },
+    "sponsoredSpend": {
+      "digest": "mirMfkMfAL4ZRdPSrZJdoYtv6S7Ug61GAzyAgt42oSE",
+      "balanceChanges": [
+        {
+          "coinType": "0xa1ec7fc00a6f40db9693ad1415d0c193ad3906494428cf252621037bd7117e29::usdc::USDC",
+          "address": "0xafea5352bb6313c6af89594eac518d24049e5bc6dfd4bbc18a14bf191f82b6b5",
+          "amount": "-100000"
+        },
+        {
+          "coinType": "0x0000000000000000000000000000000000000000000000000000000000000002::sui::SUI",
+          "address": "0xbf0e26d068caf355e9fb0767e33d33920b2e525b3b9351b24d30a2811dc3f872",
+          "amount": "-1000382"
+        },
+        {
+          "coinType": "0xa1ec7fc00a6f40db9693ad1415d0c193ad3906494428cf252621037bd7117e29::usdc::USDC",
+          "address": "0xbf0e26d068caf355e9fb0767e33d33920b2e525b3b9351b24d30a2811dc3f872",
+          "amount": "100000"
+        }
+      ]
+    },
+    "simulations": {
+      "exactlyAtCap": "would succeed",
+      "oneOverCap": "refused: Transaction resolution failed: MoveAbort in 1st command, 'EExceedsLifetimeCap': Spend would exceed the lifetime cap, in '0x0000000000000000000000000000000000000000000000000000000000000002::allowance::consume' (line 415)",
+      "nonSpender": "refused: Error checking transaction input objects: Invalid withdraw reservation: Transaction sender is not the spender of allowance 0x084e9078fafff0246443e2362e7f7fe3eedcacfd8fc636a9eb6103432bd61d80"
+    },
+    "makeImmutable": {
+      "digest": "GAiRkVpsveHPrEsoW8KQjVDBqqZmaB84TinVdPWNqPCk",
+      "upgradeCap": "0xe554895a86e0ef0d1a96cc9815a027e41b80a336117ef4b3403e5a3baf02e9c6"
+    }
+  },
+  "multisig": {
+    "address": "0xafea5352bb6313c6af89594eac518d24049e5bc6dfd4bbc18a14bf191f82b6b5",
+    "threshold": 2,
+    "members": [
+      {
+        "scheme": "Passkey",
+        "flagAndCompressedPubkeyHex": "060355969b344645e48573e045cdbf4cbb0adb4369d411962cfc8a6ae3c33b8acf16",
+        "weight": 1
+      },
+      {
+        "scheme": "Passkey",
+        "flagAndCompressedPubkeyHex": "06025cb0f7961afbdc293a3cd22290d86697bcceb402011804a4e72119960f2741f9",
+        "weight": 1
+      },
+      {
+        "scheme": "Passkey",
+        "flagAndCompressedPubkeyHex": "060399ca5c2f751fbe57d9e493e174085dee6144965b20fd5895e28902fb1148e04a",
+        "weight": 1
+      }
+    ],
+    "layout": "address = blake2b256( 0x03 || threshold u16 LE || for each member: flagAndCompressedPubkey (34 bytes) || weight u8 )",
+    "expectedAddress": "0xafea5352bb6313c6af89594eac518d24049e5bc6dfd4bbc18a14bf191f82b6b5"
+  },
+  "balances": {
+    "afterFunding": {
+      "totalBalance": "4500000",
+      "addressBalance": "4500000",
+      "coinBalance": "0"
+    },
+    "final": {
+      "totalBalance": "4500000",
+      "addressBalance": "4500000",
+      "coinBalance": "0"
+    }
+  },
+  "finishedAt": "2026-10-23T19:48:13.018Z",
+  "staffAddress": "0x956d9c62d6497dd2dddf1e7f42872536fa93d6bb524edf9211165ab8771b3d9e"
+}

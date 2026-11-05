@@ -226,6 +226,7 @@ test("an approval's spend says whether the route could have paid with it, and wh
     [{ consumedBy: 'execution', consumedAt: at }, 'closed-unused', ['NOT_SENT'], true],
     [{ consumedBy: 'reconciliation', consumedAt: at }, 'closed-unused', ['NOT_SENT'], true],
     [{ consumedBy: 'transfers/authorize', consumedAt: at }, 'route-used', ['SENT', 'NOT_SENT'], false],
+    // History: spends recorded by the since-removed payout-run route stay route-used.
     [{ consumedBy: 'batches/authorize', consumedAt: at }, 'route-used', ['SENT', 'NOT_SENT'], false],
     [{ consumedBy: 'treasury', consumedAt: at }, 'route-used', ['SENT', 'NOT_SENT'], false],
     [{ consumedBy: 'backfill', consumedAt: at }, 'backfilled', ['SENT', 'NOT_SENT'], false],
@@ -271,7 +272,7 @@ test('a lane row says what happened, where to look, and whether this viewer may 
   );
   assert.equal(stuckPaymentItem(submitted, routeUsed, tom, now).blockedReason, 'Only an approver can record what happened.');
 
-  assert.deepEqual(whereToCheck('BATCH_PAYOUT'), { label: 'Check payroll runs', href: '/dashboard/batch' });
+  assert.equal(whereToCheck('BATCH_PAYOUT'), null, 'a payout run is no kind a proposal has any more');
   assert.deepEqual(whereToCheck('TREASURY_REDEEM'), { label: 'Check Smart Treasury', href: '/dashboard/treasury' });
   assert.equal(whereToCheck('X402_PAYMENT'), null);
 });

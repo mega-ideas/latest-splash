@@ -1,8 +1,7 @@
 import type { KybLifecycleState } from '../compliance/kyb-state.ts';
-import { CUSTODY_PHASE_WHY } from '../custody-phase-rules.ts';
 import { laneAccess, type Lane } from '../payments/stablecoin-lane.ts';
-import { custodyPhaseEnabled } from '../server/custody-phase.ts';
 import { kindInScope, launchScope, laneInScope, LAUNCH_SCOPE_REASON } from '../server/launch-scope.ts';
+import { resolveTreasurySwapRoute } from '../server/treasury-providers.ts';
 
 /**
  * What Zeke may prepare for a business, given how far through verification it
@@ -109,18 +108,59 @@ export async function assertZekeLane(orgId: string, lane: Lane, currency: string
 }
 
 /**
- * Treasury holds customer funds, so verification alone does not open it: it
- * also needs the custody phase, which /api/treasury enforces
- * (lib/server/custody-phase.ts). Without this a verified business in Phase 0
- * got a treasury proposal the route then refused. Worded for a question as
- * well as a request, since "what's the treasury yield?" reaches it too.
+ * Zeke's Treasury answer (v2 D9, brief 5.7; the 5.7 review).
+ *
+ * Treasury is USDY in the business's own Splash Wallet, quoted on the
+ * Treasury page and, when this server has a swap route, sent from there to
+ * the wallet's owners to sign. Zeke prepares none of it: its custodial
+ * Treasury tools (proposeTreasuryAllocation / Redeem, and the balance and
+ * treasury reads) acted on the Smart Treasury ledger Splash held, which D9
+ * retired (lib/server/custodial-treasury.ts). So this answer stands whatever
+ * the custody phase is, and turning the custody phase on never brings those
+ * tools back.
+ *
+ * It opens with the limitation statement every money-moving intent gets
+ * (brief 4.8), says only what this server can do (signing is mentioned only
+ * when a swap route exists here: TREASURY_WALLET_SWAPS on, and not
+ * production, which has no live route in this build), and cites no licence,
+ * because none is involved. Worded for a question as well as a request,
+ * since "what's the treasury yield?" reaches it too.
  */
-export const TREASURY_CUSTODY_REFUSAL =
-  `Treasury isn't open yet. ${CUSTODY_PHASE_WHY} Until then Splash pays out only, and nothing is held for you.`;
+export function treasuryRefusalText(env: NodeJS.ProcessEnv = process.env): string {
+  const where = resolveTreasurySwapRoute(env).ok
+    ? "You can get a USDY quote on the Treasury page and send the swap to your wallet's owners; the owners sign it there."
+    : 'You can get a USDY quote on the Treasury page; swaps from the wallet are not switched on yet.';
+  return (
+    "I can't prepare, approve or send a Treasury swap. Treasury is USDY held in your business's own Splash Wallet, so Splash holds nothing for you. " +
+    `${where} ` +
+    TREASURY_RISK_LINE
+  );
+}
 
-/** The Phase 0 refusal for Treasury, or null once the custody phase is on. */
-export function treasuryCustodyRefusal(): string | null {
-  return custodyPhaseEnabled() ? null : TREASURY_CUSTODY_REFUSAL;
+/** What Treasury is, on every Treasury answer: the risk and the Shariah label. */
+export const TREASURY_RISK_LINE =
+  'USDY is backed by US Treasury bills, its yield is variable and not promised, and it is not Shariah-compliant.';
+
+/**
+ * Zeke's answer to "how do I get out of Treasury?" (the 5.7 review). There is
+ * no notice period: redeeming is a swap on Sui. It says how a redemption
+ * works only when this server has a swap route; otherwise it says, once, that
+ * swaps are not switched on, and never describes a route first. It answers a
+ * question, so it does not open with the refusal; it adds only the risk line.
+ */
+export function treasuryRedemptionText(env: NodeJS.ProcessEnv = process.env): string {
+  const how = resolveTreasurySwapRoute(env).ok
+    ? "Redeeming USDY is a swap back to USDC on Sui at the market price. The Treasury page quotes it first, there is no Splash fee on a swap, and your wallet's owners sign it there."
+    : 'Swaps between USDY and USDC are not switched on yet; the Treasury page shows a quote.';
+  return `Treasury has no notice period. ${how} ${TREASURY_RISK_LINE}`;
+}
+
+/** The answer on a server with no swap route: the default, and what tests compare against. */
+export const TREASURY_CUSTODY_REFUSAL = treasuryRefusalText({ NODE_ENV: 'development' });
+
+/** Zeke's Treasury answer on this server. Never null: the custodial ledger is retired. */
+export function treasuryCustodyRefusal(): string {
+  return treasuryRefusalText(process.env);
 }
 
 // ─── Reading a message ──────────────────────────────────────────────────────

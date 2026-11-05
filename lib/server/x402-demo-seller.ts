@@ -1,6 +1,7 @@
 import { fromBase64 } from '@mysten/sui/utils';
 
-import { ACTIVE_USD_CORRIDORS } from '@/lib/fx/corridors';
+import { pricingLine, scheduleToWire } from '@/lib/fees/copy';
+import { publishedFeeSchedule } from '@/lib/fees/fee-config';
 import { normaliseSuiAddress, SUI_USDC_COIN_TYPE } from '@/lib/payments/stablecoin-lane';
 import { verifyStablecoinTransfer } from '@/lib/payments/stablecoin-verify';
 import { encodeHeader } from '@/lib/payments/x402-sui';
@@ -10,7 +11,7 @@ import { digestOf, executeTransfer, laneClient, readTransfer, senderOf, simulate
  * The Splash demo x402 SELLER — so the buyer lane can be exercised end to end
  * with real USDC on Sui mainnet, against a seller whose code is in this repo.
  *
- * It sells Splash's active corridor fee schedule for 0.01 USDC, paid to
+ * It sells Splash's fee schedule (A1 §2.2, as published) for 0.01 USDC, paid to
  * X402_DEMO_PAY_TO. It is its own facilitator: it checks the buyer-signed
  * transaction pays exactly the price to that address and nothing else, then
  * broadcasts it. It holds no key and pays no gas — the buyer signed and pays
@@ -25,7 +26,7 @@ function paymentRequired(resourceUrl: string, payTo: string) {
     x402Version: 2,
     resource: {
       url: resourceUrl,
-      description: 'Splash corridor fee schedule (JSON), sold by the Splash demo seller over x402.',
+      description: 'Splash fee schedule (JSON), sold by the Splash demo seller over x402.',
       mimeType: 'application/json',
     },
     accepts: [{
@@ -40,11 +41,16 @@ function paymentRequired(resourceUrl: string, payTo: string) {
   };
 }
 
-function product() {
+/** Splash's fee schedule as published: per kind, its tiers (upper bound exclusive, in USDC minor units, and bps), minimum and maximum. */
+async function product() {
+  const { schedule, source } = await publishedFeeSchedule();
   return {
-    product: 'Splash corridor fee schedule',
-    corridors: ACTIVE_USD_CORRIDORS.map((c) => ({ corridor: c.pair, currency: c.currency, feeBps: c.feeBps })),
-    note: 'Fees in basis points on the USD amount. Rates are quoted live at transfer time and are not part of this product.',
+    product: 'Splash fee schedule',
+    kinds: ['SPLASH_BUSINESS', 'WALLET', 'EXCHANGE', 'CROSS_CHAIN', 'BANK_PAYOUT'],
+    schedule: scheduleToWire(schedule),
+    pricing: pricingLine(schedule),
+    source,
+    note: 'Computed on chain by splash_core::fee_config from the kind and the amount, with a 1% ceiling. Exchange rates and partner fees are quoted live at transfer time and are not part of this product.',
     asOf: new Date().toISOString(),
   };
 }
@@ -112,7 +118,7 @@ export async function handleDemoSeller(request: Request): Promise<Response> {
   }
   const client = laneClient();
   const expected = { sender: payer, coinType: USDC, legs: [{ address: payTo, amountMinor: PRICE_MINOR }] };
-  const deliver = (digest: string) => Response.json(product(), {
+  const deliver = async (digest: string) => Response.json(await product(), {
     headers: {
       'PAYMENT-RESPONSE': encodeHeader({ success: true, transaction: digest, network: 'sui:mainnet', payer, amount: PRICE_MINOR.toString() }),
       'Cache-Control': 'no-store',

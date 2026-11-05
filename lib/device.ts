@@ -17,3 +17,25 @@ export function isPhoneUserAgent(userAgent: string | null | undefined): boolean 
 
   return /iPhone|iPod|Windows Phone|BlackBerry|Opera Mini|Mobi/i.test(userAgent);
 }
+
+/**
+ * The dashboard's phone layouts (v2 brief 5.10) switch at the width the shell
+ * already switches its rail for: below Tailwind's `md`, 768px.
+ */
+export const PHONE_MAX_WIDTH = 767;
+export const PHONE_MEDIA_QUERY = `(max-width: ${PHONE_MAX_WIDTH}px)`;
+
+/**
+ * The server's hint about the device, read where a layout renders. It is only
+ * the first paint: the window's width decides once the page can ask it
+ * (`resolvePhone`), so a tablet keeps the desktop layout and a desktop window
+ * narrowed to a phone gets the phone one.
+ */
+export function phoneHintFromHeaders(headers: { get(name: string): string | null }): boolean {
+  return isPhoneUserAgent(headers.get('user-agent'));
+}
+
+/** The window's answer when it can be asked, the server's hint until then. */
+export function resolvePhone(hint: boolean, matches: boolean | null): boolean {
+  return matches ?? hint;
+}

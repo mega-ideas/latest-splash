@@ -28,15 +28,6 @@ test('the transfer history is the caller’s own, and reads the durable store', 
   assert.doesNotMatch(withoutComments(text), /operations\.transfers/);
 });
 
-test('a batch is readable by the org that authorized it', async () => {
-  const text = await route('app/api/batches/[id]/route.ts');
-  assert.match(text, /requireSessionAccount/);
-  // Through the store, scoped by org — not by the on-chain account id, which
-  // falls back to a value shared across tenants.
-  assert.match(text, /readBatch\(accountCheck\.account\.orgId, id\)/);
-  assert.match(text, /from '@\/lib\/server\/batches-store'/);
-});
-
 test('rate holds are one customer’s corridor positions, not everyone’s', async () => {
   const text = await route('app/api/rate-holds/route.ts');
   assert.match(text, /requireSessionAccount/);
@@ -49,14 +40,14 @@ test('a hold with no owner belongs to nobody, not to everybody', async () => {
   const { createRateHold, listRateHoldsFor } = await import('../lib/server/operations.ts');
 
   const mine = await createRateHold({
-    orgId: 'acme', corridorCurrency: 'PHP', rate: '56.5', feeBps: 80,
+    orgId: 'acme', corridorCurrency: 'PHP', rate: '56.5',
   });
   const theirs = await createRateHold({
-    orgId: 'northwind', corridorCurrency: 'PHP', rate: '56.5', feeBps: 80,
+    orgId: 'northwind', corridorCurrency: 'PHP', rate: '56.5',
   });
   // The demo seed creates holds with no orgId. An `orgId === undefined`
   // comparison must not match a real org.
-  const ownerless = await createRateHold({ corridorCurrency: 'MYR', rate: '4.7', feeBps: 80, demo: true });
+  const ownerless = await createRateHold({ corridorCurrency: 'MYR', rate: '4.7', demo: true });
 
   const forMe = await listRateHoldsFor('acme');
   assert.ok(forMe.some((h) => h.id === mine.id));

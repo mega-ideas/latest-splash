@@ -13,6 +13,7 @@ import {
   primaryKey,
   text,
   timestamp,
+  unique,
   uniqueIndex,
 } from 'drizzle-orm/pg-core';
 
@@ -106,6 +107,12 @@ export const organizations = pgTable('organizations', {
   /** Wallet spec §2.3 — the org's on-chain BusinessAccount object id. Null
    *  until the AdminCap-gated business_account::verify_business has run. */
   suiBusinessAccountId: text('sui_business_account_id'),
+  /**
+   * The business's choice (owners only; migration 0084): may a person's name go to an exchange in the details of a payment they
+   * sent? On by default. Off: the exchange is told "Sent by COMPANY NAME" and no name or title. Changes only what the exchange is told
+   * and what the confirmation shows; the audit proof is not affected (lib/server/exchange-names.ts).
+   */
+  shareNamesWithExchange: boolean('share_names_with_exchange').notNull().default(true),
   ...timestamps,
 });
 
@@ -177,11 +184,10 @@ export const emailVerificationTokens = pgTable('email_verification_tokens', {
 /**
  * Hits against a named rate-limit bucket, for lib/server/rate-limit.ts.
  *
- * The same shape as `login_attempts`, generalised: `bucket` names the rule
- * (`signup:ip`, `verify-resend:email`, …) and `key` is the thing being
- * limited within it. In Postgres, not Redis, for the reason login_attempts
- * gives — a limit that evaporates when a cache restarts is a pause, not a
- * limit. Rows are pruned by the limiter as it reads them.
+ * `bucket` names the rule (`signup:ip`, `verify-resend:email`,
+ * `login-failure:email`, …) and `key` is the thing being limited within it.
+ * In Postgres, not Redis: a limit that evaporates when a cache restarts is a
+ * pause, not a limit. Rows are pruned by the limiter as it reads them.
  */
 export const rateLimitHits = pgTable('rate_limit_hits', {
   id: text('id').primaryKey(),
@@ -208,6 +214,14 @@ export const memberships = pgTable('memberships', {
   userId: text('user_id').notNull().references(() => users.id, { onDelete: 'cascade' }),
   orgId: text('org_id').notNull().references(() => organizations.id),
   role: userRole('role').notNull(),
+  /**
+   * The member's job title: free text, plain words, at most 40 characters (migration 0083). Null by
+   * default; then the role word is the title. Set by an owner for anyone in the business, or by the
+   * person for themselves (lib/server/team-admin.ts setMemberTitle); read through lib/team/member-title.ts.
+   */
+  title: text('title'),
+  /** The person's own choice (migration 0084): may their name and title go to an exchange in the details of a payment they sent? On by default; only the person changes it. Either this or the business's switch off means no name is sent. */
+  shareNameWithExchange: boolean('share_name_with_exchange').notNull().default(true),
   /** Who granted it. Null for the first membership in a new organisation,
    *  which has no prior member to do the granting. */
   grantedBy: text('granted_by'),
@@ -215,25 +229,8 @@ export const memberships = pgTable('memberships', {
 }, (table) => [
   uniqueIndex('memberships_user_org_unique').on(table.userId, table.orgId),
   index('memberships_org_idx').on(table.orgId),
-  index('memberships_user_idx').on(table.userId),
-]);
-
-/**
- * LEGACY — no longer written. Failed login attempts used to live here; the
- * login limiter now rides `rate_limit_hits` like every other limit (WS7). The
- * table stays until a migration drops it, so an in-flight deploy that still
- * runs the old code does not fail on a missing relation.
- */
-export const loginAttempts = pgTable('login_attempts', {
-  id: text('id').primaryKey(),
-  /** Lowercased email as submitted. Scopes the per-email limit; it is a login
-   *  identifier, not proof anyone owns the address. */
-  email: text('email').notNull(),
-  ip: text('ip').notNull(),
-  attemptedAt: timestamp('attempted_at', { withTimezone: true }).notNull().defaultNow(),
-}, (table) => [
-  index('login_attempts_email_idx').on(table.email, table.attemptedAt),
-  index('login_attempts_ip_idx').on(table.ip, table.attemptedAt),
+  // A person belongs to ONE business (migration 0074): the database refuses a second row.
+  uniqueIndex('memberships_user_unique').on(table.userId),
 ]);
 
 /**
@@ -433,6 +430,40 @@ export const suppliers = pgTable('suppliers', {
   /** 'SLUSH' | 'METAMASK_SUI_SNAP' — the wallet the recipient said they use. */
   walletProvider: text('wallet_provider'),
 
+  // ── How the recipient is paid (v2 §4.7, migration 0047) ──────────────────
+  /** BANK, EXCHANGE (a deposit address at an exchange, on Sui), SELF_CUSTODY
+   *  (a wallet the supplier holds; paid only once proven) or CROSS_CHAIN
+   *  (USDC over CCTP V2). Each kind's columns are checked by the table. */
+  deliveryKind: text('delivery_kind').notNull().default('BANK'),
+  /** EXCHANGE: the exchange the deposit address is at (a TRAVEL_RULE_EXCHANGES id). */
+  exchangeId: text('exchange_id'),
+  /** EXCHANGE: the deposit address's network. SUI only. */
+  depositNetwork: text('deposit_network'),
+  /** CROSS_CHAIN: the CCTP chain, its domain, the address as that chain
+   *  writes it, and CCTP's 32-byte mint recipient. */
+  destinationChain: text('destination_chain'),
+  destinationDomain: integer('destination_domain'),
+  destinationAddress: text('destination_address'),
+  mintRecipient: text('mint_recipient'),
+  /** SELF_CUSTODY: unproven, proven (the supplier signed the ownership proof) or revoked. */
+  ownershipStatus: text('ownership_status'),
+
+  // ── Controls (v2 §4.7, migration 0048) ───────────────────────────────────
+  /** Who saved the recipient (a user id). */
+  createdBy: text('created_by'),
+  /** The owner who approved a wallet recipient for payment, and when. A
+   *  recipient a staff member saved is paid or tagged only once approved. */
+  approvedBy: text('approved_by'),
+  approvedAt: timestamp('approved_at', { withTimezone: true }),
+  /** SELF_CUSTODY: moved on by every withdrawal of the proof; a challenge of
+   *  an older epoch proves nothing. */
+  ownershipEpoch: integer('ownership_epoch').notNull().default(0),
+  /** SELF_CUSTODY: when the proof was recorded, and by which challenge. */
+  ownershipProvenAt: timestamp('ownership_proven_at', { withTimezone: true }),
+  ownershipChallengeId: text('ownership_challenge_id'),
+  /** CROSS_CHAIN on Solana: the USDC token account's owner, as the chain showed it at saving. */
+  destinationTokenOwner: text('destination_token_owner'),
+
   ...timestamps,
 }, (table) => [
   index('suppliers_org_idx').on(table.orgId),
@@ -473,6 +504,23 @@ export const invoices = pgTable('invoices', {
   usdcPayerAddress: text('usdc_payer_address'),
   /** The wallet the payer was shown, pinned when first shown. */
   usdcReceiveAddress: text('usdc_receive_address'),
+  /** What a payer said from the pay link (migration 0058). A report, never the
+   *  issuer's `paymentReference` and never the evidence that it was paid. */
+  payerReportedReference: text('payer_reported_reference'),
+  payerReportedAt: timestamp('payer_reported_at', { withTimezone: true }),
+  /** Who the payer said they were (migration 0059); `payerName` and
+   *  `payerEmail` stay the issuer's. */
+  payerReportedName: text('payer_reported_name'),
+  payerReportedEmail: text('payer_reported_email'),
+  /** The reference on the business's statement, typed with "Mark as paid"
+   *  (migration 0059). `paymentReference` stays the one the payer quotes. */
+  receivedReference: text('received_reference'),
+  /** One per invoice the create dialog made (migration 0060): a retry with
+   *  the same key is answered with this invoice, never a second one. */
+  createKey: text('create_key'),
+  /** What the payer is asked to pay, hashed (lib/invoices/create-once.ts),
+   *  so a key sent again with other details is refused. */
+  createFingerprint: text('create_fingerprint'),
   ...timestamps,
 }, (table) => [
   index('invoices_org_idx').on(table.orgId),
@@ -480,6 +528,7 @@ export const invoices = pgTable('invoices', {
   index('invoices_supplier_idx').on(table.supplierId),
   uniqueIndex('invoices_pay_link_unique').on(table.payLinkSlug),
   uniqueIndex('invoices_usdc_tx_digest_unique').on(table.usdcTxDigest),
+  uniqueIndex('invoices_org_create_key_unique').on(table.orgId, table.createKey).where(sql`${table.createKey} is not null`),
 ]);
 
 export const paymentIntents = pgTable('payment_intents', {
@@ -854,60 +903,6 @@ export const consumedApprovals = pgTable('consumed_approvals', {
   consumedAt: timestamp('consumed_at', { withTimezone: true }).notNull().defaultNow(),
 });
 
-export const fundingEvents = pgTable('funding_events', {
-  id: text('id').primaryKey(),
-  orgId: text('org_id').notNull().references(() => organizations.id),
-  sessionId: text('session_id').notNull(),
-  provider: text('provider').notNull(),
-  method: text('method').notNull(),
-  status: text('status').notNull(),
-  amountMinor: bigint('amount_minor', { mode: 'bigint' }).notNull(),
-  currency: text('currency').notNull(),
-  providerReference: text('provider_reference'),
-  kytStatus: text('kyt_status'),
-  ...timestamps,
-}, (table) => [
-  index('funding_org_idx').on(table.orgId),
-  uniqueIndex('funding_provider_ref_unique').on(table.provider, table.providerReference),
-]);
-
-/**
- * A payroll run: many recipients paid under one authorization, one settlement
- * digest, one replay key.
- *
- * The replay key is the reason this is a table and not a Map. It exists so a
- * dropped response leg plus a re-submit does not pay every recipient twice
- * out of the shared pool — and a Map-based guard forgot everything on
- * restart, which is exactly when an operator retries.
- */
-export const batchRuns = pgTable('batch_runs', {
-  id: text('id').primaryKey(),
-  orgId: text('org_id').notNull().references(() => organizations.id),
-  /** The on-chain BusinessAccount the run settles from. Recorded, not used
-   *  for scoping — an account id falls back to a value shared across orgs. */
-  accountId: text('account_id'),
-  state: text('state').notNull(),
-  rowCount: integer('row_count').notNull(),
-  acceptedRows: integer('accepted_rows').notNull(),
-  blockedRows: integer('blocked_rows').notNull(),
-  totalAmountMinor: bigint('total_amount_minor', { mode: 'bigint' }).notNull(),
-  currency: text('currency').notNull().default('USD'),
-  targetCurrency: text('target_currency'),
-  idempotencyKey: text('idempotency_key').notNull(),
-  digest: text('digest'),
-  packageId: text('package_id'),
-  /** Which proposal authorized this run, when it needed a second approver. */
-  proposalId: text('proposal_id'),
-  demo: boolean('demo').notNull().default(false),
-  ...timestamps,
-}, (table) => [
-  /** The replay guard itself. A unique index rather than a read-then-write:
-   *  two submissions of the same file arriving together would both find
-   *  nothing and both insert. */
-  uniqueIndex('batch_runs_idempotency_unique').on(table.orgId, table.idempotencyKey),
-  index('batch_runs_org_created_idx').on(table.orgId, table.createdAt),
-]);
-
 export const payouts = pgTable('payouts', {
   id: text('id').primaryKey(),
   orgId: text('org_id').notNull().references(() => organizations.id),
@@ -920,52 +915,6 @@ export const payouts = pgTable('payouts', {
   providerReference: text('provider_reference'),
   ...timestamps,
 }, (table) => [index('payouts_intent_idx').on(table.intentId)]);
-
-export const treasuryMoves = pgTable('treasury_moves', {
-  id: text('id').primaryKey(),
-  orgId: text('org_id').notNull().references(() => organizations.id),
-  kind: text('kind').notNull(),
-  status: text('status').notNull(),
-  amountMinor: bigint('amount_minor', { mode: 'bigint' }).notNull(),
-  currency: text('currency').notNull(),
-  approvedBy: text('approved_by'),
-  ...timestamps,
-}, (table) => [index('treasury_org_idx').on(table.orgId)]);
-
-export const complianceCases = pgTable('compliance_cases', {
-  id: text('id').primaryKey(),
-  orgId: text('org_id').notNull().references(() => organizations.id),
-  subjectKind: text('subject_kind').notNull(),
-  subjectId: text('subject_id').notNull(),
-  status: text('status').notNull().default('OPEN'),
-  reason: text('reason'),
-  releasedBy: text('released_by'),
-  releaseReason: text('release_reason'),
-  ...timestamps,
-}, (table) => [index('cases_subject_idx').on(table.subjectKind, table.subjectId)]);
-
-export const screeningResults = pgTable('screening_results', {
-  id: text('id').primaryKey(),
-  orgId: text('org_id').notNull().references(() => organizations.id),
-  subjectKind: text('subject_kind').notNull(),
-  subjectId: text('subject_id').notNull(),
-  provider: text('provider').notNull(),
-  verdict: screeningVerdict('verdict').notNull(),
-  riskScore: numeric('risk_score'),
-  raw: jsonb('raw'),
-  screenedAt: timestamp('screened_at', { withTimezone: true }).notNull(),
-  ...timestamps,
-}, (table) => [index('screening_subject_idx').on(table.subjectKind, table.subjectId)]);
-
-export const auditAnchors = pgTable('audit_anchors', {
-  id: text('id').primaryKey(),
-  orgId: text('org_id').references(() => organizations.id),
-  batchDate: text('batch_date').notNull(),
-  walrusBlobId: text('walrus_blob_id'),
-  auditHash: text('audit_hash'),
-  suiDigest: text('sui_digest'),
-  ...timestamps,
-});
 
 export const webhookEvents = pgTable('webhook_events', {
   id: text('id').primaryKey(),
@@ -1170,7 +1119,9 @@ export const rateHolds = pgTable('rate_holds', {
   corridorCurrency: text('corridor_currency').notNull(),
   /** A ratio, not money: exact decimal, string in JS. */
   rate: numeric('rate').notNull(),
-  feeBps: integer('fee_bps').notNull(),
+  /** Retired with the flat fee (A1 §2.8): a hold carries no fee, and every
+   *  new row writes 0. The column stays so no migration rewrites old rows. */
+  retiredFlatFeeRate: integer('fee_bps').notNull(),
   holdUntil: timestamp('hold_until', { withTimezone: true }).notNull(),
   scheduledExecuteAt: timestamp('scheduled_execute_at', { withTimezone: true }),
   alertRule: jsonb('alert_rule'),
@@ -1367,4 +1318,1723 @@ export const dailyAuditBatches = pgTable('daily_audit_batches', {
   ...timestamps,
 }, (table) => [
   uniqueIndex('daily_audit_batches_business_date_unique').on(table.businessDate),
+]);
+
+/**
+ * A governance change every business owner is told about (v2, brief 3.5): an
+ * upgrade or a new governance owner pending in the canonical upgrade wrapper,
+ * a registry addition pending in the canonical compliance config, or one of
+ * those having taken effect. lib/server/governance-events.ts decides what
+ * counts, from the two objects' on-chain state; only the canonical objects
+ * ever produce a row.
+ *
+ * No `org_id`, like `daily_audit_batches`: one announcement concerns every
+ * tenant at once. Who sees it is decided per person, by
+ * `governance_alert_deliveries`.
+ *
+ * One row per content key: what the alert says (wrapper + bytecode digest +
+ * eta, and so on). Every cron run reads the same state again and derives the
+ * same keys, and the unique index is why none is recorded twice.
+ */
+export const governanceAlerts = pgTable('governance_alerts', {
+  /** `gov_` + 40 hex of sha256(content key). */
+  id: text('id').primaryKey(),
+  contentKey: text('content_key').notNull(),
+  /** The wrapper or config the alert was read from. */
+  subjectId: text('subject_id').notNull(),
+  /** upgrade_proposed | owner_change_proposed | registry_addition_proposed |
+   *  upgrade_committed | registry_addition_activated | fee_schedule_proposed |
+   *  fee_recipient_proposed | fee_schedule_applied | fee_recipient_applied |
+   *  fee_schedule_withdrawn | fee_recipient_withdrawn (migration 0054). */
+  kind: text('kind').notNull(),
+  /** The announced bytecode digest, 0x + 64 hex (upgrade_proposed). */
+  bytecodeDigest: text('bytecode_digest'),
+  upgradePolicy: integer('upgrade_policy'),
+  /** Core's current package and version (upgrade_committed). */
+  packageId: text('package_id'),
+  packageVersion: bigint('package_version', { mode: 'number' }),
+  /** 1 asset, 2 settlement app, 3 bridge adapter (registry alerts). */
+  registry: integer('registry'),
+  typeName: text('type_name'),
+  newOwner: text('new_owner'),
+  /** The payment kind a fee schedule alert is about, 0-4 (migration 0050). */
+  feeKind: integer('fee_kind'),
+  /** The proposed or applied fee recipient (fee recipient alerts). */
+  feeRecipient: text('fee_recipient'),
+  proposedAt: timestamp('proposed_at', { withTimezone: true }),
+  /** When the change can take effect. */
+  etaAt: timestamp('eta_at', { withTimezone: true }),
+  /** Shown until then at the latest; a proposal until it lapses on chain. */
+  activeUntil: timestamp('active_until', { withTimezone: true }).notNull(),
+  summary: text('summary').notNull(),
+  detail: text('detail').notNull(),
+  reviewPath: text('review_path').notNull(),
+  ...timestamps,
+}, (table) => [
+  uniqueIndex('governance_alerts_content_key_unique').on(table.contentKey),
+  index('governance_alerts_active_until_idx').on(table.activeUntil),
+]);
+
+/**
+ * The last state the governance monitor read of each watched object (the
+ * upgrade wrapper, the compliance config), at the highest object version seen.
+ * Written only when a read is newer than what is stored, so a lagging read
+ * never replaces a newer one. The next run compares with it to see what took
+ * effect, and its `pendingKeys` decide which proposal alerts are still shown.
+ */
+export const governanceWatchState = pgTable('governance_watch_state', {
+  subjectId: text('subject_id').primaryKey(),
+  /** wrapper | config | fee_config. */
+  subjectKind: text('subject_kind').notNull(),
+  objectVersion: bigint('object_version', { mode: 'number' }).notNull(),
+  /** WrapperSnapshot | ConfigSnapshot (lib/server/governance-events.ts). */
+  snapshot: jsonb('snapshot').notNull(),
+  observedAt: timestamp('observed_at', { withTimezone: true }).notNull(),
+  ...timestamps,
+});
+
+/**
+ * One owner told about one governance alert on one channel.
+ *
+ * The unique index on (alert, user, channel) is the idempotency: a cron run
+ * claims an email or WhatsApp delivery by writing its row as `sending` first
+ * and sends only if that write won, so a re-run, a retry or a second instance
+ * cannot both send. A send that failed is recorded as `failed` and may be
+ * claimed again, a bounded number of times. A claim left in `sending` longer
+ * than the lease (lib/server/governance-alerts-store.ts) belongs to a run that
+ * died, and may be claimed again too; a `sent` row never is. In-app rows are
+ * written `sent` at once: nothing leaves the process.
+ */
+export const governanceAlertDeliveries = pgTable('governance_alert_deliveries', {
+  id: text('id').primaryKey(),
+  alertId: text('alert_id').notNull().references(() => governanceAlerts.id),
+  userId: text('user_id').notNull().references(() => users.id, { onDelete: 'cascade' }),
+  /** The org in which this person is an owner (the first, if several). */
+  orgId: text('org_id').notNull().references(() => organizations.id),
+  /** in_app | email | whatsapp. */
+  channel: text('channel').notNull(),
+  /** sending | sent | failed. */
+  status: text('status').notNull(),
+  attempts: integer('attempts').notNull().default(1),
+  providerRef: text('provider_ref'),
+  error: text('error'),
+  sentAt: timestamp('sent_at', { withTimezone: true }),
+  ...timestamps,
+}, (table) => [
+  uniqueIndex('governance_alert_deliveries_alert_user_channel_unique').on(table.alertId, table.userId, table.channel),
+  index('governance_alert_deliveries_user_channel_idx').on(table.userId, table.channel),
+]);
+
+/**
+ * Business Splash Wallet signature collection (v2 §4.1; migration 0033).
+ *
+ * One row per transaction a wallet, its founder or a member must sign: the
+ * exact bytes, their digest, and what they do as decoded from those bytes
+ * (lib/wallet/wallet-tx-describe.ts). `summary` is the server's decoding, not
+ * anything a client sent. Scoped by `org_id` on every read
+ * (lib/server/wallet-signing-store.ts).
+ */
+export const walletSigningRequests = pgTable('wallet_signing_requests', {
+  id: text('id').primaryKey(),
+  orgId: text('org_id').notNull().references(() => organizations.id),
+  /** nominate_wallet | register_wallet | rotate_wallet | confirm_wallet_rotation |
+   *  cancel_wallet_rotation | wallet_membership | wallet_payment | migration_transfer */
+  purpose: text('purpose').notNull(),
+  dedupeKey: text('dedupe_key').notNull(),
+  senderAddress: text('sender_address').notNull(),
+  /** single | multisig */
+  signerKind: text('signer_kind').notNull(),
+  multisigPublicKey: text('multisig_public_key'),
+  threshold: integer('threshold').notNull(),
+  /** sponsored | gasless */
+  gasMode: text('gas_mode').notNull(),
+  txBytes: text('tx_bytes').notNull(),
+  txDigest: text('tx_digest').notNull(),
+  bytesHash: text('bytes_hash').notNull(),
+  summary: jsonb('summary').notNull(),
+  /** The request to open once this one executes: public keys and weights only. */
+  nextStep: jsonb('next_step'),
+  /** collecting | submitting | unknown | executed | failed | expired | cancelled.
+   *  unknown: sent to the network with no answer yet; the cron reads the
+   *  digest until it is final (migration 0034). */
+  status: text('status').notNull(),
+  /** When one caller claimed the submission (status submitting). */
+  claimedAt: timestamp('claimed_at', { withTimezone: true }),
+  requestedBy: text('requested_by').notNull().references(() => users.id),
+  expiresAt: timestamp('expires_at', { withTimezone: true }).notNull(),
+  executedDigest: text('executed_digest'),
+  error: text('error'),
+  closedAt: timestamp('closed_at', { withTimezone: true }),
+  ...timestamps,
+}, (table) => [
+  uniqueIndex('wallet_signing_requests_digest_unique').on(table.txDigest),
+  uniqueIndex('wallet_signing_requests_open_unique')
+    .on(table.orgId, table.dedupeKey)
+    .where(sql`${table.status} in ('collecting', 'submitting', 'unknown')`),
+  index('wallet_signing_requests_org_status_idx').on(table.orgId, table.status),
+]);
+
+/**
+ * Who must sign a request, with what key and weight, and the partial
+ * signature while the request is open. `signature` is cleared when the
+ * request closes; `signature_sha256` stays as evidence.
+ */
+export const walletSigningSigners = pgTable('wallet_signing_signers', {
+  requestId: text('request_id').notNull().references(() => walletSigningRequests.id, { onDelete: 'cascade' }),
+  orgId: text('org_id').notNull().references(() => organizations.id),
+  /** No foreign key (migration 0081): the record that a person declined outlives their account, like the audit trail. */
+  userId: text('user_id').notNull(),
+  address: text('address').notNull(),
+  publicKey: text('public_key').notNull(),
+  weight: integer('weight').notNull(),
+  signature: text('signature'),
+  signatureSha256: text('signature_sha256'),
+  signedAt: timestamp('signed_at', { withTimezone: true }),
+  /** This signer declined. The request stays open for the others. */
+  declinedAt: timestamp('declined_at', { withTimezone: true }),
+  /**
+   * Who declined, as they were when they did (migration 0081), written in the same statement as
+   * `declined_at`: the name and the title, each cleaned to plain words, nothing else. Empty text
+   * means a snapshot was taken and nothing usable was left; null means the decline predates it.
+   */
+  declinedName: text('declined_name'),
+  declinedTitle: text('declined_title'),
+  notifiedAt: timestamp('notified_at', { withTimezone: true }),
+  notifiedBy: text('notified_by'),
+  ...timestamps,
+}, (table) => [
+  primaryKey({ columns: [table.requestId, table.userId] }),
+  uniqueIndex('wallet_signing_signers_request_address_unique').on(table.requestId, table.address),
+  index('wallet_signing_signers_user_idx').on(table.userId, table.orgId),
+]);
+
+/**
+ * An owner's consent to a single-signer business wallet (D1: "1-of-1 only if
+ * the business explicitly chooses it"). In a business with several owners, a
+ * wallet one member can sign alone is built only once every other owner has
+ * agreed to that exact wallet address, which the member keys and threshold
+ * determine (migration 0034).
+ */
+export const walletSingleSignerConsents = pgTable('wallet_single_signer_consents', {
+  orgId: text('org_id').notNull().references(() => organizations.id),
+  userId: text('user_id').notNull().references(() => users.id, { onDelete: 'cascade' }),
+  walletAddress: text('wallet_address').notNull(),
+  createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+}, (table) => [
+  primaryKey({ columns: [table.orgId, table.userId, table.walletAddress] }),
+]);
+
+/**
+ * An address the business proved belongs to its payee (§4.7 builds the
+ * proof). A1 §2.3: only such an address may be tagged WALLET on a
+ * SpendPolicy (migration 0036). Evidence is kept as a hash.
+ */
+export const walletOwnershipProofs = pgTable('wallet_ownership_proofs', {
+  orgId: text('org_id').notNull().references(() => organizations.id),
+  address: text('address').notNull(),
+  method: text('method').notNull(),
+  evidenceSha256: text('evidence_sha256').notNull(),
+  verifiedAt: timestamp('verified_at', { withTimezone: true }).notNull(),
+  revokedAt: timestamp('revoked_at', { withTimezone: true }),
+}, (table) => [
+  primaryKey({ columns: [table.orgId, table.address] }),
+]);
+
+/**
+ * The link Splash sends a self-custody supplier to prove it holds the wallet
+ * (v2 §4.7, D5b; migration 0047). The token in the link is kept only as its
+ * SHA-256. Used once, whatever the outcome; the nonce is unique for ever.
+ */
+export const recipientOwnershipChallenges = pgTable('recipient_ownership_challenges', {
+  id: text('id').primaryKey(),
+  orgId: text('org_id').notNull().references(() => organizations.id),
+  recipientId: text('recipient_id').notNull().references(() => suppliers.id, { onDelete: 'cascade' }),
+  address: text('address').notNull(),
+  tokenSha256: text('token_sha256').notNull().unique('recipient_ownership_challenges_token_unique'),
+  nonce: text('nonce').notNull().unique('recipient_ownership_challenges_nonce_unique'),
+  message: text('message').notNull(),
+  expiresAt: timestamp('expires_at', { withTimezone: true }).notNull(),
+  createdBy: text('created_by').notNull(),
+  sentTo: text('sent_to'),
+  createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+  usedAt: timestamp('used_at', { withTimezone: true }),
+  outcome: text('outcome'),
+  /** The recipient's ownership epoch when the challenge was made (0048). */
+  recipientEpoch: integer('recipient_epoch').notNull().default(0),
+}, (table) => [
+  index('recipient_ownership_challenges_recipient_idx').on(table.orgId, table.recipientId, table.createdAt),
+]);
+
+/**
+ * The receipt of a cross-chain USDC payment over CCTP V2 (v2 §4.7, D5c;
+ * migration 0047): the burn on Sui, Circle's attestation, the mint on the
+ * destination chain. Once per business and payment; forward only.
+ */
+export const crossChainTransfers = pgTable('cross_chain_transfers', {
+  id: text('id').primaryKey(),
+  orgId: text('org_id').notNull().references(() => organizations.id),
+  paymentRef: text('payment_ref').notNull(),
+  recipientId: text('recipient_id').references(() => suppliers.id, { onDelete: 'set null' }),
+  destinationChain: text('destination_chain').notNull(),
+  destinationDomain: integer('destination_domain').notNull(),
+  mintRecipient: text('mint_recipient').notNull(),
+  amountMinor: bigint('amount_minor', { mode: 'bigint' }).notNull(),
+  maxBridgeFeeMinor: bigint('max_bridge_fee_minor', { mode: 'bigint' }).notNull().default(0n),
+  status: text('status').notNull(),
+  /** Several receipts may share one burn: one owners' transaction may pay several cross-chain payments (0056). */
+  burnDigest: text('burn_digest'),
+  burnedAt: timestamp('burned_at', { withTimezone: true }),
+  message: text('message'),
+  messageNonce: text('message_nonce').unique('cross_chain_transfers_nonce_unique'),
+  attestation: text('attestation'),
+  attestedAt: timestamp('attested_at', { withTimezone: true }),
+  mintedAmountMinor: bigint('minted_amount_minor', { mode: 'bigint' }),
+  mintTxHash: text('mint_tx_hash'),
+  mintedAt: timestamp('minted_at', { withTimezone: true }),
+  sandbox: boolean('sandbox').notNull().default(false),
+  createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+  updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
+}, (table) => [
+  unique('cross_chain_transfers_payment_unique').on(table.orgId, table.paymentRef),
+  // One EVM transaction may carry several messages' mints (0048).
+  unique('cross_chain_transfers_mint_unique').on(table.destinationChain, table.mintTxHash, table.messageNonce),
+  index('cross_chain_transfers_burn_idx').on(table.burnDigest),
+]);
+
+/**
+ * Who did what with the Business Splash Wallet's off-chain authority: an
+ * owner appointing or revoking a person in charge, a migration sign-off, a
+ * staff member's approval ask and what became of it (migration 0035).
+ * Append-only: a trigger refuses UPDATE and DELETE.
+ */
+export const walletAuthorityEvents = pgTable('wallet_authority_events', {
+  id: text('id').primaryKey(),
+  /** The order events happened in, even within one clock tick. */
+  seq: bigserial('seq', { mode: 'number' }).notNull(),
+  orgId: text('org_id').notNull().references(() => organizations.id),
+  /** A user id, or `operator:<email>` for a Splash operator. No foreign key: the trail outlives the user (0037). */
+  actorUserId: text('actor_user_id').notNull(),
+  action: text('action').notNull(),
+  subjectUserId: text('subject_user_id'),
+  ref: text('ref'),
+  detail: jsonb('detail').notNull().default({}),
+  createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+}, (table) => [
+  index('wallet_authority_events_org_idx').on(table.orgId, table.createdAt),
+]);
+
+/**
+ * The person in charge: an off-chain role an owner appoints and revokes, per
+ * business (Sky, 25 Oct). With the owners, the highest authority, who signs
+ * off a staff member's migration of their own USDC (migration 0035).
+ */
+export const walletPersonsInCharge = pgTable('wallet_persons_in_charge', {
+  id: text('id').primaryKey(),
+  orgId: text('org_id').notNull().references(() => organizations.id),
+  userId: text('user_id').notNull().references(() => users.id, { onDelete: 'cascade' }),
+  grantedBy: text('granted_by').notNull(),
+  grantedAt: timestamp('granted_at', { withTimezone: true }).notNull(),
+  /** An owner's user id, or `operator:<email>` when a membership was removed (0037). */
+  revokedBy: text('revoked_by'),
+  revokedAt: timestamp('revoked_at', { withTimezone: true }),
+}, (table) => [
+  uniqueIndex('wallet_persons_in_charge_active_unique').on(table.orgId, table.userId).where(sql`${table.revokedAt} is null`),
+]);
+
+/**
+ * The Finance lead: one person per business whom an owner trusts with the
+ * team (add, change and remove viewers, staff and approvers) and nothing else
+ * that is an owner's. It sits on top of a membership, as the person in charge
+ * does, and grants nothing unless the person is still an approver of this
+ * business (migration 0066).
+ */
+export const walletFinanceLeads = pgTable('wallet_finance_leads', {
+  id: text('id').primaryKey(),
+  orgId: text('org_id').notNull().references(() => organizations.id),
+  userId: text('user_id').notNull().references(() => users.id, { onDelete: 'cascade' }),
+  grantedBy: text('granted_by').notNull(),
+  grantedAt: timestamp('granted_at', { withTimezone: true }).notNull(),
+  revokedBy: text('revoked_by'),
+  revokedAt: timestamp('revoked_at', { withTimezone: true }),
+}, (table) => [
+  uniqueIndex('wallet_finance_leads_one_open').on(table.orgId).where(sql`${table.revokedAt} is null`),
+]);
+
+/**
+ * Who may use Add funds and Withdraw inside the dashboard, granted by an
+ * owner, member by member (migration 0066). Owners have both without a row.
+ */
+export const walletMemberAccess = pgTable('wallet_member_access', {
+  id: text('id').primaryKey(),
+  orgId: text('org_id').notNull().references(() => organizations.id),
+  userId: text('user_id').notNull().references(() => users.id, { onDelete: 'cascade' }),
+  access: text('access').notNull(),
+  grantedBy: text('granted_by').notNull(),
+  grantedAt: timestamp('granted_at', { withTimezone: true }).notNull(),
+  revokedBy: text('revoked_by'),
+  revokedAt: timestamp('revoked_at', { withTimezone: true }),
+}, (table) => [
+  uniqueIndex('wallet_member_access_one_open').on(table.orgId, table.userId, table.access).where(sql`${table.revokedAt} is null`),
+  index('wallet_member_access_org_idx').on(table.orgId, table.userId),
+]);
+
+/**
+ * An invitation to join a business's team (migration 0073). The person sees it
+ * after signing in with the verified email it was sent to, and accepts or
+ * declines; it ends after 7 days; its sender can withdraw it. There is no token
+ * column on purpose: the signed-in person's own email finds it, so there is no
+ * link to leak or replay.
+ */
+export const teamInvitations = pgTable('team_invitations', {
+  id: text('id').primaryKey(),
+  orgId: text('org_id').notNull().references(() => organizations.id),
+  /** Lowercased, as users.email is. */
+  email: text('email').notNull(),
+  role: text('role').notNull(),
+  invitedBy: text('invited_by').notNull(),
+  /** pending, accepted, declined, withdrawn, expired */
+  status: text('status').notNull().default('pending'),
+  createdAt: timestamp('created_at', { withTimezone: true }).notNull(),
+  expiresAt: timestamp('expires_at', { withTimezone: true }).notNull(),
+  decidedAt: timestamp('decided_at', { withTimezone: true }),
+  decidedBy: text('decided_by'),
+  /** The email the invited person gets (migration 0082): null, sending, sent, failed or not_configured. */
+  emailState: text('email_state'),
+  /** Sends claimed. Part of the key given to the mail provider. */
+  emailAttempts: integer('email_attempts').notNull().default(0),
+  emailAttemptAt: timestamp('email_attempt_at', { withTimezone: true }),
+  emailSentAt: timestamp('email_sent_at', { withTimezone: true }),
+  /** The provider's message id, when it gives one. Not a secret. */
+  emailMessageRef: text('email_message_ref'),
+}, (table) => [
+  uniqueIndex('team_invitations_one_open').on(table.orgId, table.email).where(sql`${table.status} = 'pending'`),
+  index('team_invitations_email_idx').on(table.email, table.status),
+  index('team_invitations_org_idx').on(table.orgId, table.status),
+]);
+
+/**
+ * A member's request to leave the business (migration 0073). Nothing changes
+ * until an owner approves: the person keeps their access and any rule.
+ */
+export const teamLeaveRequests = pgTable('team_leave_requests', {
+  id: text('id').primaryKey(),
+  orgId: text('org_id').notNull().references(() => organizations.id),
+  userId: text('user_id').notNull().references(() => users.id, { onDelete: 'cascade' }),
+  /** pending, approved, declined, withdrawn, closed (the person was removed another way) */
+  status: text('status').notNull().default('pending'),
+  createdAt: timestamp('created_at', { withTimezone: true }).notNull(),
+  decidedAt: timestamp('decided_at', { withTimezone: true }),
+  decidedBy: text('decided_by'),
+}, (table) => [
+  uniqueIndex('team_leave_requests_one_open').on(table.orgId, table.userId).where(sql`${table.status} = 'pending'`),
+  index('team_leave_requests_org_idx').on(table.orgId, table.status),
+]);
+
+/**
+ * The highest authority's passkey-signed sign-off for one member moving the
+ * USDC at one address into one business wallet (migration 0035).
+ */
+export const walletMigrationSignoffs = pgTable('wallet_migration_signoffs', {
+  id: text('id').primaryKey(),
+  orgId: text('org_id').notNull().references(() => organizations.id),
+  memberUserId: text('member_user_id').notNull().references(() => users.id, { onDelete: 'cascade' }),
+  fromAddress: text('from_address').notNull(),
+  toWallet: text('to_wallet').notNull(),
+  signedBy: text('signed_by').notNull(),
+  message: text('message').notNull(),
+  nonce: text('nonce').notNull().unique(),
+  signature: text('signature'),
+  signerAddress: text('signer_address'),
+  signedAt: timestamp('signed_at', { withTimezone: true }),
+  voidedAt: timestamp('voided_at', { withTimezone: true }),
+  expiresAt: timestamp('expires_at', { withTimezone: true }).notNull(),
+  createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+}, (table) => [
+  index('wallet_migration_signoffs_member_idx').on(table.orgId, table.memberUserId, table.fromAddress),
+]);
+
+/**
+ * A request, by a staff member (or anyone but a viewer), that the owners
+ * approve one open payment, for example one over the asker's spending rule.
+ * `intent` is what the chain said when it was asked (migration 0035).
+ */
+export const walletApprovalAsks = pgTable('wallet_approval_asks', {
+  id: text('id').primaryKey(),
+  orgId: text('org_id').notNull().references(() => organizations.id),
+  intentId: text('intent_id').notNull(),
+  /** No foreign key: the ask outlives the user (0037). */
+  requestedBy: text('requested_by').notNull(),
+  intent: jsonb('intent').notNull(),
+  note: text('note'),
+  contentHash: text('content_hash').notNull(),
+  walrusBlobId: text('walrus_blob_id').notNull(),
+  /** open | signing | approved | declined | withdrawn */
+  status: text('status').notNull(),
+  signingRequestId: text('signing_request_id').references(() => walletSigningRequests.id),
+  decidedBy: text('decided_by'),
+  decidedAt: timestamp('decided_at', { withTimezone: true }),
+  /** The deciding owner's name and title when they declined, as plain words (migration 0081); null before it, empty when nothing usable was left. */
+  decidedName: text('decided_name'),
+  decidedTitle: text('decided_title'),
+  decisionNote: text('decision_note'),
+  expiresAt: timestamp('expires_at', { withTimezone: true }).notNull(),
+  ...timestamps,
+}, (table) => [
+  uniqueIndex('wallet_approval_asks_open_unique').on(table.orgId, table.intentId).where(sql`${table.status} in ('open', 'signing')`),
+  index('wallet_approval_asks_org_idx').on(table.orgId, table.status),
+]);
+
+/**
+ * Each address of a member who was removed from a business (migration 0037).
+ * Their spending rule lives on chain, beyond Splash's reach: until the
+ * owners' quorum takes it back the index shows it as orphaned. Resolved when
+ * an executed spending-rule change removes that spender from the policy.
+ */
+export const walletOffboardedSpenders = pgTable('wallet_offboarded_spenders', {
+  id: text('id').primaryKey(),
+  orgId: text('org_id').notNull().references(() => organizations.id),
+  userId: text('user_id').notNull(),
+  address: text('address').notNull(),
+  /** removed */
+  reason: text('reason').notNull(),
+  offboardedBy: text('offboarded_by').notNull(),
+  offboardedAt: timestamp('offboarded_at', { withTimezone: true }).notNull(),
+  resolvedAt: timestamp('resolved_at', { withTimezone: true }),
+}, (table) => [
+  index('wallet_offboarded_spenders_org_idx').on(table.orgId, table.address).where(sql`${table.resolvedAt} is null`),
+]);
+
+/* ── Funding the Business Splash Wallet (v2 §4.3, migration 0038) ───────── */
+
+/**
+ * A bank account in the company's name, a card, or a wallet the business
+ * proved it controls. Identified by `fingerprint`, a SHA-256 of the account,
+ * card or address: no full account or card number is stored.
+ */
+export const fundingSources = pgTable('funding_sources', {
+  id: text('id').primaryKey(),
+  orgId: text('org_id').notNull().references(() => organizations.id),
+  /** bank_account | card | wallet */
+  kind: text('kind').notNull(),
+  label: text('label').notNull(),
+  holderName: text('holder_name'),
+  fingerprint: text('fingerprint').notNull(),
+  last4: text('last4'),
+  /** Wallets: SUI | SOLANA | EVM, and the address in normalized form. */
+  chain: text('chain'),
+  address: text('address'),
+  /** Cards and bank accounts seen through a funding partner. */
+  provider: text('provider'),
+  /** pending | verified | rejected | revoked */
+  status: text('status').notNull(),
+  /** company_name | wallet_signature | first_use */
+  method: text('method'),
+  evidenceSha256: text('evidence_sha256'),
+  verifiedAt: timestamp('verified_at', { withTimezone: true }),
+  verifiedBy: text('verified_by'),
+  rejectedReason: text('rejected_reason'),
+  revokedAt: timestamp('revoked_at', { withTimezone: true }),
+  firstUseAt: timestamp('first_use_at', { withTimezone: true }),
+  /** passed | failed */
+  firstUseResult: text('first_use_result'),
+  firstUseDetail: text('first_use_detail'),
+  createdBy: text('created_by').notNull(),
+  ...timestamps,
+}, (table) => [
+  // One live row per source: a revoked one may be added again (0039).
+  uniqueIndex('funding_sources_org_fingerprint_live_unique').on(table.orgId, table.kind, table.fingerprint).where(sql`${table.status} <> 'revoked'`),
+  index('funding_sources_wallet_idx').on(table.orgId, table.chain, table.address),
+]);
+
+/** The single-use message a business signs to prove it controls a wallet. */
+export const fundingSourceChallenges = pgTable('funding_source_challenges', {
+  id: text('id').primaryKey(),
+  orgId: text('org_id').notNull().references(() => organizations.id),
+  sourceId: text('source_id').notNull().references(() => fundingSources.id),
+  message: text('message').notNull(),
+  nonce: text('nonce').notNull().unique(),
+  expiresAt: timestamp('expires_at', { withTimezone: true }).notNull(),
+  usedAt: timestamp('used_at', { withTimezone: true }),
+  createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+});
+
+/**
+ * One top-up into the business wallet. `id` is the idempotency key a funding
+ * partner gets; `client_key` makes a retried click open nothing new.
+ */
+export const fundingIntents = pgTable('funding_intents', {
+  id: text('id').primaryKey(),
+  orgId: text('org_id').notNull().references(() => organizations.id),
+  clientKey: text('client_key').notNull(),
+  /** provider | wallet | cctp | swap */
+  channel: text('channel').notNull(),
+  provider: text('provider'),
+  method: text('method'),
+  sourceId: text('source_id').references(() => fundingSources.id),
+  asset: text('asset').notNull(),
+  sourceChain: text('source_chain'),
+  amountMinor: bigint('amount_minor', { mode: 'bigint' }).notNull(),
+  /** The business wallet, read from the chain when the intent was made. */
+  walletAddress: text('wallet_address').notNull(),
+  quote: jsonb('quote'),
+  instructions: jsonb('instructions'),
+  /** awaiting_funds | provider_pending | arrived | failed | expired | cancelled */
+  status: text('status').notNull(),
+  providerRef: text('provider_ref'),
+  /** top_up | transfer_top_up */
+  purpose: text('purpose').notNull(),
+  transferRef: text('transfer_ref'),
+  arrivedDepositId: text('arrived_deposit_id'),
+  failure: text('failure'),
+  createdBy: text('created_by').notNull(),
+  expiresAt: timestamp('expires_at', { withTimezone: true }).notNull(),
+  ...timestamps,
+}, (table) => [
+  uniqueIndex('funding_intents_client_key_unique').on(table.orgId, table.clientKey),
+  uniqueIndex('funding_intents_provider_ref_unique').on(table.provider, table.providerRef).where(sql`${table.providerRef} is not null`),
+  index('funding_intents_org_idx').on(table.orgId, table.status),
+]);
+
+/** Money that arrived in the business wallet, as the chain recorded it. */
+export const walletDeposits = pgTable('wallet_deposits', {
+  id: text('id').primaryKey(),
+  orgId: text('org_id').notNull().references(() => organizations.id),
+  walletAddress: text('wallet_address').notNull(),
+  suiDigest: text('sui_digest').notNull(),
+  coinType: text('coin_type').notNull(),
+  /** USDC | USDT | USDSUI */
+  asset: text('asset').notNull(),
+  amountMinor: bigint('amount_minor', { mode: 'bigint' }).notNull(),
+  channel: text('channel').notNull(),
+  intentId: text('intent_id').references(() => fundingIntents.id),
+  sourceId: text('source_id').references(() => fundingSources.id),
+  sender: text('sender'),
+  originChain: text('origin_chain'),
+  originAddress: text('origin_address'),
+  /** held | cleared | blocked */
+  status: text('status').notNull(),
+  holdReasons: jsonb('hold_reasons').notNull().default(sql`'[]'::jsonb`),
+  screening: jsonb('screening').notNull(),
+  firstUse: boolean('first_use').notNull().default(false),
+  arrivedAt: timestamp('arrived_at', { withTimezone: true }),
+  /** arrival: what the transaction delivered (or a CCTP mint, up to what Circle minted). remainder: the rest of a mixed CCTP transaction, the sender's (0039). */
+  part: text('part').notNull().default('arrival'),
+  ...timestamps,
+}, (table) => [
+  uniqueIndex('wallet_deposits_arrival_part_unique').on(table.suiDigest, table.walletAddress, table.coinType, table.part),
+  index('wallet_deposits_org_idx').on(table.orgId, table.status),
+  index('wallet_deposits_intent_idx').on(table.orgId, table.intentId),
+]);
+
+/**
+ * The deposit watcher's place in a business wallet's history (0039): the
+ * indexer's cursor, and the net USDC every transaction it has read moved in
+ * or out. USDC the balance shows beyond that is unaccounted and withheld.
+ */
+export const walletDepositSync = pgTable('wallet_deposit_sync', {
+  orgId: text('org_id').notNull().references(() => organizations.id),
+  walletAddress: text('wallet_address').notNull(),
+  usdcType: text('usdc_type').notNull(),
+  cursor: text('cursor'),
+  netUsdcMinor: bigint('net_usdc_minor', { mode: 'bigint' }).notNull().default(0n),
+  txCount: integer('tx_count').notNull().default(0),
+  syncedAt: timestamp('synced_at', { withTimezone: true }),
+  ...timestamps,
+}, (table) => [
+  primaryKey({ columns: [table.orgId, table.walletAddress] }),
+]);
+
+/** Every funding-source change, append-only (0039): who, what, with what evidence. */
+export const fundingSourceEvents = pgTable('funding_source_events', {
+  id: text('id').primaryKey(),
+  seq: bigserial('seq', { mode: 'number' }).notNull(),
+  orgId: text('org_id').notNull().references(() => organizations.id),
+  sourceId: text('source_id').notNull().references(() => fundingSources.id),
+  /** A user id, or `system` for a first-use check run on a deposit. */
+  actorUserId: text('actor_user_id').notNull(),
+  /** added | verified | revoked | first_use_passed | first_use_failed */
+  action: text('action').notNull(),
+  evidenceSha256: text('evidence_sha256'),
+  detail: jsonb('detail').notNull().default({}),
+  createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+}, (table) => [
+  index('funding_source_events_org_idx').on(table.orgId, table.createdAt),
+]);
+
+/** Each funding-partner webhook, once. */
+export const fundingProviderEvents = pgTable('funding_provider_events', {
+  provider: text('provider').notNull(),
+  eventId: text('event_id').notNull(),
+  orgId: text('org_id').references(() => organizations.id),
+  intentId: text('intent_id'),
+  status: text('status').notNull(),
+  receivedAt: timestamp('received_at', { withTimezone: true }).notNull().defaultNow(),
+}, (table) => [
+  primaryKey({ columns: [table.provider, table.eventId] }),
+]);
+
+/* ── Withdrawals to the business's own bank (v2 §4.4, migration 0040) ──── */
+
+/**
+ * The business's own bank account, stored only once the holder name, as given
+ * and as the partner's name enquiry returns it from the bank, both match the
+ * business's registered name. The account number and the beneficiary salt
+ * are sealed (lib/payouts/withdrawal-rules.ts); `beneficiary_ref` is the
+ * stable commitment a bank-payout intent carries.
+ */
+export const withdrawalDestinations = pgTable('withdrawal_destinations', {
+  id: text('id').primaryKey(),
+  orgId: text('org_id').notNull().references(() => organizations.id),
+  partner: text('partner').notNull(),
+  country: text('country').notNull(),
+  currency: text('currency').notNull(),
+  bankCode: text('bank_code').notNull(),
+  holderName: text('holder_name').notNull(),
+  bankHolderName: text('bank_holder_name').notNull(),
+  nameCheckRef: text('name_check_ref').notNull(),
+  fingerprint: text('fingerprint').notNull(),
+  last4: text('last4').notNull(),
+  accountSealed: text('account_sealed').notNull(),
+  beneficiarySaltSealed: text('beneficiary_salt_sealed').notNull(),
+  beneficiaryRef: text('beneficiary_ref').notNull(),
+  label: text('label').notNull(),
+  /** own_account (a withdrawal) | supplier (a payout to another business, 0042) */
+  kind: text('kind').notNull().default('own_account'),
+  /** A supplier's ISO 20022 party (structured address, registration), sealed like the account (0042). */
+  partySealed: text('party_sealed'),
+  /** The payer's relationship to a supplier (lib/payments/iso20022.ts RELATIONSHIPS) (0042). */
+  relationship: text('relationship'),
+  /** verified | revoked */
+  status: text('status').notNull(),
+  verifiedAt: timestamp('verified_at', { withTimezone: true }).notNull(),
+  verifiedBy: text('verified_by').notNull(),
+  revokedAt: timestamp('revoked_at', { withTimezone: true }),
+  createdBy: text('created_by').notNull(),
+  ...timestamps,
+}, (table) => [
+  uniqueIndex('withdrawal_destinations_live_unique').on(table.orgId, table.partner, table.fingerprint).where(sql`${table.status} <> 'revoked'`),
+  index('withdrawal_destinations_org_idx').on(table.orgId, table.status),
+]);
+
+/** The business's fixed deposit address with a payout partner, verified once by a test deposit. */
+export const partnerDepositAddresses = pgTable('partner_deposit_addresses', {
+  id: text('id').primaryKey(),
+  orgId: text('org_id').notNull().references(() => organizations.id),
+  partner: text('partner').notNull(),
+  address: text('address').notNull(),
+  accountRef: text('account_ref').notNull(),
+  /** pending_test | test_requested | test_sent | verified | revoked */
+  status: text('status').notNull(),
+  testAmountMinor: bigint('test_amount_minor', { mode: 'bigint' }).notNull(),
+  testRequestId: text('test_request_id'),
+  testDigest: text('test_digest'),
+  testWallet: text('test_wallet'),
+  verifiedAt: timestamp('verified_at', { withTimezone: true }),
+  revokedAt: timestamp('revoked_at', { withTimezone: true }),
+  createdBy: text('created_by').notNull(),
+  ...timestamps,
+}, (table) => [
+  uniqueIndex('partner_deposit_addresses_live_unique').on(table.orgId, table.partner).where(sql`${table.status} <> 'revoked'`),
+  uniqueIndex('partner_deposit_addresses_address_unique').on(table.partner, table.address).where(sql`${table.status} <> 'revoked'`),
+  uniqueIndex('partner_deposit_addresses_account_ref_unique').on(table.partner, table.accountRef).where(sql`${table.status} <> 'revoked'`),
+  uniqueIndex('partner_deposit_addresses_test_digest_unique').on(table.testDigest).where(sql`${table.testDigest} is not null`),
+]);
+
+/** One withdrawal from the business wallet to the business's own bank. */
+export const withdrawals = pgTable('withdrawals', {
+  id: text('id').primaryKey(),
+  orgId: text('org_id').notNull().references(() => organizations.id),
+  clientKey: text('client_key').notNull(),
+  requestHash: text('request_hash').notNull(),
+  partner: text('partner').notNull(),
+  destinationId: text('destination_id').notNull().references(() => withdrawalDestinations.id),
+  depositAddressId: text('deposit_address_id').notNull().references(() => partnerDepositAddresses.id),
+  depositAddress: text('deposit_address').notNull(),
+  walletAddress: text('wallet_address').notNull(),
+  paymentRef: text('payment_ref').notNull(),
+  /** The on-chain intent id, derived from the account and payment_ref: the partner's idempotency key. */
+  intentId: text('intent_id').notNull(),
+  beneficiaryRef: text('beneficiary_ref').notNull(),
+  commitmentSaltSealed: text('commitment_salt_sealed').notNull(),
+  amountMinor: bigint('amount_minor', { mode: 'bigint' }).notNull(),
+  maxFeeMinor: bigint('max_fee_minor', { mode: 'bigint' }).notNull(),
+  currency: text('currency').notNull(),
+  rateMicro: bigint('rate_micro', { mode: 'bigint' }).notNull(),
+  receiveMinor: bigint('receive_minor', { mode: 'bigint' }).notNull(),
+  quote: jsonb('quote').notNull(),
+  quoteRef: text('quote_ref').notNull(),
+  quoteExpiresAt: timestamp('quote_expires_at', { withTimezone: true }).notNull(),
+  partnerRef: text('partner_ref'),
+  signingRequestId: text('signing_request_id'),
+  suiDigest: text('sui_digest'),
+  settlementPostedAt: timestamp('settlement_posted_at', { withTimezone: true }),
+  bankRef: text('bank_ref'),
+  returnDigest: text('return_digest'),
+  /** The USDC a return put back in the wallet, as the chain shows it (0041). */
+  returnedMinor: bigint('returned_minor', { mode: 'bigint' }),
+  /** When the executed transaction's IntentCreated event was read and named this intent id (0041). */
+  intentConfirmedAt: timestamp('intent_confirmed_at', { withTimezone: true }),
+  /** Why the digest is held back from the partner, for ops (0041). */
+  settlementHold: text('settlement_hold'),
+  /** withdrawal (to the business's own bank) | supplier_payout (to a supplier's bank) (0042). */
+  kind: text('kind').notNull().default('withdrawal'),
+  /** ISO 20022 ExternalPurpose1Code (0042). */
+  purposeCode: text('purpose_code'),
+  /** The masked pacs.008-style evidence of what the partner was sent (lib/payments/iso20022.ts pacs008Evidence) (0042). */
+  iso20022: jsonb('iso20022'),
+  /** A withdrawal row written before its ISO 20022 copy was kept (0044); every newer row carries one. */
+  iso20022Legacy: boolean('iso20022_legacy').notNull().default(false),
+  /** How often Splash asked the partner for a failed payout's USDC back (0044). */
+  returnAsks: integer('return_asks').notNull().default(0),
+  returnAskedAt: timestamp('return_asked_at', { withTimezone: true }),
+  /** When the partner accepted the return; null while it is still owed (0044). */
+  returnAcceptedAt: timestamp('return_accepted_at', { withTimezone: true }),
+  /** preparing | awaiting_signatures | sent | partner_received | paid_out | failed | returned | cancelled */
+  status: text('status').notNull(),
+  failure: text('failure'),
+  createdBy: text('created_by').notNull(),
+  ...timestamps,
+}, (table) => [
+  uniqueIndex('withdrawals_client_key_unique').on(table.orgId, table.clientKey),
+  uniqueIndex('withdrawals_intent_unique').on(table.intentId),
+  uniqueIndex('withdrawals_payment_ref_unique').on(table.paymentRef),
+  uniqueIndex('withdrawals_partner_ref_unique').on(table.partner, table.partnerRef).where(sql`${table.partnerRef} is not null`),
+  uniqueIndex('withdrawals_sui_digest_unique').on(table.suiDigest).where(sql`${table.suiDigest} is not null`),
+  uniqueIndex('withdrawals_return_digest_unique').on(table.returnDigest).where(sql`${table.returnDigest} is not null`),
+  index('withdrawals_org_idx').on(table.orgId, table.status),
+  index('withdrawals_org_kind_idx').on(table.orgId, table.kind, table.status),
+  index('withdrawals_return_owed_idx').on(table.status).where(sql`${table.status} = 'failed' and ${table.returnAcceptedAt} is null`),
+]);
+
+/**
+ * Every on-chain return counted for a withdrawal or supplier payout, short or
+ * whole (0043). A digest counts for one payout only, the first that claims it;
+ * a payout's returned amount is the sum of its rows.
+ */
+export const withdrawalReturns = pgTable('withdrawal_returns', {
+  digest: text('digest').primaryKey(),
+  withdrawalId: text('withdrawal_id').notNull().references(() => withdrawals.id),
+  orgId: text('org_id').notNull().references(() => organizations.id),
+  creditedMinor: bigint('credited_minor', { mode: 'bigint' }).notNull(),
+  checkpoint: bigint('checkpoint', { mode: 'bigint' }).notNull(),
+  eventId: text('event_id').notNull(),
+  createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+}, (table) => [
+  index('withdrawal_returns_withdrawal_idx').on(table.withdrawalId),
+]);
+
+/** Every withdrawal, destination and deposit-address change, append-only (0040). */
+export const withdrawalEvents = pgTable('withdrawal_events', {
+  id: text('id').primaryKey(),
+  seq: bigserial('seq', { mode: 'number' }).notNull(),
+  orgId: text('org_id').notNull().references(() => organizations.id),
+  /** destination | deposit_address | withdrawal */
+  subject: text('subject').notNull(),
+  subjectId: text('subject_id'),
+  /** A user id, `system`, or `partner:<id>`. */
+  actor: text('actor').notNull(),
+  action: text('action').notNull(),
+  detail: jsonb('detail').notNull().default({}),
+  createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+}, (table) => [
+  index('withdrawal_events_org_idx').on(table.orgId, table.createdAt),
+]);
+
+/**
+ * A signed partner event Splash does not know (0044): acknowledged, changes
+ * nothing, kept for ops. Only the type, status and event id, cut short.
+ */
+export const payoutPartnerUnknownEvents = pgTable('payout_partner_unknown_events', {
+  partner: text('partner').notNull(),
+  /** The event id, or a hash of the body when it has none. */
+  eventKey: text('event_key').notNull(),
+  eventId: text('event_id'),
+  eventType: text('event_type').notNull(),
+  eventStatus: text('event_status').notNull(),
+  deliveries: integer('deliveries').notNull().default(1),
+  firstReceivedAt: timestamp('first_received_at', { withTimezone: true }).notNull().defaultNow(),
+  lastReceivedAt: timestamp('last_received_at', { withTimezone: true }).notNull().defaultNow(),
+}, (table) => [
+  primaryKey({ columns: [table.partner, table.eventKey] }),
+]);
+
+/** Each payout-partner webhook, once. */
+export const payoutPartnerEvents = pgTable('payout_partner_events', {
+  partner: text('partner').notNull(),
+  eventId: text('event_id').notNull(),
+  orgId: text('org_id').references(() => organizations.id),
+  subjectId: text('subject_id'),
+  status: text('status').notNull(),
+  receivedAt: timestamp('received_at', { withTimezone: true }).notNull().defaultNow(),
+}, (table) => [
+  primaryKey({ columns: [table.partner, table.eventId] }),
+]);
+
+/* ── Compliance (v2 §4.6, migration 0045) ─────────────────────────────── */
+
+/**
+ * Every KYT screening of an address a business pays or is paid from: the
+ * provider, its own reference and its verdict, or null when there was no
+ * answer (an attempt is evidence too). Append-only: a trigger refuses UPDATE
+ * and DELETE. A provider's reference is kept once per business.
+ */
+export const kytScreenings = pgTable('kyt_screenings', {
+  id: text('id').primaryKey(),
+  orgId: text('org_id').notNull().references(() => organizations.id),
+  /** deposit | wallet_recipient | exchange_recipient | cross_chain_recipient */
+  subjectKind: text('subject_kind').notNull(),
+  chain: text('chain').notNull(),
+  address: text('address').notNull(),
+  txRef: text('tx_ref'),
+  /** elliptic | chainalysis_sanctions | sandbox | none */
+  provider: text('provider').notNull(),
+  /** CLEAR | REVIEW | BLOCK, or null: unscreened. */
+  verdict: text('verdict'),
+  reference: text('reference'),
+  riskScore: numeric('risk_score'),
+  detail: text('detail').notNull(),
+  screenedAt: timestamp('screened_at', { withTimezone: true }),
+  requestedBy: text('requested_by').notNull(),
+  createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+}, (table) => [
+  uniqueIndex('kyt_screenings_reference_unique').on(table.orgId, table.provider, table.reference, table.chain, table.address).where(sql`${table.reference} is not null`),
+  index('kyt_screenings_subject_idx').on(table.orgId, table.chain, table.address, table.createdAt),
+]);
+
+/**
+ * The Travel Rule message for one payment to an exchange recipient
+ * (VASP-to-VASP through Sumsub), once per payment: `payment_ref` is the
+ * on-chain intent id when the intent exists, else the signing request's id,
+ * and it is Sumsub's txnId, so a retry names the same transfer. The status
+ * moves forward only (lib/compliance/sumsub.ts travelRuleAdvances).
+ */
+export const travelRuleTransfers = pgTable('travel_rule_transfers', {
+  id: text('id').primaryKey(),
+  orgId: text('org_id').notNull().references(() => organizations.id),
+  paymentRef: text('payment_ref').notNull(),
+  signingRequestId: text('signing_request_id'),
+  exchange: text('exchange').notNull(),
+  depositAddress: text('deposit_address').notNull(),
+  amountMinor: bigint('amount_minor', { mode: 'bigint' }).notNull(),
+  /** sha256 of the request Splash sent: a retry must send the same one. */
+  requestHash: text('request_hash').notNull(),
+  /** sumsub | sandbox */
+  provider: text('provider').notNull(),
+  sandbox: boolean('sandbox').notNull(),
+  providerRef: text('provider_ref'),
+  /** preparing | sending | unconfirmed | submitted | awaiting_counterparty | on_hold | approved | rejected */
+  status: text('status').notNull(),
+  createdBy: text('created_by').notNull(),
+  ...timestamps,
+}, (table) => [
+  uniqueIndex('travel_rule_transfers_payment_unique').on(table.orgId, table.paymentRef),
+  uniqueIndex('travel_rule_transfers_provider_ref_unique').on(table.provider, table.providerRef).where(sql`${table.providerRef} is not null`),
+]);
+
+/**
+ * What Zeke has already said once in a sign-in session (v2 §4.8): the
+ * read-only limitation statement and the first-recipient nudge. One row per
+ * org, session and notice; the primary key is the "once" — a claim is an
+ * insert that either lands or conflicts, so two tabs, two instances or a
+ * retried request cannot say it twice. `session_key` is an HMAC of the signed
+ * session under a server secret (lib/server/zeke-session-notices.ts), never
+ * the email. The money-moving statement is not here: it is said every time.
+ *
+ * No foreign key to organizations, on purpose: the sample workspace
+ * ('demo-business') has no organizations row, and a claim that failed on a
+ * missing org would turn into the ledger's unknown answer (the read statement
+ * shown every turn, the nudge never). Rows are small, expire after 31 days and
+ * carry nothing but the org id, so an orphan after an org is deleted is inert.
+ */
+export const zekeSessionNotices = pgTable('zeke_session_notices', {
+  orgId: text('org_id').notNull(),
+  sessionKey: text('session_key').notNull(),
+  /** READ_LIMIT | FIRST_RECIPIENT */
+  notice: text('notice').notNull(),
+  shownAt: timestamp('shown_at', { withTimezone: true }).notNull().defaultNow(),
+}, (table) => [
+  primaryKey({ columns: [table.orgId, table.sessionKey, table.notice] }),
+  index('zeke_session_notices_shown_at_idx').on(table.shownAt),
+]);
+
+/**
+ * A near-threshold alert for one business's spending rules (v2 Phase 2;
+ * migration 0051): lib/server/near-threshold.ts decides it from the chain.
+ * Detective only. Unique on (org, content key), so a re-run records it once;
+ * the row is the in-app alert, read by the business's owners only
+ * (lib/server/near-threshold-store.ts).
+ */
+export const spendRuleAlerts = pgTable('spend_rule_alerts', {
+  id: text('id').primaryKey(),
+  orgId: text('org_id').notNull().references(() => organizations.id),
+  contentKey: text('content_key').notNull(),
+  /** near_threshold_repeat | same_recipient_many_spenders */
+  kind: text('kind').notNull(),
+  /** near_threshold | over_threshold */
+  severity: text('severity').notNull(),
+  policyId: text('policy_id').notNull(),
+  recipient: text('recipient'),
+  beneficiary: text('beneficiary'),
+  spenders: jsonb('spenders').notNull(),
+  countedMinor: text('counted_minor').notNull(),
+  thresholdMinor: text('threshold_minor').notNull(),
+  payments: integer('payments').notNull(),
+  summary: text('summary').notNull(),
+  detail: text('detail').notNull(),
+  activeUntil: timestamp('active_until', { withTimezone: true }).notNull(),
+  ...timestamps,
+}, (table) => [
+  uniqueIndex('spend_rule_alerts_org_content_key_unique').on(table.orgId, table.contentKey),
+  index('spend_rule_alerts_org_active_idx').on(table.orgId, table.activeUntil),
+]);
+
+/**
+ * Subscription billing (A1 §6; migration 0052), behind
+ * FEATURE_SUBSCRIPTION_BILLING, off. lib/server/subscription-billing.ts is
+ * the only reader and writer, and nothing reaches it while the flag is off.
+ */
+export const subscriptionPlans = pgTable('subscription_plans', {
+  id: text('id').primaryKey(),
+  name: text('name').notNull(),
+  priceMinor: bigint('price_minor', { mode: 'bigint' }).notNull(),
+  /** calendar_month_utc, the only interval. */
+  interval: text('interval').notNull().default('calendar_month_utc'),
+  termMonths: integer('term_months').notNull().default(12),
+  lifetimeCapMinor: bigint('lifetime_cap_minor', { mode: 'bigint' }),
+  active: boolean('active').notNull().default(true),
+  ...timestamps,
+});
+
+export const subscriptions = pgTable('subscriptions', {
+  id: text('id').primaryKey(),
+  orgId: text('org_id').notNull().references(() => organizations.id),
+  planId: text('plan_id').notNull().references(() => subscriptionPlans.id),
+  /** pending | active | grace | lapsed | cancelled | replaced | ended | abandoned */
+  status: text('status').notNull(),
+  priceMinor: bigint('price_minor', { mode: 'bigint' }).notNull(),
+  lifetimeCapMinor: bigint('lifetime_cap_minor', { mode: 'bigint' }),
+  wallet: text('wallet').notNull(),
+  financeAddress: text('finance_address').notNull(),
+  allowanceName: text('allowance_name').notNull(),
+  allowanceId: text('allowance_id'),
+  allowanceCapId: text('allowance_cap_id'),
+  termStart: timestamp('term_start', { withTimezone: true }).notNull(),
+  expiresAt: timestamp('expires_at', { withTimezone: true }).notNull(),
+  graceUntil: timestamp('grace_until', { withTimezone: true }),
+  signingRequestId: text('signing_request_id'),
+  cancelRequestId: text('cancel_request_id'),
+  replacesId: text('replaces_id'),
+  ...timestamps,
+});
+
+export const subscriptionPulls = pgTable('subscription_pulls', {
+  id: text('id').primaryKey(),
+  orgId: text('org_id').notNull().references(() => organizations.id),
+  subscriptionId: text('subscription_id').notNull().references(() => subscriptions.id),
+  /** YYYY-MM, the calendar month (UTC) billed. Unique per org. */
+  period: text('period').notNull(),
+  amountMinor: bigint('amount_minor', { mode: 'bigint' }).notNull(),
+  /** awaiting_signature | submitted | succeeded | failed | superseded (never drawn; the month is billed again, migration 0053) */
+  status: text('status').notNull(),
+  txBytes: text('tx_bytes').notNull(),
+  txDigest: text('tx_digest').notNull(),
+  attempts: integer('attempts').notNull().default(1),
+  failureReason: text('failure_reason'),
+  succeededAt: timestamp('succeeded_at', { withTimezone: true }),
+  ...timestamps,
+}, (table) => [
+  uniqueIndex('subscription_pulls_org_period_unique').on(table.orgId, table.period).where(sql`status <> 'superseded'`),
+  uniqueIndex('subscription_pulls_digest_unique').on(table.txDigest),
+]);
+
+export const subscriptionInvoices = pgTable('subscription_invoices', {
+  id: text('id').primaryKey(),
+  orgId: text('org_id').notNull().references(() => organizations.id),
+  pullId: text('pull_id').notNull().references(() => subscriptionPulls.id),
+  number: text('number').notNull(),
+  period: text('period').notNull(),
+  planName: text('plan_name').notNull(),
+  amountMinor: bigint('amount_minor', { mode: 'bigint' }).notNull(),
+  issuedAt: timestamp('issued_at', { withTimezone: true }).notNull(),
+  /** Set when its pull was superseded (never drawn): the invoice is void. */
+  voidedAt: timestamp('voided_at', { withTimezone: true }),
+  createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+}, (table) => [
+  uniqueIndex('subscription_invoices_pull_unique').on(table.pullId),
+  uniqueIndex('subscription_invoices_number_unique').on(table.number),
+]);
+
+export const subscriptionReceipts = pgTable('subscription_receipts', {
+  id: text('id').primaryKey(),
+  orgId: text('org_id').notNull().references(() => organizations.id),
+  pullId: text('pull_id').notNull().references(() => subscriptionPulls.id),
+  invoiceId: text('invoice_id').notNull().references(() => subscriptionInvoices.id),
+  suiDigest: text('sui_digest').notNull(),
+  amountMinor: bigint('amount_minor', { mode: 'bigint' }).notNull(),
+  paidAt: timestamp('paid_at', { withTimezone: true }).notNull(),
+  createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+}, (table) => [
+  uniqueIndex('subscription_receipts_pull_unique').on(table.pullId),
+  uniqueIndex('subscription_receipts_digest_unique').on(table.suiDigest),
+]);
+
+export const subscriptionNotices = pgTable('subscription_notices', {
+  id: text('id').primaryKey(),
+  orgId: text('org_id').notNull().references(() => organizations.id),
+  pullId: text('pull_id').notNull().references(() => subscriptionPulls.id),
+  userId: text('user_id').notNull().references(() => users.id, { onDelete: 'cascade' }),
+  /** pull_failed */
+  kind: text('kind').notNull(),
+  /** sending | sent | failed */
+  status: text('status').notNull(),
+  attempts: integer('attempts').notNull().default(1),
+  error: text('error'),
+  ...timestamps,
+}, (table) => [
+  uniqueIndex('subscription_notices_pull_user_kind_unique').on(table.pullId, table.userId, table.kind),
+]);
+
+/** One owner emailed about one near-threshold alert; claimed before it is sent. */
+export const spendRuleAlertDeliveries = pgTable('spend_rule_alert_deliveries', {
+  id: text('id').primaryKey(),
+  alertId: text('alert_id').notNull().references(() => spendRuleAlerts.id),
+  orgId: text('org_id').notNull().references(() => organizations.id),
+  userId: text('user_id').notNull().references(() => users.id, { onDelete: 'cascade' }),
+  /** email */
+  channel: text('channel').notNull(),
+  /** sending | sent | failed */
+  status: text('status').notNull(),
+  attempts: integer('attempts').notNull().default(1),
+  providerRef: text('provider_ref'),
+  error: text('error'),
+  sentAt: timestamp('sent_at', { withTimezone: true }),
+  ...timestamps,
+}, (table) => [
+  uniqueIndex('spend_rule_alert_deliveries_alert_user_channel_unique').on(table.alertId, table.userId, table.channel),
+]);
+
+/**
+ * A swap or redemption from the business wallet, handed to its signers
+ * (v2 D9, brief 5.7; migration 0055). Unique on (org, intent id): the
+ * intent id is the idempotency key. lib/server/treasury-wallet-orders.ts.
+ */
+export const treasuryWalletOrders = pgTable('treasury_wallet_orders', {
+  id: text('id').primaryKey(),
+  orgId: text('org_id').notNull().references(() => organizations.id),
+  intentId: text('intent_id').notNull(),
+  /** swap (USDC to USDY) | redeem (USDY to USDC). */
+  direction: text('direction').notNull(),
+  amountInMinor: bigint('amount_in_minor', { mode: 'bigint' }).notNull(),
+  minOutMinor: bigint('min_out_minor', { mode: 'bigint' }).notNull(),
+  quotedOutMinor: bigint('quoted_out_minor', { mode: 'bigint' }).notNull(),
+  priceMicros: bigint('price_micros', { mode: 'bigint' }).notNull(),
+  requestHash: text('request_hash').notNull(),
+  /** awaiting_signatures | executed | failed | expired | cancelled. */
+  status: text('status').notNull(),
+  sandbox: boolean('sandbox').notNull(),
+  providerRef: text('provider_ref'),
+  txDigest: text('tx_digest'),
+  requestedBy: text('requested_by').notNull(),
+  expiresAt: timestamp('expires_at', { withTimezone: true }).notNull(),
+  /** The business wallet the order is bound to (migration 0056): its source, and the only recipient. */
+  sourceAddress: text('source_address').notNull(),
+  recipientAddress: text('recipient_address').notNull(),
+  inCoinType: text('in_coin_type').notNull(),
+  outCoinType: text('out_coin_type').notNull(),
+  closedAt: timestamp('closed_at', { withTimezone: true }),
+  ...timestamps,
+}, (table) => [
+  uniqueIndex('treasury_wallet_orders_org_intent_unique').on(table.orgId, table.intentId),
+  index('treasury_wallet_orders_org_created_idx').on(table.orgId, table.createdAt),
+]);
+
+/** The fund-manager referral for one business (migration 0055). lib/server/fund-referral-store.ts. */
+export const treasuryFundReferrals = pgTable('treasury_fund_referrals', {
+  orgId: text('org_id').primaryKey().references(() => organizations.id),
+  answers: jsonb('answers').notNull(),
+  /** eligible | not_eligible. */
+  outcome: text('outcome').notNull(),
+  category: text('category'),
+  assessedBy: text('assessed_by').notNull(),
+  assessedAt: timestamp('assessed_at', { withTimezone: true }).notNull(),
+  referralOpenedAt: timestamp('referral_opened_at', { withTimezone: true }),
+  linkedReference: text('linked_reference'),
+  linkedBy: text('linked_by'),
+  linkedAt: timestamp('linked_at', { withTimezone: true }),
+  /** When the fund manager confirmed the reference is this business's (migration 0056). */
+  linkConfirmedAt: timestamp('link_confirmed_at', { withTimezone: true }),
+  /** The latest row of treasuryFundReferralHistory with kind 'assessed'. */
+  latestAssessmentId: text('latest_assessment_id').notNull(),
+  ...timestamps,
+}, (table) => [
+  uniqueIndex('treasury_fund_referrals_linked_reference_unique').on(table.linkedReference).where(sql`${table.linkedReference} IS NOT NULL`),
+]);
+
+/** Everything that happened to a fund referral, append-only (migration 0056). lib/server/fund-referral-store.ts. */
+export const treasuryFundReferralHistory = pgTable('treasury_fund_referral_history', {
+  id: text('id').primaryKey(),
+  /** The order things happened in, even within one millisecond. */
+  seq: bigserial('seq', { mode: 'number' }).notNull(),
+  orgId: text('org_id').notNull().references(() => organizations.id),
+  /** assessed | linked | released. */
+  kind: text('kind').notNull(),
+  actor: text('actor').notNull(),
+  at: timestamp('at', { withTimezone: true }).notNull(),
+  answers: jsonb('answers'),
+  outcome: text('outcome'),
+  category: text('category'),
+  reference: text('reference'),
+  reason: text('reason'),
+  createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+}, (table) => [
+  index('treasury_fund_referral_history_org_seq_idx').on(table.orgId, table.seq),
+]);
+
+/**
+ * A supplier's invoice the business is paying (v2 brief 5.8, Pay invoices;
+ * migration 0057). lib/server/bills-store.ts is the only reader and writer.
+ *
+ * Intake reads it (Zeke and the parser), a person confirms what was read,
+ * matches a verified recipient and schedules it; approval and payment run in
+ * the payment flow, which reports back the intent and the Sui digest. The
+ * status only moves forward (lib/bills/flow.ts), and every move is a guarded
+ * UPDATE on the status it leaves.
+ */
+export const payableInvoices = pgTable('payable_invoices', {
+  id: text('id').primaryKey(),
+  orgId: text('org_id').notNull().references(() => organizations.id),
+  /** The client's idempotency key for the intake (a UUID), unique per org. */
+  intakeKey: text('intake_key').notNull(),
+  /** review | scheduled | approving | paid | cancelled. */
+  status: text('status').notNull(),
+  documentName: text('document_name'),
+  documentSha256: text('document_sha256').notNull(),
+  /** The text that was read, so the page can show where each value came from. */
+  documentText: text('document_text'),
+  /** lib/bills/extract.ts BillExtraction: every field, its confidence and why. */
+  extraction: jsonb('extraction').notNull(),
+  // What a person confirmed. Null until then.
+  payeeName: text('payee_name'),
+  payeeKey: text('payee_key'),
+  invoiceNumber: text('invoice_number'),
+  invoiceNumberKey: text('invoice_number_key'),
+  /** Six decimals in `currency`. */
+  amountMinor: bigint('amount_minor', { mode: 'bigint' }),
+  currency: text('currency'),
+  dueDate: text('due_date'),
+  invoiceDate: text('invoice_date'),
+  /** ISO 3166-1 alpha-2. */
+  payeeCountry: text('payee_country'),
+  confirmedBy: text('confirmed_by'),
+  confirmedAt: timestamp('confirmed_at', { withTimezone: true }),
+  duplicateAckBy: text('duplicate_ack_by'),
+  duplicateAckReason: text('duplicate_ack_reason'),
+  duplicateAckAt: timestamp('duplicate_ack_at', { withTimezone: true }),
+  recipientId: text('recipient_id'),
+  matchedBy: text('matched_by'),
+  matchedAt: timestamp('matched_at', { withTimezone: true }),
+  /** Why a recipient unlike the confirmed supplier was chosen (migration 0058). */
+  matchReason: text('match_reason'),
+  scheduledFor: text('scheduled_for'),
+  scheduledBy: text('scheduled_by'),
+  scheduledAt: timestamp('scheduled_at', { withTimezone: true }),
+  /** The payment flow's intent for this invoice. One invoice, one intent. */
+  paymentIntentId: text('payment_intent_id'),
+  /** Bumped when an intent closes unpaid, is withdrawn, or the invoice goes
+   *  back to review; part of the hand-off key (migration 0059). */
+  paymentAttempt: integer('payment_attempt').notNull().default(0),
+  approvalRequestedBy: text('approval_requested_by'),
+  approvalRequestedAt: timestamp('approval_requested_at', { withTimezone: true }),
+  paidAt: timestamp('paid_at', { withTimezone: true }),
+  suiDigest: text('sui_digest'),
+  /** testnet | mainnet: where the digest is (migration 0058). */
+  suiNetwork: text('sui_network'),
+  receiptNo: text('receipt_no'),
+  approvers: jsonb('approvers'),
+  /** The self-billed e-invoice made for it, once (lib/myinvois/self-billed.ts). */
+  myinvois: jsonb('myinvois'),
+  myinvoisSha256: text('myinvois_sha256'),
+  myinvoisGeneratedAt: timestamp('myinvois_generated_at', { withTimezone: true }),
+  myinvoisGeneratedBy: text('myinvois_generated_by'),
+  /** Who did what, appended to, never rewritten. */
+  history: jsonb('history').notNull(),
+  createdBy: text('created_by').notNull(),
+  ...timestamps,
+}, (table) => [
+  uniqueIndex('payable_invoices_org_intake_unique').on(table.orgId, table.intakeKey),
+  index('payable_invoices_org_created_idx').on(table.orgId, table.createdAt),
+  uniqueIndex('payable_invoices_payment_intent_unique').on(table.paymentIntentId),
+  uniqueIndex('payable_invoices_sui_digest_unique').on(table.suiDigest),
+  // Partial indexes (WHERE status IN scheduled/approving/paid) live in the SQL:
+  // payable_invoices_number_once_unique (0057, by the typed supplier name) and
+  // payable_invoices_recipient_number_once_unique (0058, by who is paid).
+]);
+
+/**
+ * A payment started from Transfer (migration 0064): to a Splash business or a
+ * saved wallet or exchange recipient. The client's key is unique per business.
+ */
+export const walletTransfers = pgTable('wallet_transfers', {
+  id: text('id').primaryKey(),
+  orgId: text('org_id').notNull().references(() => organizations.id),
+  clientKey: text('client_key').notNull(),
+  requestHash: text('request_hash').notNull(),
+  paymentRef: text('payment_ref').notNull(),
+  route: text('route').notNull(),
+  payeeKind: text('payee_kind').notNull(),
+  recipientId: text('recipient_id'),
+  businessId: text('business_id'),
+  payeeName: text('payee_name').notNull(),
+  payeeMasked: text('payee_masked'),
+  payeeCountry: text('payee_country'),
+  address: text('address').notNull(),
+  amountMinor: bigint('amount_minor', { mode: 'bigint' }).notNull(),
+  maxFeeMinor: bigint('max_fee_minor', { mode: 'bigint' }).notNull(),
+  feeKind: integer('fee_kind').notNull(),
+  reference: text('reference'),
+  signingRequestId: text('signing_request_id').references(() => walletSigningRequests.id),
+  askId: text('ask_id').references(() => walletApprovalAsks.id),
+  requestedBy: text('requested_by').notNull(),
+  /** The hash of the sealed record made for this payment (hex, sha256 of the plain record) and its Walrus blob id (hex): what the chain anchors, kept so later decision records can name it (migration 0085). */
+  recordHash: text('record_hash'),
+  recordBlobId: text('record_blob_id'),
+  ...timestamps,
+}, (table) => [
+  uniqueIndex('wallet_transfers_org_key_unique').on(table.orgId, table.clientKey),
+  uniqueIndex('wallet_transfers_org_ref_unique').on(table.orgId, table.paymentRef),
+  index('wallet_transfers_org_created_idx').on(table.orgId, table.createdAt),
+  index('wallet_transfers_request_idx').on(table.signingRequestId),
+  index('wallet_transfers_org_requester_idx').on(table.orgId, table.requestedBy),
+]);
+
+/**
+ * One decision about a payment (migration 0085): a signature, a decline, or an owner's answer to a staff member's ask. Internal ids,
+ * times and hashes ONLY: no name is stored here. The name and title are inside the sealed decision record (Seal, on Walrus), which
+ * `content_hash` is the hash of and `walrus_blob_id` points at. Never rewritten: the one allowed change is sealing it, once.
+ */
+export const paymentTrailEvents = pgTable('payment_trail_events', {
+  id: text('id').primaryKey(),
+  orgId: text('org_id').notNull().references(() => organizations.id),
+  transferId: text('transfer_id').notNull().references(() => walletTransfers.id, { onDelete: 'cascade' }),
+  signingRequestId: text('signing_request_id'),
+  askId: text('ask_id'),
+  userId: text('user_id').notNull(),
+  /** The person's role in the business when they decided: owner, approver, staff or viewer. */
+  role: text('role').notNull(),
+  kind: text('kind').notNull(),
+  decidedAt: timestamp('decided_at', { withTimezone: true }).notNull(),
+  /** The payment's own record hash (hex) this decision is bound to; null for a payment made before records were kept with it. */
+  baseHash: text('base_hash'),
+  contentHash: text('content_hash'),
+  walrusBlobId: text('walrus_blob_id'),
+  sealedAt: timestamp('sealed_at', { withTimezone: true }),
+  createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+}, (table) => [
+  uniqueIndex('payment_trail_events_decision_unique').on(table.transferId, table.userId, table.kind),
+  index('payment_trail_events_org_transfer_idx').on(table.orgId, table.transferId),
+]);
+
+/**
+ * The message a staff member read and confirmed before paying an exchange
+ * account alone (migration 0077): the exact payload, the exact text it was
+ * hashed from, bound to the intent id and the payment. Never rewritten.
+ */
+export const walletTransferDisclosures = pgTable('wallet_transfer_disclosures', {
+  id: text('id').primaryKey(),
+  orgId: text('org_id').notNull().references(() => organizations.id),
+  transferId: text('transfer_id').notNull().references(() => walletTransfers.id, { onDelete: 'cascade' }),
+  intentId: text('intent_id').notNull(),
+  paymentRef: text('payment_ref').notNull(),
+  signingRequestId: text('signing_request_id'),
+  payload: jsonb('payload').notNull(),
+  canonical: text('canonical').notNull(),
+  payloadHash: text('payload_hash').notNull(),
+  confirmedBy: text('confirmed_by').notNull(),
+  confirmedAt: timestamp('confirmed_at', { withTimezone: true }).notNull(),
+}, (table) => [
+  uniqueIndex('wallet_transfer_disclosures_transfer_unique').on(table.orgId, table.transferId),
+  uniqueIndex('wallet_transfer_disclosures_intent_unique').on(table.orgId, table.intentId),
+  index('wallet_transfer_disclosures_request_idx').on(table.orgId, table.signingRequestId),
+]);
+
+/** A link made to share a receipt (migration 0064). Only the token's hash is kept. */
+export const paymentReceiptShares = pgTable('payment_receipt_shares', {
+  id: text('id').primaryKey(),
+  orgId: text('org_id').notNull().references(() => organizations.id),
+  paymentRef: text('payment_ref').notNull(),
+  tokenHash: text('token_hash').notNull(),
+  createdBy: text('created_by').notNull(),
+  expiresAt: timestamp('expires_at', { withTimezone: true }).notNull(),
+  revokedAt: timestamp('revoked_at', { withTimezone: true }),
+  createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+}, (table) => [
+  uniqueIndex('payment_receipt_shares_hash_unique').on(table.tokenHash),
+  index('payment_receipt_shares_org_ref_idx').on(table.orgId, table.paymentRef),
+]);
+
+/** The self-billed MyInvois file made for a payment, once per payment (migration 0064). */
+export const paymentEInvoices = pgTable('payment_einvoices', {
+  id: text('id').primaryKey(),
+  orgId: text('org_id').notNull().references(() => organizations.id),
+  paymentRef: text('payment_ref').notNull(),
+  document: jsonb('document').notNull(),
+  sha256: text('sha256').notNull(),
+  guideline: text('guideline').notNull(),
+  generatedBy: text('generated_by').notNull(),
+  generatedAt: timestamp('generated_at', { withTimezone: true }).notNull(),
+  history: jsonb('history').notNull().default([]),
+}, (table) => [
+  uniqueIndex('payment_einvoices_org_ref_unique').on(table.orgId, table.paymentRef),
+]);
+
+/**
+ * A batch of payments the owners sign once (v2 brief 5.6, migration 0065). The
+ * client's key is unique per business. It names the signing request once an
+ * owner has started the signatures; a batch a staff member prepared has none.
+ */
+export const walletBatches = pgTable('wallet_batches', {
+  id: text('id').primaryKey(),
+  orgId: text('org_id').notNull().references(() => organizations.id),
+  clientKey: text('client_key').notNull(),
+  requestHash: text('request_hash').notNull(),
+  label: text('label'),
+  rowCount: integer('row_count').notNull(),
+  totalAmountMinor: bigint('total_amount_minor', { mode: 'bigint' }).notNull(),
+  totalMaxFeeMinor: bigint('total_max_fee_minor', { mode: 'bigint' }).notNull(),
+  signingRequestId: text('signing_request_id').references(() => walletSigningRequests.id),
+  requestedBy: text('requested_by').notNull(),
+  ...timestamps,
+}, (table) => [
+  uniqueIndex('wallet_batches_org_key_unique').on(table.orgId, table.clientKey),
+  index('wallet_batches_org_created_idx').on(table.orgId, table.createdAt),
+  index('wallet_batches_request_idx').on(table.signingRequestId),
+]);
+
+/** One payment of a batch, in the order of the sheet (migration 0065). Its payment reference is unique per business. */
+export const walletBatchRows = pgTable('wallet_batch_rows', {
+  id: text('id').primaryKey(),
+  batchId: text('batch_id').notNull().references(() => walletBatches.id, { onDelete: 'cascade' }),
+  orgId: text('org_id').notNull().references(() => organizations.id),
+  position: integer('position').notNull(),
+  paymentRef: text('payment_ref').notNull(),
+  payeeKind: text('payee_kind').notNull(),
+  recipientId: text('recipient_id'),
+  businessId: text('business_id'),
+  payeeName: text('payee_name').notNull(),
+  payeeMasked: text('payee_masked'),
+  payeeCountry: text('payee_country'),
+  address: text('address').notNull(),
+  amountMinor: bigint('amount_minor', { mode: 'bigint' }).notNull(),
+  maxFeeMinor: bigint('max_fee_minor', { mode: 'bigint' }).notNull(),
+  feeKind: integer('fee_kind').notNull(),
+  reference: text('reference'),
+  createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+}, (table) => [
+  uniqueIndex('wallet_batch_rows_batch_position_unique').on(table.batchId, table.position),
+  uniqueIndex('wallet_batch_rows_org_ref_unique').on(table.orgId, table.paymentRef),
+  index('wallet_batch_rows_org_idx').on(table.orgId),
+]);
+
+/**
+ * A request for pilot access to a route that is not live yet (v2 brief D16):
+ * Malaysia, Vietnam, Thailand or Singapore, from the landing calculator.
+ *
+ * Public input, so it is scoped narrowly. One row per email and route (the
+ * unique index), so asking twice changes nothing and a flood of one address
+ * adds nothing. No customer route reads it back; the staff console reads it
+ * through `listAccessRequestsForStaff` (lib/server/access-requests.ts).
+ */
+export const accessRequests = pgTable('access_requests', {
+  id: text('id').primaryKey(),
+  email: text('email').notNull(),
+  company: text('company').notNull(),
+  /** MYR | VND | THB | SGD. */
+  currency: text('currency').notNull(),
+  ...timestamps,
+}, (table) => [
+  uniqueIndex('access_requests_email_currency_unique').on(table.email, table.currency),
+  index('access_requests_created_idx').on(table.createdAt),
+]);
+
+/**
+ * A scheduled batch (v2 Phase 3, migration 0069): payments to verified
+ * recipients, set to fall due once, every week or every month, in the mode an
+ * owner chose. `items` are the recipients and amounts as they were saved (the
+ * address, the amount and the fee shown), so a run can tell when one changed.
+ * (org, client key) is unique: a double click makes one schedule.
+ */
+export const paymentSchedules = pgTable('payment_schedules', {
+  id: text('id').primaryKey(),
+  orgId: text('org_id').notNull().references(() => organizations.id),
+  clientKey: text('client_key').notNull(),
+  name: text('name').notNull(),
+  /** ask | auto */
+  mode: text('mode').notNull(),
+  /** once | weekly | monthly */
+  cadence: text('cadence').notNull(),
+  firstDueAt: timestamp('first_due_at', { withTimezone: true }).notNull(),
+  /** The next time it falls due that has not been run; null when there is none. */
+  nextDueAt: timestamp('next_due_at', { withTimezone: true }),
+  /** active | stopped | completed | deleted */
+  status: text('status').notNull(),
+  createdBy: text('created_by').notNull(),
+  /** owner | finance_lead: an automatic schedule is always an owner's. */
+  createdAs: text('created_as').notNull(),
+  items: jsonb('items').notNull(),
+  itemCount: integer('item_count').notNull(),
+  totalMinor: bigint('total_minor', { mode: 'bigint' }).notNull(),
+  feeMinor: bigint('fee_minor', { mode: 'bigint' }).notNull(),
+  confirmedNewPayees: boolean('confirmed_new_payees').notNull().default(false),
+  version: integer('version').notNull().default(1),
+  stoppedAt: timestamp('stopped_at', { withTimezone: true }),
+  stoppedBy: text('stopped_by'),
+  ...timestamps,
+}, (table) => [
+  uniqueIndex('payment_schedules_org_key_unique').on(table.orgId, table.clientKey),
+  index('payment_schedules_org_idx').on(table.orgId, table.status),
+  index('payment_schedules_due_idx').on(table.status, table.nextDueAt),
+]);
+
+/**
+ * One run of a schedule, for one due date. (schedule, due date) is unique:
+ * running twice is running once. `claimedAt` is the lease a runner holds.
+ */
+export const paymentScheduleRuns = pgTable('payment_schedule_runs', {
+  id: text('id').primaryKey(),
+  scheduleId: text('schedule_id').notNull().references(() => paymentSchedules.id),
+  orgId: text('org_id').notNull().references(() => organizations.id),
+  /** YYYY-MM-DD, UTC. */
+  dueDate: text('due_date').notNull(),
+  dueAt: timestamp('due_at', { withTimezone: true }).notNull(),
+  /** The mode the schedule was in when the run was made. */
+  mode: text('mode').notNull(),
+  /** How it was actually carried out: ask (a person signs) or auto (inside the allowance). Null until it starts. */
+  ranAs: text('ran_as'),
+  /** scheduled | waiting_approval | approved | paid | skipped | failed | lapsed */
+  status: text('status').notNull(),
+  reasonCode: text('reason_code'),
+  /** Plain words for the owners. */
+  reason: text('reason'),
+  /** True when an automatic run was handed back to "ask me first". */
+  fallback: boolean('fallback').notNull().default(false),
+  batchId: text('batch_id').references(() => walletBatches.id),
+  itemCount: integer('item_count').notNull().default(0),
+  totalMinor: bigint('total_minor', { mode: 'bigint' }).notNull().default(0n),
+  feeMinor: bigint('fee_minor', { mode: 'bigint' }).notNull().default(0n),
+  claimedAt: timestamp('claimed_at', { withTimezone: true }),
+  noticeDayBeforeAt: timestamp('notice_day_before_at', { withTimezone: true }),
+  noticeRunningAt: timestamp('notice_running_at', { withTimezone: true }),
+  noticeReceiptAt: timestamp('notice_receipt_at', { withTimezone: true }),
+  skippedBy: text('skipped_by'),
+  skippedAt: timestamp('skipped_at', { withTimezone: true }),
+  /**
+   * When this run's first automatic payment may be claimed (migration 0076). Null while no window has been announced; set
+   * once, when the "starting" notice goes out. The payment claim refuses to run before it.
+   */
+  startsAt: timestamp('starts_at', { withTimezone: true }),
+  /** The schedule's version when the window opened: a schedule changed inside the window hands the run back at its end. */
+  windowVersion: integer('window_version'),
+  ...timestamps,
+}, (table) => [
+  uniqueIndex('payment_schedule_runs_schedule_due_unique').on(table.scheduleId, table.dueDate),
+  index('payment_schedule_runs_org_idx').on(table.orgId, table.createdAt),
+  index('payment_schedule_runs_status_idx').on(table.status, table.dueAt),
+  index('payment_schedule_runs_batch_idx').on(table.batchId),
+]);
+
+/**
+ * One payment of an automatic run, claimed once (pending, submitting, then
+ * paid or failed). The payment reference is unique per business and is also
+ * the payment's idempotency key on chain. `gasBudgetMist` counts toward the
+ * business's 24-hour network-fee allowance.
+ */
+export const paymentScheduleRunPayments = pgTable('payment_schedule_run_payments', {
+  id: text('id').primaryKey(),
+  runId: text('run_id').notNull().references(() => paymentScheduleRuns.id, { onDelete: 'cascade' }),
+  orgId: text('org_id').notNull().references(() => organizations.id),
+  position: integer('position').notNull(),
+  paymentRef: text('payment_ref').notNull(),
+  recipientId: text('recipient_id'),
+  businessId: text('business_id'),
+  payeeName: text('payee_name').notNull(),
+  address: text('address').notNull(),
+  amountMinor: bigint('amount_minor', { mode: 'bigint' }).notNull(),
+  maxFeeMinor: bigint('max_fee_minor', { mode: 'bigint' }).notNull(),
+  feeKind: integer('fee_kind').notNull(),
+  reference: text('reference'),
+  /** pending | submitting | paid | failed */
+  status: text('status').notNull(),
+  digest: text('digest'),
+  gasBudgetMist: bigint('gas_budget_mist', { mode: 'bigint' }).notNull().default(0n),
+  error: text('error'),
+  attemptedAt: timestamp('attempted_at', { withTimezone: true }),
+  completedAt: timestamp('completed_at', { withTimezone: true }),
+  ...timestamps,
+}, (table) => [
+  uniqueIndex('payment_schedule_run_payments_run_position_unique').on(table.runId, table.position),
+  uniqueIndex('payment_schedule_run_payments_org_ref_unique').on(table.orgId, table.paymentRef),
+  index('payment_schedule_run_payments_org_idx').on(table.orgId, table.createdAt),
+]);
+
+/**
+ * Per business: the kill switch for automatic payments (any one owner may
+ * pause) and the daily limit the owners set, which Splash's server enforces.
+ */
+export const scheduledPaymentSettings = pgTable('scheduled_payment_settings', {
+  orgId: text('org_id').primaryKey().references(() => organizations.id),
+  autoPaused: boolean('auto_paused').notNull().default(false),
+  pausedBy: text('paused_by'),
+  pausedAt: timestamp('paused_at', { withTimezone: true }),
+  dailyCapMinor: bigint('daily_cap_minor', { mode: 'bigint' }),
+  /** A daily limit asked for and waiting for the owners' signatures (migration 0070); it becomes the limit when that request executes. */
+  pendingDailyCapMinor: bigint('pending_daily_cap_minor', { mode: 'bigint' }),
+  pendingCapRequestId: text('pending_cap_request_id'),
+  /** Minutes between telling the owners a run is starting and its first automatic payment: 0 to 60, 10 by default (migration 0076). */
+  graceMinutes: integer('grace_minutes').notNull().default(10),
+  ...timestamps,
+});
+
+/**
+ * A business's limit that is not the standard one (migration 0078). No row for
+ * a kind means the standard limit (lib/limits/rules.ts DEFAULT_LIMITS). Written
+ * when an owner lowers a limit, or when an approved higher limit takes effect.
+ * `value` is USDC minor units for the three amounts and days for `days`.
+ */
+export const businessLimits = pgTable('business_limits', {
+  orgId: text('org_id').notNull().references(() => organizations.id),
+  kind: text('kind').notNull(),
+  value: bigint('value', { mode: 'bigint' }).notNull(),
+  /** raised | lowered | restored (migration 0079) | starting (a new business, started at its proposal; migration 0086). */
+  source: text('source').notNull(),
+  /** A user id (an owner), `system:limits` when the notice ran out, or `system:migration` for a figure the business already ran on. */
+  changedBy: text('changed_by').notNull(),
+  requestId: text('request_id'),
+  /** The highest figure this business has legitimately held for the limit (migration 0079): an owner restores up to it at once. Never below `value`. */
+  heldMax: bigint('held_max', { mode: 'bigint' }).notNull(),
+  updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
+}, (table) => [
+  primaryKey({ columns: [table.orgId, table.kind], name: 'business_limits_pk' }),
+]);
+
+/**
+ * An owner's request to Splash for a higher limit (migration 0078). Staff
+ * approve (or approve a smaller figure) or decline with a reason; an approval
+ * starts a 24 hour notice, and the owner can cancel until it has passed.
+ * pending | approved | declined | cancelled | applied.
+ */
+export const businessLimitRequests = pgTable('business_limit_requests', {
+  id: text('id').primaryKey(),
+  orgId: text('org_id').notNull().references(() => organizations.id),
+  kind: text('kind').notNull(),
+  requestedValue: bigint('requested_value', { mode: 'bigint' }).notNull(),
+  /** What the limit was when it was asked. */
+  currentValue: bigint('current_value', { mode: 'bigint' }).notNull(),
+  reason: text('reason').notNull(),
+  /** The caller's idempotency key: the same key is the same request. */
+  requestKey: text('request_key').notNull(),
+  requestedBy: text('requested_by').notNull(),
+  requestedAt: timestamp('requested_at', { withTimezone: true }).notNull(),
+  status: text('status').notNull().default('pending'),
+  grantedValue: bigint('granted_value', { mode: 'bigint' }),
+  /** `operator:<email>`. For a grant that needed two people this is the SECOND approver. */
+  decidedBy: text('decided_by'),
+  decidedAt: timestamp('decided_at', { withTimezone: true }),
+  declineReason: text('decline_reason'),
+  /** The first of two Splash staff to approve a large grant (migration 0086): `operator:<email>`, their role, when, and the figure they approved. The request stays pending; nothing starts. */
+  firstApprovedBy: text('first_approved_by'),
+  firstApproverRole: text('first_approver_role'),
+  firstApprovedAt: timestamp('first_approved_at', { withTimezone: true }),
+  firstGrantedValue: bigint('first_granted_value', { mode: 'bigint' }),
+  /** The role (compliance | operations) of whoever decided: the second approver of a large grant. */
+  decidedRole: text('decided_role'),
+  /** decided_at + 24 hours. */
+  effectiveAt: timestamp('effective_at', { withTimezone: true }),
+  appliedAt: timestamp('applied_at', { withTimezone: true }),
+  cancelledBy: text('cancelled_by'),
+  cancelledAt: timestamp('cancelled_at', { withTimezone: true }),
+  approvedNotifiedAt: timestamp('approved_notified_at', { withTimezone: true }),
+  declinedNotifiedAt: timestamp('declined_notified_at', { withTimezone: true }),
+  effectiveNotifiedAt: timestamp('effective_notified_at', { withTimezone: true }),
+  ...timestamps,
+}, (table) => [
+  uniqueIndex('business_limit_requests_key_unique').on(table.orgId, table.requestKey),
+  uniqueIndex('business_limit_requests_one_open').on(table.orgId, table.kind).where(sql`${table.status} in ('pending', 'approved')`),
+  index('business_limit_requests_queue_idx').on(table.status, table.requestedAt),
+]);
+
+/**
+ * The three answers a business gave about how it will use Splash, what was read from them and the proposal worked out
+ * (migration 0086, lib/limits/start.ts). One row per business. The `*_text` columns hold the answers as the owner wrote
+ * them, cleaned and at most 40 characters; they are shown to the owner and to Splash staff as text and are never written
+ * to the trail or the logs. `appliedAt` is set once, when a new business was started at the proposal.
+ */
+export const businessLimitAnswers = pgTable('business_limit_answers', {
+  id: text('id').primaryKey(),
+  orgId: text('org_id').notNull().references(() => organizations.id),
+  monthlyText: text('monthly_text').notNull(),
+  perWeekText: text('per_week_text').notNull(),
+  firstText: text('first_text').notNull(),
+  monthlyMinor: bigint('monthly_minor', { mode: 'bigint' }).notNull(),
+  perWeek: integer('per_week').notNull(),
+  firstMinor: bigint('first_minor', { mode: 'bigint' }).notNull(),
+  proposedPerPayment: bigint('proposed_per_payment', { mode: 'bigint' }).notNull(),
+  proposedDaily: bigint('proposed_daily', { mode: 'bigint' }).notNull(),
+  proposedMonthly: bigint('proposed_monthly', { mode: 'bigint' }).notNull(),
+  wantedPerPayment: bigint('wanted_per_payment', { mode: 'bigint' }).notNull(),
+  wantedDaily: bigint('wanted_daily', { mode: 'bigint' }).notNull(),
+  wantedMonthly: bigint('wanted_monthly', { mode: 'bigint' }).notNull(),
+  /** Counts up each time the answers change: a new version is a new "Ask for higher limits". */
+  version: integer('version').notNull().default(1),
+  formulaVersion: integer('formula_version').notNull(),
+  answeredBy: text('answered_by').notNull(),
+  appliedAt: timestamp('applied_at', { withTimezone: true }),
+  ...timestamps,
+}, (table) => [
+  uniqueIndex('business_limit_answers_org_unique').on(table.orgId),
+]);
+
+/**
+ * When nobody who can approve answers (v2 Phase 3, p3-no-approver; migration 0087).
+ *
+ * One row per (kind of request, request id, step): the row is the idempotency key, so a step of the
+ * escalation ladder ("asked", "reminder_10m", "reminder_1h", "reminder_4h", "lapsed", and each
+ * "Remind them now") happens once however often the cron runs. lib/server/approval-wait.ts.
+ */
+export const approvalWaitSteps = pgTable('approval_wait_steps', {
+  /** signing | ask */
+  subjectKind: text('subject_kind').notNull(),
+  subjectId: text('subject_id').notNull(),
+  step: text('step').notNull(),
+  orgId: text('org_id').notNull().references(() => organizations.id),
+  createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+}, (table) => [
+  primaryKey({ columns: [table.subjectKind, table.subjectId, table.step] }),
+  index('approval_wait_steps_org_idx').on(table.orgId, table.subjectKind, table.subjectId),
+]);
+
+/**
+ * One person told at one step: the in-app notice and the record of the e-mail. Words only (no amount,
+ * no payee, no address, no secret). The e-mail is claimed (`sending`) before it is sent.
+ */
+export const approvalNotices = pgTable('approval_notices', {
+  id: text('id').primaryKey(),
+  orgId: text('org_id').notNull().references(() => organizations.id),
+  subjectKind: text('subject_kind').notNull(),
+  subjectId: text('subject_id').notNull(),
+  step: text('step').notNull(),
+  userId: text('user_id').notNull(),
+  /** approver | requester | owner */
+  audience: text('audience').notNull(),
+  title: text('title').notNull(),
+  body: text('body').notNull(),
+  linkPath: text('link_path').notNull(),
+  /** pending | sending | sent | failed | not_configured */
+  emailState: text('email_state').notNull().default('pending'),
+  emailAttempts: integer('email_attempts').notNull().default(0),
+  emailClaimedAt: timestamp('email_claimed_at', { withTimezone: true }),
+  emailSentAt: timestamp('email_sent_at', { withTimezone: true }),
+  createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+}, (table) => [
+  uniqueIndex('approval_notices_once').on(table.subjectKind, table.subjectId, table.step, table.userId),
+  index('approval_notices_user_idx').on(table.orgId, table.userId, table.createdAt),
 ]);

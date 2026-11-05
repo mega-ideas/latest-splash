@@ -1,20 +1,31 @@
+import type { Viewport } from 'next';
+import { headers } from 'next/headers';
 import { redirect } from 'next/navigation';
 import type { ReactNode } from 'react';
 
+import { RETURN_HEADER, loginRedirectFor } from '@/lib/approve/link';
 import DashboardShell from '@/components/dashboard/DashboardShell';
 import { custodyPhaseEnabled, sweepAccountEnabled } from '@/lib/server/custody-phase';
 import { getCustomerSession } from '@/lib/server/customer-auth';
+import { readGovernanceBannerForSession } from '@/lib/server/governance-alerts-store';
 import { readKybGateState } from '@/lib/server/kyb-gate';
 import { readOnboardingState } from '@/lib/server/onboarding';
 import { launchScope } from '@/lib/server/launch-scope';
+import { phoneHintFromHeaders } from '@/lib/device';
 
 export const dynamic = 'force-dynamic';
+
+/** The bottom bars of the phone layouts clear the home indicator (env(safe-area-inset-bottom)) only when the page covers the whole screen. */
+export const viewport: Viewport = { width: 'device-width', initialScale: 1, viewportFit: 'cover' };
 
 export default async function DashboardLayout({ children }: { children: ReactNode }) {
   const session = await getCustomerSession();
 
   if (!session) {
-    redirect('/login');
+    // A link to one request's Approve screen comes back to it after sign-in;
+    // anything else signs in to Home. The proxy sets the header, and only for
+    // that one path (lib/approve/link.ts).
+    redirect(loginRedirectFor((await headers()).get(RETURN_HEADER)));
   }
 
   // Wallet spec §3.2 — resolve the KYB state ONCE, here. Every page under
@@ -30,9 +41,14 @@ export default async function DashboardLayout({ children }: { children: ReactNod
   // nothing redirects, mirroring how the gates themselves behave in dev.
   let locks: { termsDone: boolean; moneyBlocked: boolean; custodyOn: boolean; reason: string } | undefined;
   let needsIntent = false;
+  // Account setup sits on the rail until its required steps (1-4) are done,
+  // then under Settings (v2 brief 5.1). Unreadable means no nudge.
+  let setup: { done: number; total: number; complete: boolean } | undefined;
   try {
     const onboarding = await readOnboardingState(session);
     needsIntent = onboarding.intent === null;
+    const required = onboarding.steps.slice(0, 4);
+    setup = { done: required.filter((step) => step.done).length, total: required.length, complete: onboarding.complete };
     locks = {
       termsDone: onboarding.steps[0].done,
       moneyBlocked: kyb.blocked,
@@ -41,11 +57,21 @@ export default async function DashboardLayout({ children }: { children: ReactNod
     };
   } catch {
     locks = undefined;
+    setup = undefined;
   }
   if (needsIntent) redirect('/onboarding/intent');
+
+  // v2 governance (brief 3.5): the contract changes this person, as a business
+  // owner, was told about and that are still active. Their own deliveries
+  // only; it never throws, and an unreadable store means no banner, not a
+  // broken dashboard (email and WhatsApp carry the same alert).
+  const governanceAlerts = await readGovernanceBannerForSession(session);
 
   // One line on purpose: tests/oxwal-frontend.test.mjs pins the shape
   // {children}</DashboardShell> as the no-second-wrapper contract.
   // sweepOn needs no database, so it is resolved even when `locks` is not.
-  return <DashboardShell session={session} kyb={kyb} locks={locks} sweepOn={sweepAccountEnabled()} launchScope={launchScope()}>{children}</DashboardShell>;
+  // Phone is decided where the layout renders, from the User-Agent, so the
+  // right layout arrives on the first byte; the window's width decides after.
+  const phoneHint = phoneHintFromHeaders(await headers());
+  return <DashboardShell session={session} kyb={kyb} locks={locks} setup={setup} sweepOn={sweepAccountEnabled()} launchScope={launchScope()} governanceAlerts={governanceAlerts} phoneHint={phoneHint}>{children}</DashboardShell>;
 }

@@ -70,10 +70,9 @@ async function refused(res, label) {
   assert.equal(body.code, 'not_in_launch_scope', label);
 }
 
-test('customer routes: transfers, batches, treasury, funding and rate holds refuse, and nothing is deferred', async () => {
+test('customer routes: transfers, treasury, funding and rate holds refuse, and nothing is deferred', async () => {
   const cases = [
     ['@/app/api/transfers/authorize/route', '/api/transfers/authorize', { recipientName: 'Maria', amountUsd: 500, targetCurrency: 'PHP' }],
-    ['@/app/api/batches/authorize/route', '/api/batches/authorize', { batchId: 'b1' }],
     ['@/app/api/treasury/route', '/api/treasury', { action: 'allocate', amountUsd: 100 }],
     ['@/app/api/funding/sessions/route', '/api/funding/sessions', { amountUsd: 100 }],
     ['@/app/api/rate-holds/route', '/api/rate-holds', { targetCurrency: 'PHP', amountUsd: 100 }],

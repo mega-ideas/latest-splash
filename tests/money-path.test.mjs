@@ -65,9 +65,7 @@ test('money path panel renders from config only — no hardcoded partner copy', 
   assert.match(source, /href="\/trust"/);
 });
 
-test('money path mounts: treasury page and funding flow render the panel', async () => {
+test('money path mounts: the treasury page renders the panel', async () => {
   const treasury = await readFile(new URL('../app/dashboard/treasury/page.tsx', import.meta.url), 'utf8');
-  const quote = await readFile(new URL('../components/transfer/StepQuote.tsx', import.meta.url), 'utf8');
   assert.match(treasury, /<MoneyPathPanel \/>/);
-  assert.match(quote, /<MoneyPathPanel compact \/>/);
 });

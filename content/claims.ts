@@ -1,3 +1,6 @@
+import { pricingLine } from '../lib/fees/copy.ts';
+import { LAUNCH_SCHEDULE } from '../lib/fees/schedule.ts';
+
 /**
  * `not-licensed` exists because a regulatory position is not a model. The
  * Labuan claim carried status 'modeled', which reads as a product surface
@@ -15,9 +18,8 @@ export type Claim = {
 
 export const lockedCopy = {
   headline: 'Collect USD. Pay Southeast Asia. Keep cash working.',
-  fee: '0.70% to local currency',
-  feeFootnote: 'Flat on every corridor, no fixed fee. USDC transfers are free.',
-  speed: '~400ms Sui settlement finality',
+  // In words, not a benchmark figure nobody sourced (the step B review).
+  speed: 'Seconds on Sui',
   speedFootnote: 'Local delivery varies by rail.',
   yield: 'Variable APY - T-bill-backed',
   agent: 'Zeke prepares. You approve.',
@@ -55,8 +57,10 @@ export const claims = {
     status: 'testnet-verified',
   },
   fee: {
-    claim: lockedCopy.fee,
-    evidence: 'Corridor fee table in lib/fx/corridors.ts: 70 bps on every corridor and no fixed fee (pricing decision of 2026-09-26).',
+    // Rendered from the launch schedule, never typed in (A1 §2.7). A page
+    // that shows Splash's price renders it from the schedule in force.
+    claim: pricingLine(LAUNCH_SCHEDULE),
+    evidence: "splash_core::fee_config computes Splash's fee on chain from the derived kind and the amount; the launch schedule (A1 §2.2) is FeeConfig's default at publish and changes only through the 24-hour path. Mirrored in lib/fees/schedule.ts; the pricing line renders from it (lib/fees/copy.ts).",
     status: 'modeled',
   },
   treasuryYield: {
@@ -75,8 +79,27 @@ export const claims = {
     status: 'testnet-verified',
   },
   footerLegal: {
-    claim: 'Licence application in preparation with Labuan FSA. Not yet authorised to hold customer funds. USDC transfers are real, on Sui mainnet, signed by the sending business in its own wallet. USD in and local-currency payouts are not live yet.',
-    evidence: 'Custody gate (lib/custody-phase-rules.ts); the stablecoin lane is mainnet-only and the business wallet signs every transfer (lib/payments/stablecoin-lane.ts); fiat partners are not connected (docs/GO-LIVE-HANDOVER.md).',
+    claim: 'Splash is software and does not hold customer funds. USDC transfers are signed by the sending business in its own Splash Wallet. Local-currency payouts are made by partners of record, each live once its agreement is signed.',
+    evidence: 'D3 (no Splash account receives client money); the business wallet signs every transfer (lib/payments/stablecoin-lane.ts); a route is live only once its payout partner is in SIGNED_PARTNERS (lib/landing/routes.ts routeIsLive).',
     status: 'modeled',
   },
 } satisfies Record<string, Claim>;
+
+/**
+ * The footer's compliance text (v2 brief section 6, D3): what Splash is,
+ * what it does not do, and who pays out. No licence is claimed, and no
+ * Labuan line is shown: that application comes later.
+ *
+ * The entity line renders only once `BRAND.legalEntity` holds the SSM
+ * registration (SPLASH MY SDN BHD, number pending). Until then the caller
+ * passes null and there is no entity line at all.
+ */
+export function saasCompliance(legalEntity: string | null): string[] {
+  const lines = [
+    'Splash is a software (SaaS) provider operating under Malaysian law (BNM/SC).',
+    'Splash does not hold customer funds: money stays in your Splash Wallet, and Splash has no key to it.',
+    'Local-currency payouts are made by partners of record.',
+  ];
+  if (legalEntity) lines.push(legalEntity);
+  return lines;
+}

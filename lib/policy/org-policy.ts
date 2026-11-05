@@ -4,7 +4,7 @@ import type { PgDatabase } from 'drizzle-orm/pg-core';
 import { orgPolicies } from '../db/schema.ts';
 import { ensureOrganization } from '../db/proposal-repo.ts';
 import type * as schemaModule from '../db/schema.ts';
-import type { OrgPolicy, ProposalKind } from '../agent/types.ts';
+import { PROPOSAL_KINDS, type OrgPolicy, type ProposalKind } from '../agent/types.ts';
 
 /**
  * Track A §1.2 — the org policy record is SERVER-OWNED. It is loaded from the
@@ -22,11 +22,6 @@ export class PolicyMissingError extends Error {
     this.name = 'PolicyMissingError';
   }
 }
-
-const PROPOSAL_KINDS: ProposalKind[] = [
-  'PAYMENT', 'INTERNAL_TRANSFER', 'FX_CONVERT', 'TREASURY_ALLOCATE',
-  'TREASURY_REDEEM', 'BATCH_PAYOUT', 'NETTING_SETTLE', 'X402_PAYMENT',
-];
 
 /** The one server-side default, stated once. USD micro units. */
 export function serverDefaultOrgPolicy(orgId: string): OrgPolicy {
@@ -48,7 +43,7 @@ function rowToPolicy(row: typeof orgPolicies.$inferSelect): OrgPolicy {
     orgId: row.orgId,
     tier1ThresholdUsd: row.tier1ThresholdUsdMicro,
     dualApprovalThresholdUsd: row.dualApprovalThresholdUsdMicro,
-    whitelistedAutoKinds: kinds.filter((kind): kind is ProposalKind => PROPOSAL_KINDS.includes(kind as ProposalKind)),
+    whitelistedAutoKinds: kinds.filter((kind): kind is ProposalKind => (PROPOSAL_KINDS as readonly string[]).includes(kind)),
     operatingMinimumByCorridor: Object.fromEntries(
       Object.entries(minimums).map(([corridor, amount]) => [corridor, BigInt(amount)]),
     ),

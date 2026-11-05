@@ -43,6 +43,12 @@ export const DOMAIN_TAGS = {
   payment: 'splash:payment:v1',
   /** A minted receipt (receipt_v2). */
   receipt: 'splash:receipt:v1',
+  /** v2: the rail and partner reference of one payment (`PaymentIntent.rail_commitment`). */
+  rail: 'splash:rail:v1',
+  /** v2: one bank beneficiary, stable across payments (`beneficiary_ref`, `SpendPolicy` beneficiaries). */
+  beneficiary: 'splash:beneficiary:v1',
+  /** v2: the business's own id for a payment (`payment_ref`, the intent's idempotency key). */
+  paymentRef: 'splash:payment-ref:v1',
 } as const;
 export type DomainTag = (typeof DOMAIN_TAGS)[keyof typeof DOMAIN_TAGS];
 
@@ -69,6 +75,56 @@ export const RECEIPT_PAYLOAD_FIELDS = [
   'fx_rate_usd_local',
   'tx_digest',
 ] as const;
+
+/** The documented BCS field order of a rail commitment. */
+export const RAIL_PAYLOAD_FIELDS = ['rail', 'partner_reference'] as const;
+
+/** The documented BCS field order of a beneficiary commitment. */
+export const BENEFICIARY_PAYLOAD_FIELDS = ['partner', 'country', 'bank_code', 'account_number', 'holder_name'] as const;
+
+/** The documented BCS field order of a payment-reference commitment. */
+export const PAYMENT_REF_PAYLOAD_FIELDS = ['business_account_id', 'payment_id'] as const;
+
+/**
+ * What a payment's `rail_commitment` commits to: the rail it settles over and
+ * the partner's own reference for it. Salted with the payment's salt, like the
+ * payment commitment, under its own tag.
+ */
+export type RailCommitmentPayload = {
+  /** The rail, e.g. `pdax`, `durianpay`, `sui`, `cctp-v2`. */
+  rail: string;
+  /** The partner's quote or payout reference; empty when the rail has none. */
+  partnerReference: string;
+};
+
+/**
+ * One bank beneficiary, as the partner will pay it. STABLE across payments:
+ * salted with a per-beneficiary secret kept in the recipient record, never a
+ * per-payment salt, because a business's `SpendPolicy` verifies the
+ * beneficiary once and every later payment must produce the same 32 bytes.
+ * The payout adapter recomputes it from the record it sends the partner and
+ * refuses on a mismatch.
+ */
+export type BeneficiaryCommitmentPayload = {
+  /** The payout partner, e.g. `pdax`. */
+  partner: string;
+  /** ISO 3166-1 alpha-2. */
+  country: string;
+  bankCode: string;
+  accountNumber: string;
+  holderName: string;
+};
+
+/**
+ * The business's own identifier for a payment (an invoice id, a batch row id).
+ * STABLE for that payment: salted with a per-business secret, so a retried or
+ * double-submitted create derives the same 32 bytes and the chain refuses the
+ * second intent (`payment_ref` is the intent's derived-UID key).
+ */
+export type PaymentRefCommitmentPayload = {
+  businessAccountId: string;
+  paymentId: string;
+};
 
 /** What a payment's lifecycle events commit to. Integers may arrive as bigint, safe number or decimal string. */
 export type PaymentCommitmentPayload = {
@@ -121,6 +177,24 @@ const ReceiptLayout = bcs.struct('ReceiptCommitmentPayload', {
   target_amount: bcs.u64(),
   fx_rate_usd_local: bcs.u64(),
   tx_digest: bcs.string(),
+});
+
+const RailLayout = bcs.struct('RailCommitmentPayload', {
+  rail: bcs.string(),
+  partner_reference: bcs.string(),
+});
+
+const BeneficiaryLayout = bcs.struct('BeneficiaryCommitmentPayload', {
+  partner: bcs.string(),
+  country: bcs.string(),
+  bank_code: bcs.string(),
+  account_number: bcs.string(),
+  holder_name: bcs.string(),
+});
+
+const PaymentRefLayout = bcs.struct('PaymentRefCommitmentPayload', {
+  business_account_id: bcs.Address,
+  payment_id: bcs.string(),
 });
 
 const U64_MAX = (1n << 64n) - 1n;
@@ -179,6 +253,35 @@ export function encodeReceiptPayload(payload: ReceiptCommitmentPayload): Uint8Ar
   }).toBytes();
 }
 
+/** BCS bytes of a rail payload, in the documented order. */
+export function encodeRailPayload(payload: RailCommitmentPayload): Uint8Array {
+  if (!payload.rail) throw new RangeError('a rail commitment names its rail');
+  return RailLayout.serialize({ rail: payload.rail, partner_reference: payload.partnerReference ?? '' }).toBytes();
+}
+
+/** BCS bytes of a beneficiary payload, in the documented order. */
+export function encodeBeneficiaryPayload(payload: BeneficiaryCommitmentPayload): Uint8Array {
+  for (const [name, value] of Object.entries(payload)) {
+    if (!value) throw new RangeError(`a beneficiary commitment needs ${name}`);
+  }
+  return BeneficiaryLayout.serialize({
+    partner: payload.partner,
+    country: payload.country,
+    bank_code: payload.bankCode,
+    account_number: payload.accountNumber,
+    holder_name: payload.holderName,
+  }).toBytes();
+}
+
+/** BCS bytes of a payment-reference payload, in the documented order. */
+export function encodePaymentRefPayload(payload: PaymentRefCommitmentPayload): Uint8Array {
+  if (!payload.paymentId) throw new RangeError('a payment reference needs the payment id');
+  return PaymentRefLayout.serialize({
+    business_account_id: payload.businessAccountId,
+    payment_id: payload.paymentId,
+  }).toBytes();
+}
+
 /** Thirty-two bytes from the operating system's CSPRNG. One per payment. */
 export function newSalt(): Uint8Array {
   return new Uint8Array(randomBytes(SALT_BYTES));
@@ -212,6 +315,21 @@ export function paymentCommitment(payload: PaymentCommitmentPayload, salt: Uint8
 
 export function receiptCommitment(payload: ReceiptCommitmentPayload, salt: Uint8Array): Uint8Array {
   return commitmentBytes(DOMAIN_TAGS.receipt, encodeReceiptPayload(payload), salt);
+}
+
+/** `rail_commitment`, salted with the payment's own salt. */
+export function railCommitment(payload: RailCommitmentPayload, salt: Uint8Array): Uint8Array {
+  return commitmentBytes(DOMAIN_TAGS.rail, encodeRailPayload(payload), salt);
+}
+
+/** `beneficiary_ref`, salted with the beneficiary's own stable secret. */
+export function beneficiaryCommitment(payload: BeneficiaryCommitmentPayload, salt: Uint8Array): Uint8Array {
+  return commitmentBytes(DOMAIN_TAGS.beneficiary, encodeBeneficiaryPayload(payload), salt);
+}
+
+/** `payment_ref`, salted with the business's own stable secret. */
+export function paymentRefCommitment(payload: PaymentRefCommitmentPayload, salt: Uint8Array): Uint8Array {
+  return commitmentBytes(DOMAIN_TAGS.paymentRef, encodePaymentRefPayload(payload), salt);
 }
 
 export function toHex(bytes: Uint8Array): string {

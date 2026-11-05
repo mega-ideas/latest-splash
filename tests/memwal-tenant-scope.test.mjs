@@ -309,7 +309,8 @@ test('each MemWal caller takes the org from the session, never the request', asy
 
   const copilot = await source('lib/server/copilot.ts');
   assert.match(copilot, /recallForOrg\(orgId, SUGGESTION_RECALL_QUERY, 6\)/);
-  assert.match(copilot, /rememberForOrg\(orgId, `Invoice vendor \$\{vendor\} settles in \$\{currency\}`\)/);
+  assert.match(copilot, /return `Invoice vendor \$\{vendor\} settles in \$\{currency\}`;/);
+  assert.match(copilot, /const memory = invoiceVendorMemory\(recipient, currency\);\s*if \(memory\) void rememberForOrg\(orgId, memory\);/);
   assert.equal((copilot.match(/rememberInvoiceVendor\(orgId, recipient, currency\);/g) ?? []).length, 2, 'both parse paths');
 
   const operations = await source('lib/server/operations.ts');
@@ -322,7 +323,9 @@ test('each MemWal caller takes the org from the session, never the request', asy
   // …and request.orgId is the session's: the route derives it, and refuses a
   // body that tries to send one.
   const route = await source('app/api/oxwal/route.ts');
-  assert.match(route, /const ctx = await resolveAuthorityForSession\(auth\.session\);/);
-  assert.match(route, /orgId: ctx\.orgId,/);
+  // v2 §4.8: through requireSessionAccount, which answers a person with no
+  // membership instead of crashing; the org is the same resolver's.
+  assert.match(route, /const accountCheck = await requireSessionAccount\(auth\.session\);/);
+  assert.match(route, /orgId: accountCheck\.account\.orgId,/);
   assert.match(route, /assertCleanBody\(rawBody, 'oxwal'\)/);
 });

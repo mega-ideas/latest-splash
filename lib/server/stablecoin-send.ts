@@ -1,6 +1,7 @@
 import { fromBase64, normalizeStructTag, toBase64 } from '@mysten/sui/utils';
 
 import type { UserRole } from '@/lib/agent/types';
+import { LAUNCH_SCHEDULE, type FeeSchedule } from '@/lib/fees/schedule';
 import {
   anchorFeeEnabled,
   explorerTxUrl,
@@ -27,6 +28,8 @@ import {
 } from '@/lib/server/stablecoin-outflows';
 import { walletSendable } from '@/lib/server/wallet-screening';
 import { stablecoinTransferSubject } from '@/lib/server/step-up-subjects';
+import { MOVE_KIND } from '@/lib/recipients/wallet-recipients';
+import { walletDeliveryGate } from '@/lib/server/wallet-recipients';
 
 /**
  * A wallet transfer, end to end: quote → the business signs → submit.
@@ -75,11 +78,17 @@ export interface SendDeps {
   chain: ChainDeps;
   approval: ApprovalDeps;
   readRecipient(orgId: string, recipientId: string): Promise<RecipientRecord | null>;
-  feeAddress(): string | undefined;
+  /** Who receives Splash's fee: the FeeConfig's fee recipient
+   *  (lib/server/stablecoin-fee.ts). Undefined when it cannot be named. */
+  feeAddress(): string | undefined | Promise<string | undefined>;
   /** Is this address a Splash user's wallet? Transfers to one are always free. */
   isSplashWallet(address: string): Promise<boolean>;
-  /** The audit-anchor fee on transfers out of Splash; off unless switched on. */
-  anchorFeeOn?: () => boolean;
+  /** Splash's fee on transfers out of Splash; off unless switched on, and
+   *  off while the FeeConfig has no recipient. */
+  anchorFeeOn?: () => boolean | Promise<boolean>;
+  /** The schedule the fee is charged from: the FeeConfig's. Defaults to the
+   *  launch schedule. */
+  feeSchedule?: () => FeeSchedule | Promise<FeeSchedule>;
   /** Gasless wallet transfers; on unless STABLECOIN_GASLESS=off. */
   gaslessOn?: () => boolean;
   now?: () => number;
@@ -141,15 +150,34 @@ export async function quoteWalletTransfer(
   const sendable = walletSendable(recipient.screeningVerdict);
   if (!sendable.ok) return fail(403, 'recipient_not_sendable', sendable.reason);
 
+  // v2 §4.7 (D5b): a wallet the supplier holds is paid only once it signed
+  // the ownership proof. An exchange account is paid from the business
+  // wallet, where its Travel Rule message is sent first, not from here.
+  const delivery = recipient.delivery;
+  if (delivery?.deliveryKind === 'EXCHANGE') {
+    return fail(409, 'exchange_from_business_wallet', 'An exchange account is paid from the business wallet, with its Travel Rule message. Pay it there.');
+  }
+  if (delivery?.deliveryKind !== 'SELF_CUSTODY' || delivery.ownershipStatus !== 'proven') {
+    return fail(409, 'ownership_not_proven', 'The supplier has not proven it holds this wallet yet. Send the ownership link from Recipients and wait for the signature.');
+  }
+
   const recipientAddress = normaliseSuiAddress(recipient.walletAddress);
   if (recipientAddress === sender) return fail(400, 'self_transfer', 'The recipient wallet is the wallet you are sending from.');
+  // The server's own gate (v2 §4.7), read from the saved row: approved by an
+  // owner, the supplier's details on file, the proof live, never Splash's
+  // address or the business's own. Read again at submission.
+  const gated = await walletDeliveryGate(deps.db, input.orgId, recipientAddress, MOVE_KIND.WALLET);
+  if (gated) return fail(gated.status, gated.code, gated.error);
 
-  // Free to a Splash user's wallet; to anywhere else, the audit-anchor fee
-  // when it is switched on (free until then). lib/payments/stablecoin-lane.ts.
+  // Free to a Splash user's wallet; to anywhere else, Splash's WALLET fee
+  // from the schedule when it is switched on (free until then).
+  // lib/payments/stablecoin-lane.ts.
   const destination = (await deps.isSplashWallet(recipientAddress)) ? 'SPLASH' as const : 'EXTERNAL' as const;
+  const anchorFeeOn = deps.anchorFeeOn ? await deps.anchorFeeOn() : anchorFeeEnabled();
+  const schedule = deps.feeSchedule ? await deps.feeSchedule() : LAUNCH_SCHEDULE;
   let quote;
   try {
-    quote = quoteStablecoinTransfer(principalMinor, { destination, anchorFeeOn: deps.anchorFeeOn?.() ?? anchorFeeEnabled() });
+    quote = quoteStablecoinTransfer(principalMinor, { destination, anchorFeeOn, schedule });
   } catch (error) {
     if (error instanceof StablecoinLaneError) return fail(400, 'below_minimum', `Amount refused: ${error.message}.`);
     throw error;
@@ -158,9 +186,9 @@ export async function quoteWalletTransfer(
   // A fee needs a real, named destination — never defaulted. No fee, no leg.
   let feeAddress: string | null = null;
   if (quote.feeMinor > 0n) {
-    const configuredFee = deps.feeAddress();
+    const configuredFee = await deps.feeAddress();
     if (!configuredFee) {
-      return fail(503, 'fee_address_missing', 'Transfers out of Splash are not open yet: Splash’s mainnet fee address is not configured.');
+      return fail(503, 'fee_address_missing', 'Transfers out of Splash are not open yet: Splash’s fee recipient cannot be read from the mainnet FeeConfig.');
     }
     feeAddress = normaliseSuiAddress(configuredFee);
     if (feeAddress === recipientAddress || feeAddress === sender) {
@@ -319,6 +347,12 @@ export async function submitWalletTransfer(
   // The approval — WhatsApp code + passkey, or a click, per Settings — for
   // exactly this quote. Spent here, before the chain; handed back below if
   // nothing moves, so a retry does not need a second approval.
+  // The recipient is checked again (v2 §4.7): a proof withdrawn, or an
+  // approval or address that stopped holding, between the quote and now
+  // stops the transfer before its approval is spent.
+  const stillPayable = await walletDeliveryGate(deps.db, input.orgId, row.recipientAddress, MOVE_KIND.WALLET);
+  if (stillPayable) return fail(stillPayable.status, stillPayable.code, stillPayable.error);
+
   const approvalSubject = stablecoinTransferSubject(row, '');
   // (x402 rows are paid through lib/server/x402-pay.ts, never here.)
   // A resend of the SAME bound transaction already spent its approval.

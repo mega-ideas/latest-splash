@@ -1,7 +1,8 @@
-import { and, desc, eq, inArray, isNotNull, ne } from 'drizzle-orm';
+import { and, desc, eq, gte, inArray, isNotNull, ne, or } from 'drizzle-orm';
 
 import { invoices, stablecoinOutflows, stepUpCodes, suppliers, users } from '@/lib/db/schema';
 import type { UsdcRecord } from '@/lib/payments/usdc-records';
+import type { HomeWalletPayment } from '@/lib/dashboard/home';
 
 /**
  * Every USDC transfer a workspace quoted, joined with the names an export
@@ -88,6 +89,80 @@ export async function listUsdcRecords(db: Db, orgId: string): Promise<UsdcRecord
       failureReason: r.failureReason,
     };
   });
+}
+
+/**
+ * What Home needs from this workspace's wallet payments, and no more than
+ * that (lib/dashboard/home.ts): every payment confirmed since `since`, for
+ * Sent this month, and the `recent` newest payments, for Recent payments,
+ * each with its recipient's name. Two bounded queries plus the names, rather
+ * than every quote ever made with the export's approval and people joins.
+ *
+ * A payment is a row with a digest, or one that confirmed or failed. A quote
+ * that was never broadcast is not one (isWalletPayment), so it is not read.
+ */
+export async function listHomeOutflows(
+  db: Db,
+  orgId: string,
+  input: { since: Date; recent: number },
+): Promise<HomeWalletPayment[]> {
+  const columns = {
+    id: stablecoinOutflows.id,
+    kind: stablecoinOutflows.kind,
+    status: stablecoinOutflows.status,
+    supplierId: stablecoinOutflows.supplierId,
+    recipientAddress: stablecoinOutflows.recipientAddress,
+    principalMinor: stablecoinOutflows.principalMinor,
+    txDigest: stablecoinOutflows.txDigest,
+    createdAt: stablecoinOutflows.createdAt,
+    confirmedAt: stablecoinOutflows.confirmedAt,
+  };
+  type Row = { id: string; kind: string; status: string; supplierId: string | null; recipientAddress: string; principalMinor: bigint | string; txDigest: string | null; createdAt: Date; confirmedAt: Date | null };
+
+  const confirmed: Row[] = await db
+    .select(columns)
+    .from(stablecoinOutflows)
+    .where(and(
+      eq(stablecoinOutflows.orgId, orgId),
+      eq(stablecoinOutflows.status, 'CONFIRMED'),
+      gte(stablecoinOutflows.confirmedAt, input.since),
+    ))
+    .limit(MAX_RECORDS);
+  const newest: Row[] = await db
+    .select(columns)
+    .from(stablecoinOutflows)
+    .where(and(
+      eq(stablecoinOutflows.orgId, orgId),
+      or(isNotNull(stablecoinOutflows.txDigest), inArray(stablecoinOutflows.status, ['CONFIRMED', 'FAILED', 'MISMATCH'])),
+    ))
+    .orderBy(desc(stablecoinOutflows.createdAt))
+    .limit(input.recent);
+
+  const byId = new Map<string, Row>();
+  for (const row of [...confirmed, ...newest]) byId.set(row.id, row);
+  const rows = [...byId.values()];
+
+  const supplierIds = [...new Set(rows.map((r) => r.supplierId).filter((id): id is string => Boolean(id)))];
+  const names = new Map<string, string>();
+  if (supplierIds.length > 0) {
+    const found: Array<{ id: string; name: string }> = await db
+      .select({ id: suppliers.id, name: suppliers.name })
+      .from(suppliers)
+      .where(and(eq(suppliers.orgId, orgId), inArray(suppliers.id, supplierIds)));
+    for (const s of found) names.set(s.id, s.name);
+  }
+
+  return rows.map((r) => ({
+    id: r.id,
+    kind: r.kind,
+    status: r.status,
+    recipientName: r.supplierId ? names.get(r.supplierId) ?? null : null,
+    recipientAddress: r.recipientAddress,
+    principalMinor: BigInt(r.principalMinor),
+    txDigest: r.txDigest,
+    createdAt: r.createdAt,
+    confirmedAt: r.confirmedAt,
+  }));
 }
 
 /**

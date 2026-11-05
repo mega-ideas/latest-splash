@@ -6,7 +6,8 @@
  * ⚠️  THESE ARE REAL RISK CONTROLS. Read before changing anything.
  *
  * `max_slippage_bps` defines the price band used by
- * `peg_monitor::assert_deepbook_liquidity`: settlement only clears if DeepBook
+ * `liquidity_guard::assert_deepbook_liquidity` (splash_custody, testnet only):
+ * settlement only clears if DeepBook
  * holds at least `min_depth_base_units` of BID depth within
  * [mid*(1 - slippage), mid].
  *
@@ -172,7 +173,8 @@ if (NETWORK === 'mainnet' && next.slippageBps > 50) {
 console.log('applying:', next);
 
 // ABI straddle: the package deployed today has a 4-parameter `update`. The
-// republished package adds `min_settlement_amount` (the on-chain $100 floor).
+// republished package adds `min_settlement_amount`. On v2 it is the bank-payout
+// floor: payment_intent holds every bank payout to max(99 USDC, this value).
 // Detect which one we are talking to from the config object itself rather than
 // guessing, so this script keeps working across the publish.
 const hasMinSettlement = current.min_settlement_amount !== undefined;

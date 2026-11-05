@@ -57,7 +57,7 @@ async function freshDesk() {
   const { resetOxwalFixtures, resetOxwalProposalStore, upsertOxwalCounterpartyFixture } = await agent();
   resetOxwalFixtures();
   resetOxwalProposalStore();
-  upsertOxwalCounterpartyFixture({ id: 'cp_verified_payee', name: 'Verified Payee', kybStatus: 'VERIFIED', bankRefHash: 'verified-payee-ref' });
+  upsertOxwalCounterpartyFixture({ id: 'cp_verified_payee', name: 'Vendor Ltd', kybStatus: 'VERIFIED', bankRefHash: 'verified-payee-ref' });
 }
 
 /* ── The action card ───────────────────────────────────────────────────── */
@@ -106,7 +106,6 @@ test('no Zeke proposal carries an invented confidence', async () => {
     await executeOxwalTool('proposeInternalTransfer', { orgId: 'demo-business', toOrgId: 'org-2', amountUsd: 100 }),
     await executeOxwalTool('proposeFxConvert', { orgId: 'demo-business', amountUsd: 100, currencyOut: 'PHP' }),
     await executeOxwalTool('proposeNettingSettlement', { orgId: 'demo-business', amountUsd: 100, corridor: 'MY_PH', counterpartyIds: ['cp_verified_payee'] }),
-    await executeOxwalTool('proposeBatchPayout', { orgId: 'demo-business', corridor: 'MY_PH', payouts: [{ counterpartyId: 'cp_verified_payee', amountUsd: 600, currency: 'USDC' }] }),
     await executeOxwalTool('proposeX402Payment', { orgId: 'demo-business', challenge: X402_CHALLENGE('arbitrum-sepolia') }),
   ];
   for (const proposal of built) {
@@ -115,7 +114,7 @@ test('no Zeke proposal carries an invented confidence', async () => {
   }
   // A clean PHP payment and a known x402 network: nothing extra to check.
   assert.deepEqual(built[0].explain.reviewReasons, []);
-  assert.deepEqual(built[5].explain.reviewReasons, []);
+  assert.deepEqual(built[4].explain.reviewReasons, []);
 });
 
 test('an invoice with warnings says so, without repeating the flagged text', async () => {
@@ -140,9 +139,13 @@ test('a payment that is not the invoice, or pays one already paid, says so', asy
   upsertOxwalInvoiceFixture({ id: 'inv_1200_php', amountUsd: '1200.00', targetCurrency: 'PHP', dueDate: '2026-12-01', issuerOrg: 'Vendor Ltd', payerOrgName: 'Buyer Ltd', memo: 'Component supply' });
   upsertOxwalInvoiceFixture({ id: 'inv_paid', amountUsd: '100.00', targetCurrency: 'PHP', dueDate: '2026-12-01', issuerOrg: 'Vendor Ltd', payerOrgName: 'Buyer Ltd', memo: 'Component supply', status: 'paid' });
 
-  const other = await executeOxwalTool('proposePayment', { orgId: 'demo-business', counterpartyId: 'cp_verified_payee', amountUsd: 100, currency: 'IDR', invoiceId: 'inv_1200_php' });
+  // Another amount is refused, not flagged (tests/zeke-rules.test.mjs).
+  await assert.rejects(
+    () => executeOxwalTool('proposePayment', { orgId: 'demo-business', counterpartyId: 'cp_verified_payee', amountUsd: 100, currency: 'IDR', invoiceId: 'inv_1200_php' }),
+    /the invoice is for 1200\.00 USD/,
+  );
+  const other = await executeOxwalTool('proposePayment', { orgId: 'demo-business', counterpartyId: 'cp_verified_payee', amountUsd: 1200, currency: 'IDR', invoiceId: 'inv_1200_php' });
   assert.deepEqual(other.explain.reviewReasons, [
-    'The amount is 100 USD, but invoice inv_1200_php is for 1200.00 USD.',
     'The payout is in IDR, but invoice inv_1200_php asks for PHP.',
   ]);
 
@@ -213,11 +216,11 @@ test('without a model, Zeke recommends review on exactly those grounds, and name
   assert.equal(reviewSentence({ explain: { confidence: null, evidence: [live()], reviewReasons: [reason] } }), ` Review it before approving. ${reason}`);
 
   // Demo data: said, not a review trigger (policy already sends it to a person).
-  assert.equal(reviewSentence({ explain: { confidence: null, evidence: [{ ...live(), status: 'DEMO' }] } }), ' It is built on demo or modeled data.');
-  assert.equal(reviewSentence({ explain: { confidence: null, evidence: [], evidenceQuality: 'CONTAINS_DEMO_DATA' } }), ' It is built on demo or modeled data.', 'keyed off evidenceQuality, as policy is');
+  assert.equal(reviewSentence({ explain: { confidence: null, evidence: [{ ...live(), status: 'DEMO' }] } }), ' It is built on sample or modeled data.');
+  assert.equal(reviewSentence({ explain: { confidence: null, evidence: [], evidenceQuality: 'CONTAINS_DEMO_DATA' } }), ' It is built on sample or modeled data.', 'keyed off evidenceQuality, as policy is');
   assert.equal(
     reviewSentence({ explain: { confidence: null, evidence: [{ ...live(false), status: 'DEMO' }], reviewReasons: [reason] } }),
-    ` Review it before approving: it relies on untrusted evidence (COUNTERPARTY). ${reason} It is built on demo or modeled data.`,
+    ` Review it before approving: it relies on untrusted evidence (COUNTERPARTY). ${reason} It is built on sample or modeled data.`,
   );
 });
 

@@ -4,6 +4,8 @@ import { useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { CheckCircle2, Loader2, Send, XCircle } from 'lucide-react';
 
+import { kindLabel, proposalTitle } from '@/lib/queue/queue-decision';
+
 /**
  * Payments every approver has agreed to that nobody has sent yet.
  *
@@ -110,9 +112,11 @@ export default function ReadyToSendLane({ items }: { items: ReadyToSendItem[] })
           return (
             <div key={item.id} className="grid grid-cols-1 gap-3 px-4 py-4 md:grid-cols-[1.4fr_0.7fr_0.7fr_1fr] md:items-center">
               <div className="min-w-0">
-                <strong className="block truncate text-sm text-[#1F4452]">{item.recommendation}</strong>
+                <strong className="block truncate text-sm text-[#1F4452]">{proposalTitle(item.kind)}</strong>
+                {/* Free text (an x402 one quotes the seller): a detail, never the headline. */}
+                <p className="mt-1 line-clamp-2 text-[13px] font-medium text-[#326273]/90">{item.recommendation}</p>
                 <p className="mt-1 truncate text-[13px] font-medium text-[#326273]/90">
-                  {item.id} · {item.kind} · {item.approvalsLabel}
+                  {item.id} · {kindLabel(item.kind)} · {item.approvalsLabel}
                 </p>
               </div>
               <span className="money text-sm font-medium text-[#1F4452]">{item.amountLabel}</span>
@@ -144,7 +148,7 @@ export default function ReadyToSendLane({ items }: { items: ReadyToSendItem[] })
         {settled.map((outcome) => (
           <div key={`sent-${outcome.item.id}`} className="flex flex-wrap items-center justify-between gap-3 px-4 py-3">
             <div className="min-w-0">
-              <strong className="block truncate text-sm text-[#1F4452]">{outcome.item.recommendation}</strong>
+              <strong className="block truncate text-sm text-[#1F4452]">{proposalTitle(outcome.item.kind)}</strong>
               <p className="mt-0.5 truncate text-[13px] font-medium text-[#326273]/90">
                 {outcome.item.id} · {outcome.item.amountLabel}
               </p>

@@ -40,6 +40,21 @@ export async function executeComposedPayment(input: {
   targetCurrency: string;
   fxRate: string | number | null | undefined;
   funding?: AuditReceipt['funding'];
+  /**
+   * The `max_fee` this payment may be charged, in USDC minor units: the
+   * Splash fee the payer was shown (lib/server/quote.ts `maxFeeMinor`,
+   * Amendment A1 §2.6, §4).
+   *
+   * The v2 PTB builder reads it and passes it as `max_fee` to
+   * `payment_intent::confirm_from_business_wallet` (or the balance and
+   * cross-chain forms) and `splash_spend::pay_intent`, where the chain
+   * computes the fee itself and aborts (EFeeAboveMax) above it. That builder
+   * is Phase 2. The builder below is the v1 TESTNET ONLY composed path
+   * (`create_payment_intent` / `confirm_payment_intent` on the v1 testnet
+   * package, which has no fee leg), so it carries the field and passes it to
+   * nothing.
+   */
+  maxFeeMinor: bigint;
 }) {
   // Fail before creating an on-chain intent if the audit encryption boundary
   // cannot accept the receipt payload.

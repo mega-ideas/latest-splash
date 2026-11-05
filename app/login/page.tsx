@@ -7,6 +7,7 @@ import { useState, type FormEvent } from 'react';
 import { ArrowRight, Eye, EyeOff, Lock, Mail } from 'lucide-react';
 import { toast } from 'sonner';
 
+import { safeApproveReturn } from '@/lib/approve/link';
 import IsometricAuthShell from '@/components/auth/IsometricAuthShell';
 import SplashLoading from '@/components/SplashLoading';
 
@@ -42,7 +43,9 @@ export default function LoginPage() {
 
       toast.success('Signed in securely');
       setAuthorizing(true);
-      router.push('/dashboard');
+      // Linked to one request's Approve screen: back to it. Only that shape; anything else is Home.
+      const returnTo = safeApproveReturn(new URLSearchParams(window.location.search).get('next'));
+      router.push(returnTo ?? '/dashboard');
       router.refresh();
     } catch (reason) {
       const message = reason instanceof Error ? reason.message : 'Unable to sign in. Check your credentials and try again.';

@@ -30,8 +30,8 @@ const ROLE_ROWS = [
   },
   {
     role: "Collection of record",
-    body: "A provider of record holds incoming USD. This is the one role with a named provider anywhere on this page, because it is the one that is live.",
-    status: "Airwallex · live on the testnet corridor",
+    body: "A funding provider of record takes a card or bank payment and delivers USDC to the business's own Splash Wallet. Splash never receives the money.",
+    status: "Not yet signed",
   },
   {
     role: "FX and liquidity",

@@ -1,0 +1,29 @@
+# splash_upgrade_delay — a 24-hour public notice before any upgrade (D11).
+#
+# `splash_core` is upgradeable, additive-only, by the 2-of-3 governance
+# multisig. That makes its UpgradeCap the most powerful object Splash has: an
+# additive upgrade can add a function to a module, and a function added to a
+# module can touch that module's objects. This package holds the cap and puts
+# a delay between "governance wants to upgrade" and "the upgrade can run", and
+# the proposal is an event every business owner is alerted to, so a business
+# that does not like what is coming can revoke its allowances first.
+#
+# It publishes IMMUTABLE, and that is the point: a delay its holder could
+# shorten would be a delay in name only. There is no function that unwraps the
+# cap, shortens the delay or loosens the policy.
+#
+# Depends on splash_core for one pure function: `multisig::assert_quorum_sender`,
+# which proves the governance multisig that holds the wrapper is a real quorum.
+# Built and tested with Sui CLI mainnet-v1.82.3.
+[package]
+name = "splash_upgrade_delay"
+version = "0.0.1"
+edition = "2024"
+license = "Apache-2.0"
+authors = ["Splash Finance"]
+
+[dependencies]
+splash_core = { local = "../splash_core" }
+
+[addresses]
+splash_upgrade_delay = "0x0"

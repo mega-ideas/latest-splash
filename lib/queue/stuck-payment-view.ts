@@ -82,8 +82,6 @@ export function whereToCheck(kind: string): { label: string; href: string } | nu
   switch (kind) {
     case 'PAYMENT':
       return { label: 'Check payment history', href: '/dashboard/history' };
-    case 'BATCH_PAYOUT':
-      return { label: 'Check payroll runs', href: '/dashboard/batch' };
     case 'TREASURY_ALLOCATE':
     case 'TREASURY_REDEEM':
       return { label: 'Check Smart Treasury', href: '/dashboard/treasury' };

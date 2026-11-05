@@ -3,8 +3,25 @@
   --ink: #1F4452;
   --slate: #326273;
   --teal: #5C9EAD;
-  --coral: #E39774;
   --gold: #D9A441;
+  /* The accent (v2 D14): a solid gold fill with --ink words on it, the pale
+     gold tint where a peach tint was, and --gold-ink for words on the tint
+     (6.1:1 on --gold-tint, 6.8:1 on white). */
+  --gold-light: #efc46f;
+  --gold-tint: #fdf3dc;
+  --gold-ink: #7a5410;
+  /* The edge under a gold button, its pressed depth. */
+  --gold-edge: #b38a3c;
+
+  /* Zeke (v2 brief 5.3 boards): its cards sit on a warm paper, its accents
+     are teal, its chips and icon wells a pale teal tint, and the mint of
+     D14 marks it online. Zeke's own speech bubble is a warm stone. Words in
+     the muted ink are 5.4:1 on white and 5.1:1 on the paper. */
+  --zeke-paper: #fffaf2;
+  --zeke-tint: #eef5f3;
+  --zeke-mint: #9fcfc7;
+  --zeke-bubble: #f1e9e4;
+  --ink-muted: #4e6f78;
 
   --surface: #FFFFFF;
   --surface-2: #FBF7F5;
@@ -13,8 +30,16 @@
 
   --ok: #2E7D6B;
   --ok-bg: #E4F1ED;
+  /* Words in a success state: --ok is 4.25:1 on --ok-bg, under 4.5:1 for
+     small text, so its words take this darker green (5.7:1 on --ok-bg,
+     6.6:1 on white). */
+  --ok-ink: #24675A;
   --warn: #B4690E;
   --warn-bg: #FBEFDD;
+  /* Words that need attention: --warn itself is 3.7:1 on --warn-bg and 4.2:1
+     on white, so a warning's words take this darker amber (4.7:1 on
+     --warn-bg, 5.3:1 on white). A state colour, not the gold accent. */
+  --warn-ink: #8b6418;
   --error: #B3402F;
   --error-bg: #F9E7E3;
   --info: #326273;

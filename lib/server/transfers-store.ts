@@ -161,6 +161,32 @@ export async function listTransfersFor(orgId: string, limit = 100): Promise<Tran
 }
 
 /**
+ * When each of `orgId`'s transfers in `ids` first reached one of `states`,
+ * as ISO strings by id. Postgres reads `intent_transitions`; the in-process
+ * store reads the status history its receipt mirror appended. A transfer
+ * with no such record is absent, and the caller decides what stands in.
+ */
+export async function settledTimesFor(
+  orgId: string,
+  ids: readonly string[],
+  states: readonly string[],
+): Promise<Map<string, string>> {
+  const out = new Map<string, string>();
+  if (ids.length === 0) return out;
+  if (!usingPostgres()) {
+    const wanted = new Set(states);
+    for (const id of ids) {
+      if (operations.transfers.get(id)?.orgId !== orgId) continue;
+      const reached = operations.auditReceipts.get(id)?.statusHistory.find((entry) => wanted.has(entry.state));
+      if (reached) out.set(id, reached.at);
+    }
+    return out;
+  }
+  for (const [id, at] of await repo.listSettledAt(await db(), orgId, ids, states)) out.set(id, at.toISOString());
+  return out;
+}
+
+/**
  * True when one of `orgId`'s transfers references this Walrus blob, as its own
  * blob or as the receipt's settlement evidence bundle.
  */

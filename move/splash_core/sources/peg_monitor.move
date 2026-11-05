@@ -2,12 +2,19 @@
 ///
 /// `PegState` is a shared object updated periodically by the operator (off-chain
 /// daemon reads Pyth Hermes and writes the freshest USDC/USDT deviations on
-/// chain). Every settlement reads it and aborts the PTB if either deviation
-/// exceeds 30 bps OR the state is older than `MAX_STALENESS_MS`.
+/// chain). `assert_pegged` aborts the PTB if either deviation exceeds 30 bps OR
+/// the state is older than `MAX_STALENESS_MS`.
 ///
-/// Net effect: even if the off-chain authorize layer is bypassed (compromised
-/// sponsor key, direct CLI call with a verified BusinessAccount, etc.), funds
-/// cannot leave the settlement pool on a broken peg.
+/// Who calls it: `splash_custody`'s pooled settlement, retired from the mainnet
+/// path, and nothing else. No v2 payment path in `splash_core`, `splash_spend`
+/// or `splash_upgrade_delay` reads `PegState`, so the peg tolerances in
+/// `ComplianceConfig` constrain no v2 payout. The peg check D6 asks for belongs
+/// to converting funding in another asset to USDC, which happens off chain.
+///
+/// Net effect on the custody path: even if the off-chain authorize layer is
+/// bypassed (compromised sponsor key, direct CLI call with a verified
+/// BusinessAccount, etc.), funds cannot leave the settlement pool on a broken
+/// peg.
 module splash_core::peg_monitor;
 
 // NOTE: `assert_deepbook_liquidity` used to live here. It moved to

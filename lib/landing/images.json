@@ -1,0 +1,130 @@
+{
+  "hero": {
+    "source": "cinematic/hero-district-v6.png",
+    "sourceSha256": "9bcd101b96e0d41e",
+    "recolouredPixels": 2046,
+    "variants": [
+      {
+        "src": "/cinematic/landing/hero-1600.webp",
+        "width": 1600,
+        "height": 900,
+        "bytes": 177240
+      },
+      {
+        "src": "/cinematic/landing/hero-2000.webp",
+        "width": 2000,
+        "height": 1125,
+        "bytes": 214560
+      }
+    ],
+    "phone": {
+      "src": "/cinematic/landing/hero-phone.webp",
+      "width": 900,
+      "height": 743,
+      "bytes": 132010
+    }
+  },
+  "liquidity-pools": {
+    "source": "cinematic/liquidity-pools-cream.png",
+    "sourceSha256": "5507e26074a65de4",
+    "recolouredPixels": 0,
+    "variants": [
+      {
+        "src": "/cinematic/landing/liquidity-pools-1600.webp",
+        "width": 1600,
+        "height": 1194,
+        "bytes": 139356
+      },
+      {
+        "src": "/cinematic/landing/liquidity-pools-2000.webp",
+        "width": 2000,
+        "height": 1493,
+        "bytes": 204334
+      }
+    ],
+    "phone": {
+      "src": "/cinematic/landing/liquidity-pools-phone.webp",
+      "width": 900,
+      "height": 884,
+      "bytes": 87364
+    }
+  },
+  "loop-settle": {
+    "source": "isometric/loop-settle-v3.png",
+    "sourceSha256": "4dc1f51dc774f14c",
+    "recolouredPixels": 0,
+    "goldShiftedPixels": 22552,
+    "variants": [
+      {
+        "src": "/cinematic/landing/loop-settle-720.webp",
+        "width": 720,
+        "height": 540,
+        "bytes": 57746
+      },
+      {
+        "src": "/cinematic/landing/loop-settle-1448.webp",
+        "width": 1448,
+        "height": 1086,
+        "bytes": 81866
+      }
+    ],
+    "phone": {
+      "src": "/cinematic/landing/loop-settle-phone.webp",
+      "width": 900,
+      "height": 675,
+      "bytes": 77356
+    }
+  },
+  "loop-save": {
+    "source": "isometric/loop-save-v3.png",
+    "sourceSha256": "25f6d2081b62fa5d",
+    "recolouredPixels": 0,
+    "goldShiftedPixels": 17651,
+    "variants": [
+      {
+        "src": "/cinematic/landing/loop-save-720.webp",
+        "width": 720,
+        "height": 540,
+        "bytes": 45964
+      },
+      {
+        "src": "/cinematic/landing/loop-save-1448.webp",
+        "width": 1448,
+        "height": 1086,
+        "bytes": 73824
+      }
+    ],
+    "phone": {
+      "src": "/cinematic/landing/loop-save-phone.webp",
+      "width": 900,
+      "height": 675,
+      "bytes": 61076
+    }
+  },
+  "loop-supply": {
+    "source": "isometric/loop-supply.png",
+    "sourceSha256": "c420b1013e930976",
+    "recolouredPixels": 0,
+    "goldShiftedPixels": 18248,
+    "variants": [
+      {
+        "src": "/cinematic/landing/loop-supply-720.webp",
+        "width": 720,
+        "height": 540,
+        "bytes": 47386
+      },
+      {
+        "src": "/cinematic/landing/loop-supply-1200.webp",
+        "width": 1200,
+        "height": 900,
+        "bytes": 86796
+      }
+    ],
+    "phone": {
+      "src": "/cinematic/landing/loop-supply-phone.webp",
+      "width": 900,
+      "height": 675,
+      "bytes": 63490
+    }
+  }
+}

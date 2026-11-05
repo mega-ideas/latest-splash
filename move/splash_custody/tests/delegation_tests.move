@@ -11,6 +11,7 @@
 #[test_only]
 module splash_custody::delegation_tests;
 
+use splash_core::address_registry;
 use splash_core::business_account;
 use splash_custody::delegation;
 use splash_custody::settlement;
@@ -87,7 +88,9 @@ fun grant_for(scenario: &mut test_scenario::Scenario, tenant: address, ttl_ms: u
         let mut account = scenario.take_shared<business_account::BusinessAccount>();
         let ctx = scenario.ctx();
         let admin = business_account::admin_cap_for_testing(ctx);
-        business_account::verify_business(&admin, &mut account, 10);
+        let mut areg = address_registry::new_for_testing(ctx);
+        business_account::verify_business(&admin, &mut account, &mut areg, 10);
+        address_registry::destroy_for_testing(areg);
         business_account::destroy_admin_cap_for_testing(admin);
         test_scenario::return_shared(account);
     };
