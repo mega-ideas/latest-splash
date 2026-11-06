@@ -16,6 +16,12 @@ transaction.
 | Payment opened | [`0x97a8d0f4…5ec6f0`](https://explorer.testnet.arc.io/tx/0x97a8d0f45db7ffb17a3c689a4896c467506e925632ae5098972dcd06ca5ec6f0) |
 | **Released, fee charged** | [`0x25d93b00…3462ab`](https://explorer.testnet.arc.io/tx/0x25d93b00ee8cb270145f0ce8ea0661fead66e6a912019f8bb8214d37d23462ab) |
 | Commitment | `0x9dc8d5d0d1fc026cb5f53bde2d1e759274def1641c67c244649cd7cab3a0cded` |
+| **Same commitment anchored on Sui** | [`9DsBLSiK…tJ3VaY`](https://testnet.suivision.xyz/txblock/9DsBLSiKhgdT9yXW8EgkRxeM1nA9tF9ZDbUweatJ3VaY) |
+
+The Sui anchor is the audit record, written by the `audit_anchor` module Splash
+already ran before this event — no new Move was written for it. One commitment,
+created off chain, enforced on Arc, recorded on Sui: the same 32 bytes in all
+three places.
 
 Result on chain: recipient **+1.997000 USDC**, Splash **+0.003000 USDC**, which
 is `min(maxFee, 2 USDC × 15bps)` exactly.
