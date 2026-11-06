@@ -20,6 +20,28 @@ at two different decimal scales.
 
 ## What cost us time
 
+**Two testnet RPC hosts, two different chains, nearly identical names.** This
+cost us the most time of anything in the event, so it is the first thing we
+would change.
+
+```
+rpc.testnet.whitechain.io    chainId 1874    the real testnet
+rpc-testnet.whitechain.io    chainId 2625    something else entirely
+```
+
+The hyphenated host answers, reports a plausible chain id, and serves blocks —
+it just is not the chain the faucet, the explorer and the docs are about. On it,
+the official USDT address has no code and faucet WBT never arrives. Both
+symptoms read as "the token is mainnet-only" and "the faucet is broken", and we
+wrote both of those conclusions down before discovering neither was true.
+
+Everything else in the ecosystem is consistently under `*.testnet.whitechain.io`
+— `faucet.`, `explorer.`, `rpc.` — so the hyphenated host is the odd one out.
+Either retiring it, or having it answer `eth_chainId` with something obviously
+not-testnet, would save the next team several hours. A line in the docs saying
+"the testnet is chain 1874; if you see 2625 you are on the wrong host" would
+do it on its own.
+
 **Two tokens both called USDT.** The official token is
 `0xcedfB56113143d55b2358b8CFbB0dEB5Ad2f55a7` ("Tether USD", 6 decimals, permit
 and EIP-3009). The Portal bridge delivers `USDT.e` at `0xaa79…8f46`, which is a
@@ -38,6 +60,18 @@ built.** The gasless-checkout story is the compelling one, but building it still
 needs a funded relayer, and the relayer is where the WBT goes. A relayer-specific
 faucet, or a sponsored-transaction endpoint for testnet, would make this class of
 app much easier to demo.
+
+## Deployed
+
+| | |
+| --- | --- |
+| `SplashProofRegistry` | `0xF2cc98A712Da800b73F000075d41276B28D74ec6` |
+| `SplashInvoice` | `0x27e6cC8574deACa4B30A7A97e24fE11C209eCD95` |
+| against official USDT | `0xcedfB56113143d55b2358b8CFbB0dEB5Ad2f55a7` |
+
+The registry holds proofs from both rails: the Arc escrow settlement and the
+invoice, 2 entries and 0.018 USDC of fees, each row naming the chain and
+transaction it came from.
 
 ## What we built
 

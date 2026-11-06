@@ -25,7 +25,7 @@ const RAIL = (arg('rail') ?? 'arc').toLowerCase();
 const EXECUTE = process.argv.includes('--execute');
 
 const ARC_RPC = process.env.ARC_RPC ?? 'https://rpc.testnet.arc.io';
-const WC_RPC = process.env.WHITECHAIN_RPC ?? 'https://rpc-testnet.whitechain.io';
+const WC_RPC = process.env.WHITECHAIN_RPC ?? 'https://rpc.testnet.whitechain.io';
 const ESCROW = (process.env.ESCROW ?? '0xc536d49c040c3327ee6aa72b83c8a9d31a72ae34') as Hex;
 const REGISTRY = (process.env.REGISTRY ?? '') as Hex;
 const PK = (process.env.ADMIN_PK ?? '') as Hex;
@@ -39,7 +39,7 @@ const arcTestnet = defineChain({
   rpcUrls: { default: { http: [ARC_RPC] } },
 });
 const whitechainTestnet = defineChain({
-  id: 2625,
+  id: 1874,
   name: 'Whitechain Testnet',
   nativeCurrency: { name: 'WBT', symbol: 'WBT', decimals: 18 },
   rpcUrls: { default: { http: [WC_RPC] } },

@@ -51,14 +51,7 @@ finality, because an acknowledgement carries no value and the money it releases
 is already escrowed. At the time of writing it is still `VERIFYING`; the local
 acknowledgement path (Payment C) is what proves the release rule end to end.
 
-## What is not deployed, and why
-
-`SplashInvoice` and `SplashProofRegistry` are written and tested (20 tests) but
-not deployed. The Whitechain testnet faucet gives 0.5 WBT per 24 hours and our
-addresses had none, and the official USDT address
-`0xcedfB56113143d55b2358b8CFbB0dEB5Ad2f55a7` has no contract on testnet — it is
-a mainnet address. We would rather say that plainly than show a deployment that
-is not there.
+## The relayer
 
 The relayer reads settlements from the rail's own events rather than from our
 notes, so a registry row cannot claim a payment the rail did not make. Against
@@ -70,48 +63,57 @@ the live escrow it already reads:
 
 ## The invoice rail, and one registry for both
 
-The Whitechain contracts are deployed and running — on **Sepolia**, not
-Whitechain. The Whitechain faucet gives 0.5 WBT per 24 hours and ours never
-arrived, and the official USDT address
-`0xcedfB56113143d55b2358b8CFbB0dEB5Ad2f55a7` has no contract on testnet; it is a
-mainnet address. Circle's Sepolia USDC exposes the same EIP-3009 surface, so the
-contract is unchanged — only the token address and the EIP-712 domain differ
-(`USDC`/`2` rather than `Tether USD`/`1`).
+Deployed on **Whitechain testnet (chainId 1874)**, against the official USDT
+`0xcedfB56113143d55b2358b8CFbB0dEB5Ad2f55a7`, and mirrored on Sepolia.
 
-| | |
+| | Whitechain (1874) | Sepolia |
+| --- | --- | --- |
+| `SplashProofRegistry` | [`0xF2cc98A7…D74ec6`](https://explorer.testnet.whitechain.io/address/0xF2cc98A712Da800b73F000075d41276B28D74ec6) | [`0x27e6cC85…9eCD95`](https://sepolia.etherscan.io/address/0x27e6cC8574deACa4B30A7A97e24fE11C209eCD95) |
+| `SplashInvoice` | [`0x27e6cC85…9eCD95`](https://explorer.testnet.whitechain.io/address/0x27e6cC8574deACa4B30A7A97e24fE11C209eCD95) | [`0x7805719A…789Cbc`](https://sepolia.etherscan.io/address/0x7805719AE19522422ec2B404e1f2a58A4C789Cbc) |
+
+A correction worth recording, because it cost us hours. There are two hosts:
+
+```
+rpc-testnet.whitechain.io   chainId 2625   a different chain entirely
+rpc.testnet.whitechain.io   chainId 1874   the real testnet
+```
+
+On 2625 the official USDT address has no code and the faucet's WBT never
+appears, which looks exactly like "the token is mainnet-only" and "the faucet
+is broken". Neither was true. The faucet, explorer and RPC all live under
+`*.testnet.whitechain.io`; the hyphenated host is something else. See
+`WHITECHAIN_FEEDBACK.md`.
+
+### Both rails, one list, on Whitechain
+
+| Registry entry | |
 | --- | --- |
-| `SplashInvoice` | [`0x7805719A…789Cbc`](https://sepolia.etherscan.io/address/0x7805719AE19522422ec2B404e1f2a58A4C789Cbc) |
-| `SplashProofRegistry` | [`0x27e6cC85…9eCD95`](https://sepolia.etherscan.io/address/0x27e6cC8574deACa4B30A7A97e24fE11C209eCD95) |
+| Arc escrow settlement | [`0xcec2de31…4cd7b3`](https://explorer.testnet.whitechain.io/tx/0xcec2de3188003f5cb8c8f19c68f8e7351d2b5af272c832767ceb8872d44cd7b3) |
+| Invoice settlement | [`0x3b87ae66…640414`](https://explorer.testnet.whitechain.io/tx/0x3b87ae668ad31a8d1eaeb6ec8aa0c9cd911aab9999e263d23079d01c5f640414) |
+| `total()` | **2** proofs |
+| `totalFeesRecorded()` | **0.018000** = 0.003 Arc + 0.015 invoice |
 
-A 10 USDC invoice, paid by signature:
+Two rails that never touch each other's money, and one list an auditor reads to
+see every fee Splash earned and the proof that earned it. In production this is
+Walrus; the registry is the stand-in, same shape, on a chain, checkable today.
+
+It is a record, not a gate. Nothing in it can release or withhold anyone's
+money, and no rail reads it to decide anything. A duplicate commitment is
+refused so the count cannot be inflated, and every row names the chain and
+transaction it came from so each can be checked against the rail itself.
+
+### The invoice, paid by signature
+
+Run on Sepolia with Circle's USDC, which has the same EIP-3009 surface:
 
 | Step | Link | Result |
 | --- | --- | --- |
-| Invoice raised | [`0xdf54bb0f…f3145d`](https://sepolia.etherscan.io/tx/0xdf54bb0fbaf67141bd7a4d1e11769dcf77f3091db4c86c94958114aa3bf3145d) | fee fixed at 0.015 and can never grow |
+| Invoice raised | [`0xdf54bb0f…f3145d`](https://sepolia.etherscan.io/tx/0xdf54bb0fbaf67141bd7a4d1e11769dcf77f3091db4c86c94958114aa3bf3145d) | fee fixed at 0.015, can never grow |
 | Customer signs | — | EIP-3009, **no transaction, no gas token** |
 | Relayer submits | [`0x2f236bf5…11f0c5`](https://sepolia.etherscan.io/tx/0x2f236bf57d627ac7b4821c838304fda2722c3f51d70d597c158716247511f0c5) | merchant **+9.985 at once**, 0.015 held |
 | Proof recorded | [`0xb1363e79…74cf3b`](https://sepolia.etherscan.io/tx/0xb1363e79bd0e6b8e82e1618d26c0323e99782ad2bf4d8b85d6d08844cb74cf3b) | **Splash paid 0.015**, only now |
 
 The customer spent no gas token and never sent a transaction. The merchant's
 money was never held hostage to anything Splash did: only the fee waited, and
-had no proof arrived inside the window `forfeitFee` would have sent it to the
-merchant, not back to Splash.
-
-### Both rails, one list
-
-| Registry | |
-| --- | --- |
-| Arc escrow settlement | [`0xc1b5a0bb…226c55`](https://sepolia.etherscan.io/tx/0xc1b5a0bbcfd2a193bb0e81a638e019f2fc06693262c099085876174efe226c55) |
-| Whitechain-style invoice | [`0x7cd01843…985ebc`](https://sepolia.etherscan.io/tx/0x7cd01843fe736f9ed871226bc6d389edd4e3c056509dc3dd407e5d5391985ebc) |
-| `total()` | **2** proofs |
-| `totalFeesRecorded()` | **0.018000 USDC** = 0.003 Arc + 0.015 invoice |
-
-Two rails that never touch each other's money, and one list an auditor can read
-to see every fee Splash earned and the proof that earned it. In production this
-role is Walrus; the registry is the stand-in, same shape, on a chain, so the
-claim can be checked today.
-
-It is a record, not a gate. Nothing in it can release or withhold anyone's
-money, and no rail reads it to decide anything. A duplicate commitment is
-refused, so the count cannot be inflated, and every row names the chain and
-transaction it came from so each one can be checked against the rail itself.
+had no proof arrived `forfeitFee` would have sent it to the merchant, not back
+to Splash.

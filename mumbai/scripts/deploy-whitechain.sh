@@ -19,7 +19,7 @@ ROOT=$(cd "$(dirname "$0")/.." && pwd)
 # shellcheck disable=SC1091
 set -a; . "$ROOT/.env.wallets"; set +a
 
-WC=${WHITECHAIN_RPC:-https://rpc-testnet.whitechain.io}
+WC=${WHITECHAIN_RPC:-https://rpc.testnet.whitechain.io}
 USDT=${USDT_ADDRESS:-}
 
 say() { printf '\n\033[1m%s\033[0m\n' "$*"; }
