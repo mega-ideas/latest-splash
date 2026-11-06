@@ -1,0 +1,10 @@
+node_modules/
+out/
+cache/
+broadcast/
+.env
+.env.*
+!.env.example
+*.log
+known_good.json
+.env.wallets
