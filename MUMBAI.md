@@ -1,65 +1,63 @@
-# Splash × ETHGlobal Mumbai
 
-Splash × ETHGlobal Mumbai. Every Splash payment carries a proof of who sent it,
-who receives it and under which rule — and Splash charges a fee only when that
-proof is recorded.
+## Proof table
 
-**Before this event.** Splash was a Sui-only testnet build. It assembled three
-travel-rule records offchain (`travelRuleSnapshot()`, `pacs008ForInstruction()`,
-`sumsubTravelRuleBody()`) and committed none of them to any chain, and
-"charge only on proof" existed only in the fee policy.
+Every link below is a real transaction on a public testnet. One commitment can
+be followed across all of them.
 
-The baseline is this repository's **`main`** branch at `348a9a90` (2 Nov 2026),
-untouched by the event.
+**Payment C — the proof released the money.** 2 USDC escrowed on Arc, the
+beneficiary recomputed the commitment from the record it holds, acknowledged
+it, and the escrow paid the recipient and charged Splash's fee in the same
+transaction.
 
-**Everything built during the event is on the `mumbai` branch**, and the whole
-of it lives in two directories: `arc/` (the escrow, authored in Arc Studio) and
-`mumbai/` (everything else). Nothing outside those two was changed, so
-`main...mumbai` is exactly the submission and nothing else.
-
-**During this event.** The travel-rule commitment, an escrow on Arc released by
-a beneficiary's acknowledgement, that acknowledgement carried from Ethereum
-Sepolia over Chainlink CCIP, a USDT invoice checkout on Whitechain, and the Sui
-audit anchor that ties them together.
-
-## The proof rule
-
-    commitment = blake2b256( utf8("splash:travel-rule:v1") || bcs(record) || salt32 )
-
-Only the 32-byte commitment goes onchain. The beneficiary recomputes it from the
-record and salt it received offchain; that recomputation is what its
-acknowledgement proves. One scheme on every chain, one value per payment.
-
-## Layout
-
-| Path | What |
+| Step | Link |
 | --- | --- |
-| `mumbai/lib/travel-rule-commitment.ts` | The commitment, reproducing `latest-splash`'s scheme |
-| `mumbai/evm/sepolia/` | `SplashTravelRuleAck.sol` — the beneficiary's acknowledgement, sent over CCIP |
-| `arc/` | `SplashProofEscrow` — authored in Arc Studio |
-| `mumbai/evm/whitechain/` | `SplashInvoice.sol` — USDT checkout, fee held until proof |
-| `mumbai/scripts/` | Beneficiary service, Sui anchor, CSV export |
+| Escrow (Arc) | [`0xc536d49c…72ae34`](https://explorer.testnet.arc.io/address/0xc536d49c040c3327ee6aa72b83c8a9d31a72ae34) |
+| Escrow deployed | [`0xa8d66129…d23f33`](https://explorer.testnet.arc.io/tx/0xa8d661291b43effbc8ddb7be25761f6a262919fdc406db8ce088fcf128d23f33) |
+| Payment opened | [`0x97a8d0f4…5ec6f0`](https://explorer.testnet.arc.io/tx/0x97a8d0f45db7ffb17a3c689a4896c467506e925632ae5098972dcd06ca5ec6f0) |
+| **Released, fee charged** | [`0x25d93b00…3462ab`](https://explorer.testnet.arc.io/tx/0x25d93b00ee8cb270145f0ce8ea0661fead66e6a912019f8bb8214d37d23462ab) |
+| Commitment | `0x9dc8d5d0d1fc026cb5f53bde2d1e759274def1641c67c244649cd7cab3a0cded` |
 
-## Status
+Result on chain: recipient **+1.997000 USDC**, Splash **+0.003000 USDC**, which
+is `min(maxFee, 2 USDC × 15bps)` exactly.
 
-Preflight, verified onchain rather than from docs:
+**Payment B — no proof, so no fee.** 2 USDC escrowed, left to expire, refunded
+in full. Splash's balance did not move.
 
-| Check | Result |
+| Step | Link |
 | --- | --- |
-| Arc testnet chain id | `5042002` |
-| Arc CCIP router deployed | yes, 10.7 KB bytecode, `Router 1.2.0` |
-| Sepolia router `isChainSupported(3034092155422581607)` | `true` |
+| Payment opened | [`0x76fa5c23…1ba0de7`](https://explorer.testnet.arc.io/tx/0x76fa5c2306cc9167a72c5276c5e2170b9fd7e9beba8c114cf4880cb4c1ba0de7) |
+| Refunded, zero fee | payer **+2.000000 USDC**, fee recipient unchanged at 0.003000 |
+| Commitment | `0x2b0f0602b2e293b6904a809853700a0ceb6fb7e72f434d1c7e5978312fba44a5` |
 
-## Trust model
+**Payment A — the acknowledgement travels.** The same proof, carried by
+Chainlink CCIP 2.0 from Ethereum Sepolia to Arc.
 
-On Arc the acknowledgement comes from the beneficiary's own key and is verified
-by Chainlink's committee. An admin sets which sender is allowed and can at worst
-release early, to the correct recipient; no admin path moves principal. On
-Whitechain a Splash attestor records the proof.
+| Step | Link |
+| --- | --- |
+| Sender (Sepolia) | [`0xd01a1665…8F3Ef6`](https://sepolia.etherscan.io/address/0xd01a1665f1382a22857C46668cFdB8C5048F3Ef6) |
+| Acknowledgement sent | [`0x26127770…b0764`](https://sepolia.etherscan.io/tx/0x26127770435be52529296d21a8e2c0434dc80ab64677fc613e33c5d5050b0764) |
+| CCIP message | [`0xa07b3722…95c6e5`](https://ccip.chain.link/msg/0xa07b3722e48b94dcb0ff411494cbc365367e890d86bdb6065d0701ca4295c6e5) |
+| Escrow trusts the sender | [`0xd34d3677…fd8ef2`](https://explorer.testnet.arc.io/tx/0xd34d3677cf6a1c4f3531931048f14ae588c6b56f69255e6b5d3e5d5cf2fd8ef2) |
 
-Simulated in this demo: the MYR and PHP legs, the travel-rule record itself, and
-the Splash attestor on Whitechain.
+The message is a genuine CCIP **2.0.0** message carrying
+`requestedFinalityConfig 0x00000005` — block-depth finality rather than full
+finality, because an acknowledgement carries no value and the money it releases
+is already escrowed. At the time of writing it is still `VERIFYING`; the local
+acknowledgement path (Payment C) is what proves the release rule end to end.
 
-## Licence
+## What is not deployed, and why
 
-Apache-2.0.
+`SplashInvoice` and `SplashProofRegistry` are written and tested (20 tests) but
+not deployed. The Whitechain testnet faucet gives 0.5 WBT per 24 hours and our
+addresses had none, and the official USDT address
+`0xcedfB56113143d55b2358b8CFbB0dEB5Ad2f55a7` has no contract on testnet — it is
+a mainnet address. We would rather say that plainly than show a deployment that
+is not there.
+
+The relayer reads settlements from the rail's own events rather than from our
+notes, so a registry row cannot claim a payment the rail did not make. Against
+the live escrow it already reads:
+
+```
+0xc92382f8…  amount 2.000000  fee 0.003000  commitment 0x9dc8d5d0d1…
+```

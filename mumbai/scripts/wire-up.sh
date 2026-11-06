@@ -34,10 +34,22 @@ ARC_GAS="--gas-price 20gwei"
 say() { printf '\n\033[1m%s\033[0m\n' "$*"; }
 
 say "0. the escrow"
-CODE=$(cast code "$ESCROW" --rpc-url "$ARC_RPC" 2>/dev/null || echo 0x)
-[ "$CODE" = "0x" ] && { echo "no bytecode at $ESCROW on Arc" >&2; exit 1; }
+# The Arc public RPC rate-limits; an empty answer usually means 429, not "no
+# contract". Retry before concluding anything.
+CODE=0x
+for i in 1 2 3 4 5; do
+  CODE=$(cast code "$ESCROW" --rpc-url "$ARC_RPC" 2>/dev/null || echo 0x)
+  [ "$CODE" != "0x" ] && [ -n "$CODE" ] && break
+  sleep 3
+done
+[ "$CODE" = "0x" ] || [ -z "$CODE" ] && { echo "no bytecode at $ESCROW on Arc after 5 tries" >&2; exit 1; }
 echo "   $ESCROW  (${#CODE} chars of bytecode)"
-echo "   admin reported: $(cast call "$ESCROW" 'admin()(address)' --rpc-url "$ARC_RPC" 2>/dev/null || echo '(no admin() getter)')"
+OWNER=$(cast call "$ESCROW" 'owner()' --rpc-url "$ARC_RPC" 2>/dev/null | sed 's/^0x000000000000000000000000/0x/')
+echo "   owner: $OWNER"
+if [ "$(echo "$OWNER" | tr 'A-Z' 'a-z')" != "$(echo "$ADMIN_ADDRESS" | tr 'A-Z' 'a-z')" ]; then
+  echo "   REFUSING: the escrow owner is not our admin, so setAckSender would fail." >&2
+  exit 1
+fi
 
 if [ "$EXECUTE" != "--execute" ]; then
   say "DRY RUN — rerun with --execute to send transactions."

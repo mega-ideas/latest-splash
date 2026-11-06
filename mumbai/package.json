@@ -8,7 +8,8 @@
     "commitment": "node --import tsx scripts/commitment-demo.ts",
     "ack": "node --import tsx scripts/beneficiary-ack.ts",
     "anchor": "node --import tsx scripts/sui-anchor.ts",
-    "csv": "node --import tsx scripts/export-csv.ts"
+    "csv": "node --import tsx scripts/export-csv.ts",
+    "record": "node --import tsx scripts/record-proof.ts"
   },
   "dependencies": {
     "@chainlink/contracts-ccip": "^2.0.0",
