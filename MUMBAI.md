@@ -67,3 +67,51 @@ the live escrow it already reads:
 ```
 0xc92382f8…  amount 2.000000  fee 0.003000  commitment 0x9dc8d5d0d1…
 ```
+
+## The invoice rail, and one registry for both
+
+The Whitechain contracts are deployed and running — on **Sepolia**, not
+Whitechain. The Whitechain faucet gives 0.5 WBT per 24 hours and ours never
+arrived, and the official USDT address
+`0xcedfB56113143d55b2358b8CFbB0dEB5Ad2f55a7` has no contract on testnet; it is a
+mainnet address. Circle's Sepolia USDC exposes the same EIP-3009 surface, so the
+contract is unchanged — only the token address and the EIP-712 domain differ
+(`USDC`/`2` rather than `Tether USD`/`1`).
+
+| | |
+| --- | --- |
+| `SplashInvoice` | [`0x7805719A…789Cbc`](https://sepolia.etherscan.io/address/0x7805719AE19522422ec2B404e1f2a58A4C789Cbc) |
+| `SplashProofRegistry` | [`0x27e6cC85…9eCD95`](https://sepolia.etherscan.io/address/0x27e6cC8574deACa4B30A7A97e24fE11C209eCD95) |
+
+A 10 USDC invoice, paid by signature:
+
+| Step | Link | Result |
+| --- | --- | --- |
+| Invoice raised | [`0xdf54bb0f…f3145d`](https://sepolia.etherscan.io/tx/0xdf54bb0fbaf67141bd7a4d1e11769dcf77f3091db4c86c94958114aa3bf3145d) | fee fixed at 0.015 and can never grow |
+| Customer signs | — | EIP-3009, **no transaction, no gas token** |
+| Relayer submits | [`0x2f236bf5…11f0c5`](https://sepolia.etherscan.io/tx/0x2f236bf57d627ac7b4821c838304fda2722c3f51d70d597c158716247511f0c5) | merchant **+9.985 at once**, 0.015 held |
+| Proof recorded | [`0xb1363e79…74cf3b`](https://sepolia.etherscan.io/tx/0xb1363e79bd0e6b8e82e1618d26c0323e99782ad2bf4d8b85d6d08844cb74cf3b) | **Splash paid 0.015**, only now |
+
+The customer spent no gas token and never sent a transaction. The merchant's
+money was never held hostage to anything Splash did: only the fee waited, and
+had no proof arrived inside the window `forfeitFee` would have sent it to the
+merchant, not back to Splash.
+
+### Both rails, one list
+
+| Registry | |
+| --- | --- |
+| Arc escrow settlement | [`0xc1b5a0bb…226c55`](https://sepolia.etherscan.io/tx/0xc1b5a0bbcfd2a193bb0e81a638e019f2fc06693262c099085876174efe226c55) |
+| Whitechain-style invoice | [`0x7cd01843…985ebc`](https://sepolia.etherscan.io/tx/0x7cd01843fe736f9ed871226bc6d389edd4e3c056509dc3dd407e5d5391985ebc) |
+| `total()` | **2** proofs |
+| `totalFeesRecorded()` | **0.018000 USDC** = 0.003 Arc + 0.015 invoice |
+
+Two rails that never touch each other's money, and one list an auditor can read
+to see every fee Splash earned and the proof that earned it. In production this
+role is Walrus; the registry is the stand-in, same shape, on a chain, so the
+claim can be checked today.
+
+It is a record, not a gate. Nothing in it can release or withhold anyone's
+money, and no rail reads it to decide anything. A duplicate commitment is
+refused, so the count cannot be inflated, and every row names the chain and
+transaction it came from so each one can be checked against the rail itself.
