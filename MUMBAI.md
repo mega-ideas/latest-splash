@@ -167,3 +167,56 @@ The customer spent no gas token and never sent a transaction. The merchant's
 money was never held hostage to anything Splash did: only the fee waited, and
 had no proof arrived `forfeitFee` would have sent it to the merchant, not back
 to Splash.
+
+## The treasury: where a proof-earned fee ends up
+
+Splash charges a fee only when a travel-rule proof is recorded. Those fees
+arrive in whatever the rail settled in — USDT on Whitechain, USDC on Arc —
+while the treasury holds one reserve asset. Something has to convert them, and
+that something is Uniswap.
+
+| | |
+| --- | --- |
+| `SplashTreasury` | [`0x1c5BfC99…de1Ab6`](https://explorer.testnet.whitechain.io/address/0x1c5BfC9952B4B69cC16C309d7331639424de1Ab6) |
+| Uniswap V3 `SwapRouter02` | `0xe208cC685cD95D56E8ec6DEC9816476567fc6962` |
+| Pool used | [`0x5645101C…F027E3`](https://explorer.testnet.whitechain.io/address/0x5645101Ca8d2F7BaBC27b10359555767a1BdF999) — WWBT/USDT, 0.3% |
+
+The sweep of the fee earned by the Whitechain invoice:
+[`0x11f535bb…7d0b29`](https://explorer.testnet.whitechain.io/tx/0x11f535bbbe6fd138fc4b2cfc694824ecb6ec328c3569a1311b207234ff7d0b29)
+
+```
+fee wallet USDT      0.037500  ->  0
+treasury reserve     0         ->  0.000512465556245838
+swept[0x9dc8d5d0…]   true
+```
+
+### Why this is not just a swap
+
+The `FeeSwept` event carries the `travelRuleCommitment` that earned the fee. So
+one 32-byte value can be followed the whole way:
+
+```
+the payment  ->  the proof that released it  ->  the fee it earned
+             ->  the Uniswap swap  ->  the treasury position
+```
+
+An auditor asking "where did this revenue come from" gets an answer that
+terminates in a proof, not in a balance.
+
+Three properties the contract enforces:
+
+- **One sweep per proof.** A fee is earned once, so the sum of `FeeSwept` is
+  revenue rather than revenue plus retries.
+- **`minOut` is required, never defaulted.** A sweep that accepts any price is
+  a sweep that can be sandwiched, and the caller is the one who knows what the
+  fee was worth. A test drives the price down and checks the swap reverts.
+- **It holds no customer money.** It never touches an escrow or an invoice; it
+  moves fees already earned. The worst a compromised treasurer can do is sell
+  Splash's own revenue badly.
+
+The reserve is a constructor parameter, set here to WWBT. In production it is
+**USDY** — Splash's ledger already prices a yield-bearing reserve
+(`treasury_ledgers`, and the `swap (USDC to USDY) | redeem (USDY to USDC)`
+order kinds predate this event). There is no USDY on either testnet we used, so
+the demo sweeps into what exists rather than deploying a token and calling it
+USDY.
