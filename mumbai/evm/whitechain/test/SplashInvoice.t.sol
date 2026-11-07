@@ -19,6 +19,21 @@ contract MockUSDT {
         honourPartially = on;
     }
 
+    mapping(address => mapping(address => uint256)) public allowance;
+
+    function approve(address sp, uint256 v) external returns (bool) {
+        allowance[msg.sender][sp] = v;
+        return true;
+    }
+
+    function transferFrom(address f, address t, uint256 v) external returns (bool) {
+        require(allowance[f][msg.sender] >= v, "allowance");
+        allowance[f][msg.sender] -= v;
+        require(balanceOf[f] >= v, "balance");
+        balanceOf[f] -= v; balanceOf[t] += v;
+        return true;
+    }
+
     function transfer(address to, uint256 v) external returns (bool) {
         require(balanceOf[msg.sender] >= v, "balance");
         balanceOf[msg.sender] -= v;
@@ -180,5 +195,56 @@ contract SplashInvoiceTest is Test {
         SplashInvoice.Invoice memory got = inv.getInvoice(id);
         assertLe(got.feeAmount * 10_000, uint256(amount) * 100, "fee within the 1% ceiling");
         assertEq(got.amount - got.feeAmount + got.feeAmount, amount, "nothing is lost in the split");
+    }
+}
+
+/// The approval path: same split, same hold, same proof rule, for a token
+/// without EIP-3009.
+contract SplashInvoiceApprovalTest is Test {
+    MockUSDT internal usdt;
+    SplashInvoice internal inv;
+    address internal admin = address(0xA11CE);
+    address internal merchant = address(0x3E12);
+    address internal customer = address(0xC057);
+    address internal splashFees = address(0x5915);
+    address internal attestor = address(0xA77E);
+    bytes32 internal constant ID = keccak256("INV-APPROVAL-1");
+    bytes32 internal constant COMMITMENT = keccak256("c");
+    uint256 internal constant AMOUNT = 100_000_000;
+
+    function setUp() public {
+        usdt = new MockUSDT();
+        inv = new SplashInvoice(address(usdt), admin, splashFees, 15);
+        vm.prank(admin);
+        inv.setAttestor(attestor, true);
+        usdt.mint(customer, 1_000_000_000);
+        vm.prank(merchant);
+        inv.createInvoice(ID, AMOUNT, uint64(block.timestamp + 1 days), COMMITMENT);
+    }
+
+    function test_approvalPathSplitsTheSameWay() public {
+        vm.startPrank(customer);
+        usdt.approve(address(inv), AMOUNT);
+        inv.payWithApproval(ID);
+        vm.stopPrank();
+
+        uint256 fee = (AMOUNT * 15) / 10_000;
+        assertEq(usdt.balanceOf(merchant), AMOUNT - fee, "merchant paid at once");
+        assertEq(usdt.balanceOf(address(inv)), fee, "only the fee held");
+        assertEq(usdt.balanceOf(splashFees), 0, "splash not paid yet");
+
+        vm.prank(attestor);
+        inv.recordProof(ID, COMMITMENT);
+        assertEq(usdt.balanceOf(splashFees), fee, "fee released on proof");
+    }
+
+    /// An allowance lying around must not let a third party spend it.
+    function test_cannotPayFromSomeoneElsesAllowance() public {
+        vm.prank(customer);
+        usdt.approve(address(inv), AMOUNT);
+        address stranger = address(0xDEAD);
+        vm.prank(stranger);
+        vm.expectRevert();
+        inv.payWithApproval(ID);
     }
 }

@@ -5,6 +5,8 @@ pragma solidity ^0.8.24;
 ///      is "Tether USD", 6 decimals, and supports EIP-3009. The bridged
 ///      USDT.e at 0xaa79…8f46 is a different token and is not accepted here.
 interface IUSDT3009 {
+    function transferFrom(address from, address to, uint256 value) external returns (bool);
+    function allowance(address owner, address spender) external view returns (uint256);
     function transferWithAuthorization(
         address from,
         address to,
@@ -194,6 +196,33 @@ contract SplashInvoice {
         uint256 net = inv.amount - inv.feeAmount;
         if (!USDT.transfer(inv.merchant, net)) revert TransferFailed();
         emit InvoicePaid(invoiceId, from, net, inv.feeAmount);
+    }
+
+    /// @notice Pay an invoice from an ordinary ERC-20 approval.
+    /// @dev EIP-3009 is the better customer experience and the reason this rail
+    ///      exists, but not every token has it. Where it is missing the customer
+    ///      approves and pays a transaction itself; the split, the hold and the
+    ///      proof rule are identical, so a merchant's terms do not change with
+    ///      the token. `from` is `msg.sender`, never a parameter: an allowance
+    ///      left lying around must not let anyone else spend it.
+    function payWithApproval(bytes32 invoiceId) external {
+        Invoice storage inv = invoices[invoiceId];
+        if (inv.status == Status.None) revert NoSuchInvoice();
+        if (inv.status != Status.Open) revert WrongStatus();
+        if (block.timestamp > inv.dueAt) revert PastDue();
+
+        uint256 before = USDT.balanceOf(address(this));
+        if (!USDT.transferFrom(msg.sender, address(this), inv.amount)) revert TransferFailed();
+        uint256 received = USDT.balanceOf(address(this)) - before;
+        if (received < inv.amount) revert Underfunded(inv.amount, received);
+
+        inv.status = Status.Paid;
+        inv.payer = msg.sender;
+        inv.proofDeadline = uint64(block.timestamp) + proofWindow;
+
+        uint256 net = inv.amount - inv.feeAmount;
+        if (!USDT.transfer(inv.merchant, net)) revert TransferFailed();
+        emit InvoicePaid(invoiceId, msg.sender, net, inv.feeAmount);
     }
 
     /// @notice Splash records the proof and is paid. The only path that pays Splash.

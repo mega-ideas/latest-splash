@@ -102,7 +102,26 @@ money, and no rail reads it to decide anything. A duplicate commitment is
 refused so the count cannot be inflated, and every row names the chain and
 transaction it came from so each can be checked against the rail itself.
 
-### The invoice, paid by signature
+### A payment settled on Whitechain
+
+| Step | Link | Result |
+| --- | --- | --- |
+| Invoice raised, 50 USDT | [`0xaa1b9e62…122069`](https://explorer.testnet.whitechain.io/tx/0xaa1b9e622e28112a719346221587a600a3b20179f144f75b9adc8bd4d3122069) | fee fixed at 0.075 |
+| Customer pays | [`0x99f4cd15…0f3a85`](https://explorer.testnet.whitechain.io/tx/0x99f4cd1592154b1a47c9ee5a1dbb409a8e767f2ce8fcd9a4e38f330e6b0f3a85) | merchant **+49.925 at once**, 0.075 held |
+| Proof recorded | [`0x8f4ff643…2ac66e`](https://explorer.testnet.whitechain.io/tx/0x8f4ff643179627d97bd2131f649a63684f4fab6794be09eb32d50d22c02ac66e) | **Splash paid 0.075**, only now |
+
+`SplashInvoice` for this run is
+[`0x60A24A73…D33889`](https://explorer.testnet.whitechain.io/address/0x60A24A7347f9701a1bbEb998EF9878eAEcD33889),
+paid through `payWithApproval`.
+
+The official USDT at `0xcedfB561…` does carry EIP-3009 — we checked, and the
+deployment at `0x27e6cC85…` points at it. We could not obtain any: `mint` is
+`onlyOwner` and we are not the owner. So this run used a mintable test token
+and the approval path. The gasless EIP-3009 path is the one this rail is for,
+and it is demonstrated on Sepolia below with Circle's USDC, which has the same
+surface. With official USDT in hand, the same contract runs it unchanged.
+
+### The same invoice, paid by signature
 
 Run on Sepolia with Circle's USDC, which has the same EIP-3009 surface:
 
