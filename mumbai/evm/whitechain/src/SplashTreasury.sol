@@ -69,6 +69,7 @@ contract SplashTreasury {
     error NoMinimumOut();
     error AlreadySwept(bytes32 travelRuleCommitment);
     error PullFailed();
+    error LengthMismatch();
 
     address public admin;
     /// @dev The asset the treasury holds. USDY in production — Splash's ledger
@@ -120,6 +121,16 @@ contract SplashTreasury {
         uint256 amountIn,
         uint256 minOut
     ) external returns (uint256 amountOut) {
+        return _sweep(travelRuleCommitment, tokenIn, poolFee, amountIn, minOut);
+    }
+
+    function _sweep(
+        bytes32 travelRuleCommitment,
+        address tokenIn,
+        uint24 poolFee,
+        uint256 amountIn,
+        uint256 minOut
+    ) internal returns (uint256 amountOut) {
         if (!treasurers[msg.sender]) revert NotTreasurer(msg.sender);
         if (travelRuleCommitment == bytes32(0)) revert ZeroCommitment();
         if (tokenIn == address(0)) revert ZeroAddress();
@@ -147,6 +158,31 @@ contract SplashTreasury {
 
         totalSwept += amountOut;
         emit FeeSwept(travelRuleCommitment, tokenIn, amountIn, reserve_, amountOut, poolFee);
+    }
+
+    /// @notice Sweep several proofs' fees in one transaction.
+    /// @dev Fees accrue one proof at a time but are swept in batches, because a
+    ///      treasury that must send one transaction per fee is a treasury that
+    ///      quietly stops sweeping. Each proof still gets its own `FeeSwept`, so
+    ///      batching changes the gas and nothing else: the audit trail is
+    ///      identical to sweeping them one by one.
+    ///
+    ///      `minOut` stays per-proof rather than per-batch. A single total would
+    ///      let a good price on one fee hide a bad one on another.
+    function sweepMany(
+        bytes32[] calldata commitments,
+        address[] calldata tokensIn,
+        uint24[] calldata poolFees,
+        uint256[] calldata amountsIn,
+        uint256[] calldata minOuts
+    ) external returns (uint256 totalOut) {
+        uint256 n = commitments.length;
+        if (
+            tokensIn.length != n || poolFees.length != n || amountsIn.length != n || minOuts.length != n || n == 0
+        ) revert LengthMismatch();
+        for (uint256 i = 0; i < n; i++) {
+            totalOut += _sweep(commitments[i], tokensIn[i], poolFees[i], amountsIn[i], minOuts[i]);
+        }
     }
 
     /// @notice Move reserve out of the treasury. Admin only, and it can never

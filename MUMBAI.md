@@ -220,3 +220,35 @@ The reserve is a constructor parameter, set here to WWBT. In production it is
 order kinds predate this event). There is no USDY on either testnet we used, so
 the demo sweeps into what exists rather than deploying a token and calling it
 USDY.
+
+### One treasury, many rails
+
+Fees accrue one proof at a time but sweep in batches, because a treasury that
+needs one transaction per fee is a treasury that quietly stops sweeping.
+
+| | |
+| --- | --- |
+| `SplashTreasury` (batch) | [`0x54C58B40…02e722`](https://explorer.testnet.whitechain.io/address/0x54C58B4016FC059f36D68896b4f317e55502e722) |
+| Both rails, one transaction | [`0xb29e4129…2327d1`](https://explorer.testnet.whitechain.io/tx/0xb29e41294a5490a9124513bbcf1b157c1829d942bb5697b120dff6ad452327d1) |
+
+```
+fee wallet                     0.018000 USDT  ->  0
+treasury reserve               0              ->  0.000245986733001312
+swept[0x9dc8d5d0…]  (Arc)      true
+swept[0x2b0f0602…]  (invoice)  true
+```
+
+`sweepMany` changes the gas and nothing else. Each proof still emits its own
+`FeeSwept`, so the audit trail is identical to sweeping one by one — a test
+counts the events to prove it.
+
+`minOut` stays **per proof**, never a batch total: a single total would let a
+good price on one fee hide a bad one on another. A test halves the price on the
+second fee only and checks the whole batch reverts with nothing marked swept.
+
+The second fee came from a second real invoice on Whitechain
+([`0x95efe8c0…b4e1eb`](https://explorer.testnet.whitechain.io/tx/0x95efe8c0d36321f7e10ad510c12331c7abfa905da9915380985488638ab4e1eb)
+paid, [`0x52547185…a4c794`](https://explorer.testnet.whitechain.io/tx/0x5254718579a654dbf6feeb49cdb0b211a9a34a6e5bb37ec692548b28b7a4c794)
+proof recorded) through
+[`0xd736E9D9…29Ce4F`](https://explorer.testnet.whitechain.io/address/0xd736E9D99aA0EcC6Db78f36ad41597Ef7A29Ce4F),
+which carries both the EIP-3009 and the approval path.
