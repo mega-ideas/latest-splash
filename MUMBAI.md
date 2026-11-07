@@ -102,7 +102,31 @@ money, and no rail reads it to decide anything. A duplicate commitment is
 refused so the count cannot be inflated, and every row names the chain and
 transaction it came from so each can be checked against the rail itself.
 
-### A payment settled on Whitechain
+### Official USDT, paid by signature, on Whitechain
+
+The real thing: `0xcedfB56113143d55b2358b8CFbB0dEB5Ad2f55a7`, no gas token for
+the customer, fee held until the proof.
+
+| Step | Link | Result |
+| --- | --- | --- |
+| 25 USDT invoice raised | — | fee fixed at 0.0375 |
+| Customer signs | — | EIP-3009, **no transaction, no WBT** |
+| Relayer submits | — | merchant **+24.9625 at once**, 0.0375 held |
+| Proof recorded | [`0xa6dd4a30…886f1c`](https://explorer.testnet.whitechain.io/tx/0xa6dd4a305e721a0d142664e8d55bc6fb473f49ffb8b76d85da2f356f3b886f1c) | **Splash paid 0.0375**, only now |
+
+Contract: [`0x27e6cC85…9eCD95`](https://explorer.testnet.whitechain.io/address/0x27e6cC8574deACa4B30A7A97e24fE11C209eCD95).
+
+Getting the USDT took a detour worth recording. The faucet dispenses WBT only,
+and the token's `mint` is `onlyOwner`. But the chain runs a Uniswap V3
+deployment with a live WWBT/USDT pool at the 0.3% tier, so we wrapped 0.5 WBT
+and swapped: [`0xb7c64c99…f46589`](https://explorer.testnet.whitechain.io/tx/0xb7c64c999f8ebd0a9db620247b4b4b94329cc607bdf51aaec01bca71f4f46589).
+
+One trap for anyone following: the token's `version()` returns an **empty
+string**, but its `DOMAIN_SEPARATOR` is built with version `"1"`. We derived it
+by reproducing the separator rather than trusting the getter — signing with
+`""` produces a valid-looking signature the token silently rejects.
+
+### An earlier run, with a test token
 
 | Step | Link | Result |
 | --- | --- | --- |
