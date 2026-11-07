@@ -32,7 +32,7 @@ in full. Splash's balance did not move.
 | Step | Link |
 | --- | --- |
 | Payment opened | [`0x76fa5c23…1ba0de7`](https://explorer.testnet.arc.io/tx/0x76fa5c2306cc9167a72c5276c5e2170b9fd7e9beba8c114cf4880cb4c1ba0de7) |
-| Refunded, zero fee | payer **+2.000000 USDC**, fee recipient unchanged at 0.003000 |
+| Refunded, zero fee | [`0x14c9e5b0…032e7ff`](https://explorer.testnet.arc.io/tx/0x14c9e5b097f032e7ff) — payer **+2.000000 USDC**, fee recipient unchanged at 0.003000 |
 | Commitment | `0x2b0f0602b2e293b6904a809853700a0ceb6fb7e72f434d1c7e5978312fba44a5` |
 
 **Payment A — the acknowledgement travels.** The same proof, carried by
@@ -44,6 +44,13 @@ Chainlink CCIP 2.0 from Ethereum Sepolia to Arc.
 | Acknowledgement sent | [`0x26127770…b0764`](https://sepolia.etherscan.io/tx/0x26127770435be52529296d21a8e2c0434dc80ab64677fc613e33c5d5050b0764) |
 | CCIP message | [`0xa07b3722…95c6e5`](https://ccip.chain.link/msg/0xa07b3722e48b94dcb0ff411494cbc365367e890d86bdb6065d0701ca4295c6e5) |
 | Escrow trusts the sender | [`0xd34d3677…fd8ef2`](https://explorer.testnet.arc.io/tx/0xd34d3677cf6a1c4f3531931048f14ae588c6b56f69255e6b5d3e5d5cf2fd8ef2) |
+
+Every transaction that has ever touched the escrow is one of ours — three
+`open`s, one `ackLocal`, one `refund`, one `setAckSender`. **None came from the
+CCIP off-ramp.** The message has not been delivered at all: it is held in
+verification, before execution, so our receiver has never been called. There is
+nothing in the contract to fix, which is also why the local path proves the
+release rule just as well.
 
 The message is a genuine CCIP **2.0.0** message carrying
 `requestedFinalityConfig 0x00000005` — block-depth finality rather than full
