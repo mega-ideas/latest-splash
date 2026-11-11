@@ -43,7 +43,9 @@ export async function buildWalletOverview(deps: OverviewDeps): Promise<WalletOve
     return { ...base, walletState: 'unavailable', wallet: null, balance: null, balanceError: null, signers: null };
   }
   if (!account.wallet) {
-    const pending = Boolean(account.pendingWallet || account.nominatedWallet);
+    // A nomination on its own still needs the owner to register the wallet, so
+    // it must not hide the setup form. Only a rotation in flight does.
+    const pending = Boolean(account.pendingWallet);
     return { ...base, walletState: pending ? 'pending' : 'none', wallet: null, balance: null, balanceError: null, signers: null };
   }
 

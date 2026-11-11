@@ -73,6 +73,8 @@ export async function POST(request: Request) {
     threshold: body.threshold === undefined ? undefined : Number(body.threshold),
     singleSignerChosen: body.singleSignerChosen === true,
     confirmExcluded: Array.isArray(body.confirmExcluded) ? body.confirmExcluded.map(String) : undefined,
+    // Nothing left for the founder to sign once the chain holds a nomination.
+    nominationReady: Boolean(account.nominatedWallet),
   };
   let plan = planBusinessWallet(ask);
   if (!plan.ok && plan.code === 'consent_needed') {
@@ -81,7 +83,10 @@ export async function POST(request: Request) {
   }
   if (!plan.ok) return asResponse(plan);
 
-  const founder = plan.founder as NonNullable<typeof plan.founder>;
+  // No founder among our users: the requester stands in, and the server's own
+  // nomination check decides whether that is allowed.
+  const founder = (plan.founder ?? candidates.find((c) => c.userId === authority.userId)) as NonNullable<typeof plan.founder>;
+  if (!founder) return NextResponse.json({ error: 'You need a passkey on this site to start the wallet.' }, { status: 409, headers: NO_STORE });
   const result = await startBusinessWallet(ctx, {
     orgId,
     requestedBy: authority.userId,

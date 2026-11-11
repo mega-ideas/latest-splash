@@ -43,7 +43,11 @@ export default function SetupWallet({ onChanged }: { onChanged: () => void }) {
   if (!business.data) return <Card title="Create your business wallet"><Note tone="error">{business.error}</Note></Card>;
   const b = business.data;
   const founder = b.owners.find((o) => o.founder) ?? null;
-  const iAmFounder = founder?.userId === b.you.userId;
+  // An on-chain owner may start the wallet too: the account's founder is not
+  // always one of our users, and the server is the authority on whether the
+  // attempt is allowed.
+  const meOnChain = b.owners.find((o) => o.userId === b.you.userId)?.onChainOwner ?? false;
+  const iAmFounder = founder?.userId === b.you.userId || meOnChain;
   const soleOwner = b.owners.length === 1;
   const missing = b.ownersWithoutPasskey;
   const allLeftOut = missing.length === 0 || missing.every((m) => leftOut.includes(m.userId));

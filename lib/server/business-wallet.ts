@@ -261,10 +261,18 @@ export function planBusinessWallet(input: {
   confirmExcluded?: string[];
   /** A rotation: any owner who is a member may propose it; there is no nomination. */
   rotation?: boolean;
+  /** The chain already holds a nomination, so no founder signature is needed. */
+  nominationReady?: boolean;
 }): { ok: true; founder: WalletCandidate | null; owners: WalletMemberInput[]; wallet: BusinessMultisig } | PlanFailure {
   const founder = input.candidates.find((c) => c.founder) ?? null;
-  const proposer = input.rotation ? input.candidates.find((c) => c.userId === input.requestedBy) : founder;
-  if (input.rotation) {
+  // With the nomination already on chain there is nothing for the founder to
+  // sign, so the requester proposes. An account opened by an operator key has
+  // no founder among our users and would otherwise be stuck forever.
+  const nominationReady = input.nominationReady === true;
+  const proposer = (input.rotation || (nominationReady && !founder))
+    ? input.candidates.find((c) => c.userId === input.requestedBy)
+    : founder;
+  if (input.rotation || (nominationReady && !founder)) {
     if (!proposer) return refuse(403, 'not_a_member', 'only an owner with a passkey here can propose new wallet signers');
   } else {
     if (!founder) {
@@ -337,6 +345,40 @@ export async function startBusinessWallet(
   const account = await accountNow(ctx);
   if (isFailure(account)) return account;
   if (account.wallet) return refuse(409, 'wallet_registered', 'this business already has a business wallet; change its signers with a rotation');
+  // A nomination already on chain, naming exactly this wallet, leaves nothing
+  // for the founder to do: register_wallet checks the nomination itself, not
+  // who asked for it. Go straight to the registration the new multisig signs.
+  // Without this an account whose founder is not a passkey — one opened by an
+  // operator key rather than through the product — could never register a
+  // wallet here at all.
+  if (
+    account.nominatedWallet
+    && normalizeSuiAddress(account.nominatedWallet) === normalizeSuiAddress(wallet.address)
+  ) {
+    const gasForRegister = await sponsoredGas(ctx);
+    if (!gasForRegister) return refuse(503, 'no_sponsor', 'business wallet transactions need a gas sponsor, and none is configured');
+    const already = asMembers(wallet);
+    const regNow = registration(already);
+    const registerBytes = await registerWalletTx(ctx.chain, {
+      wallet: regNow.address,
+      account: ctx.account,
+      keys: regNow.keys,
+      weights: regNow.weights,
+      threshold: regNow.threshold,
+      singleSignerAck: wallet.singleSigner,
+      gas: gasForRegister,
+    });
+    return openSigningRequest(ctx.signing, {
+      orgId: input.orgId,
+      requestedBy: input.requestedBy,
+      purpose: 'register_wallet',
+      dedupeKey: 'wallet:create',
+      transactionBytes: registerBytes,
+      signer: { kind: 'multisig', multisigPublicKey: already.multisigPublicKey, members: already.members },
+      gasMode: 'sponsored',
+    });
+  }
+
   const founder = passkeySuiKey(input.founder.passkeyPublicKey);
   if (normalizeSuiAddress(founder.address) !== account.owner) {
     return refuse(403, 'not_the_founder', "this passkey is not the business account's owner key, so it cannot nominate the wallet");
