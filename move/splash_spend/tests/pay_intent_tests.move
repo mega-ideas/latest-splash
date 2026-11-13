@@ -4681,3 +4681,29 @@ fun an_allowance_cap_of_exactly_the_principal_and_max_fee_pays() {
     assert_eq!(alw_spend(&mut s, exact), (PAY + MAX_FEE) as u256);
     s.end();
 }
+
+// ═══ Pre-audit B1 (13 Nov 2026): a split across staff ═══════════════════════
+
+/// The wallet lowers the second-approval threshold to `threshold`.
+fun lower_threshold(s: &mut Scenario, fx: &Fx, threshold: u64) {
+    let mut p = wallet_policy(s, fx);
+    let account = s.take_shared_by_id<BusinessAccount>(fx.account);
+    p.set_limits(&account, POLICY_MAX, threshold, s.ctx());
+    ts::return_shared(account);
+    ts::return_shared(p);
+}
+
+#[test]
+#[expected_failure(abort_code = splash_spend::E_APPROVAL_REQUIRED)]
+/// Two staff each pay the same supplier under the threshold in one window.
+/// Each alone stays under it; together they are above it, so the second
+/// payer needs an owner's approval. Before B1 this paid without one.
+fun a_split_across_two_staff_needs_an_approval() {
+    let (mut s, fx) = setup();
+    lower_threshold(&mut s, &fx, 1_500_000_000);
+    let first = open(&mut s, &fx, STAFF, 1, payment_intent::kind_wallet(), SUPPLIER, 1_000_000_000);
+    let second = open(&mut s, &fx, JUNIOR, 2, payment_intent::kind_wallet(), SUPPLIER, 1_000_000_000);
+    pay(&mut s, &fx, STAFF, fx.staff, first, false);
+    pay(&mut s, &fx, JUNIOR, fx.junior, second, false);
+    s.end();
+}
