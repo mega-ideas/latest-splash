@@ -30,7 +30,9 @@ no module-level caching, no in-process pinning, no service restart.
 |---|---|---|
 | `packageId` | `SPLASH_PACKAGE_ID` | 0x + 64 hex. Required for settlement and peg refresh. |
 | `treasuryId` | `SPLASH_TREASURY_ID` | `SettlementPool<SUI>` shared object. |
-| `adminCapId` | `SPLASH_ADMIN_CAP_ID` | `business_account::AdminCap` owned by the operator wallet. |
+| `adminCapId` | `SPLASH_ADMIN_CAP_ID` | `business_account::AdminCap`. Held by the 2-of-3 governance multisig (Sky, Sebastian, cold backup), never the operator wallet (`docs/KEY-POLICY.md`; `docs/KEY-CEREMONY-RUNBOOK.md` §0 and §3.6). Once it moves there, the console's KYB approval (`verifyBusinessOnSui`) can no longer sign with it. |
+| `anchorCapId` | `SPLASH_ANCHOR_CAP_ID` | `business_account::AnchorCap`, the hot operator's cap for peg pushes and audit anchors. Never set it to the `AdminCap`. |
+| `capRegistryId` | `SPLASH_CAP_REGISTRY_ID` | `cap_registry::CapRegistry` shared object, checked on every `AnchorCap` use. |
 | `pegStateId` | `SPLASH_PEG_STATE_ID` | `peg_monitor::PegState` shared object. |
 | `businessAccountId` | `SPLASH_BUSINESS_ACCOUNT_ID` | `business_account::BusinessAccount` shared object. |
 | `transferCoinId` | `SPLASH_TRANSFER_COIN_ID` | Optional. SUI coin pre-funded for test transfers. |
@@ -122,9 +124,11 @@ See [`openapi.yaml`](./openapi.yaml) for the full contract.
 ### `E_PEG_STALE` (Move abort 302)
 
 The peg reading was older than 60 s when settle ran. The single-transfer PTB
-bundles a `peg_monitor::update_peg` step, so this usually means
-`SPLASH_ADMIN_CAP_ID` or `SPLASH_PEG_STATE_ID` is wrong. Open the admin page
-and verify both fields.
+bundles a `peg_monitor::update_peg` step that takes the `AnchorCap`, so this
+usually means `SPLASH_ANCHOR_CAP_ID`, `SPLASH_CAP_REGISTRY_ID` or
+`SPLASH_PEG_STATE_ID` is wrong. The admin page shows the peg state; check the
+anchor cap and the cap registry in `.env.local`, because the page has no field
+for either.
 
 ### `ObjectNotFound`
 
