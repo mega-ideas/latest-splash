@@ -76,6 +76,8 @@ export const SpendPolicyBcs = struct('SpendPolicy', {
   generation: bcs.u64(),
   running_window_ms: bcs.u64(),
   running_totals: LinkedTable,
+  /** Pre-audit B1: per recipient, what every payer paid it without an owner's approval (payer @0x0). */
+  policy_totals: LinkedTable,
 });
 export const SpenderBcs = struct('Spender', { role: bcs.u8(), per_payment_max: bcs.u64() });
 export const DestinationBcs = struct('Destination', { domain: bcs.u32(), addr: bcs.Address });
@@ -128,8 +130,8 @@ export type SpendPolicyHead = {
   walletEpoch: bigint;
   asset: string;
   owners: string[];
-  tables: { spenders: string; recipients: string; beneficiaries: string; partnerDeposits: string; runningTotals: string };
-  counts: { spenders: bigint; recipients: bigint; beneficiaries: bigint; runningTotals: bigint };
+  tables: { spenders: string; recipients: string; beneficiaries: string; partnerDeposits: string; runningTotals: string; policyTotals: string };
+  counts: { spenders: bigint; recipients: bigint; beneficiaries: bigint; runningTotals: bigint; policyTotals: bigint };
   perPaymentMax: bigint;
   secondApprovalThreshold: bigint;
   generation: bigint;
@@ -184,8 +186,15 @@ export function parseSpendPolicy(bytes: Uint8Array): SpendPolicyHead {
       beneficiaries: normalizeSuiAddress(p.beneficiaries.id),
       partnerDeposits: normalizeSuiAddress(p.partner_deposits.id),
       runningTotals: normalizeSuiAddress(p.running_totals.id),
+      policyTotals: normalizeSuiAddress(p.policy_totals.id),
     },
-    counts: { spenders: big(p.spender_count), recipients: big(p.recipient_count), beneficiaries: big(p.beneficiary_count), runningTotals: big(p.running_totals.size) },
+    counts: {
+      spenders: big(p.spender_count),
+      recipients: big(p.recipient_count),
+      beneficiaries: big(p.beneficiary_count),
+      runningTotals: big(p.running_totals.size),
+      policyTotals: big(p.policy_totals.size),
+    },
     perPaymentMax: big(p.per_payment_max),
     secondApprovalThreshold: big(p.second_approval_threshold),
     generation: big(p.generation),

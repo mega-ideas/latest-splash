@@ -661,6 +661,17 @@ Modules: `splash_spend` (app type, permits, intents, approvals, paying) and
     once nothing in it counts, at most sixty days after its window opened.
   - Views: `running_total`, `threshold_total`, `running_window_start_ms`,
     `running_window_end_ms`, `running_total_count`.
+  - **(Pre-audit B1, 13 Nov 2026) A policy-wide total per destination.** A
+    total per payer alone let several staff split one supplier's invoices,
+    each under the threshold. `policy_totals`, a second `LinkedTable` keyed
+    like `running_totals` with payer `@0x0` (never a spender), adds up what
+    EVERY payer paid the destination without an owner's approval, with the
+    same windows, carry-over and pruning. The check counts the larger of it
+    and the payer's own total. Approved payments (and so every executor
+    payment) count only in their payer's own total. Each payment prunes up to
+    two spent entries from each list; the wallet prunes more with
+    `prune_policy_totals`. Views: `policy_threshold_total`,
+    `policy_total_count`.
   - The cost: `pay_intent` takes the policy mutably, so every payment under
     one business is sequenced on its policy object.
 - **What a core upgrade can still do (R2, stated plainly).** Additive policy
