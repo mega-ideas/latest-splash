@@ -17,6 +17,22 @@ import test from 'node:test';
  * in the image optimizer (GHSA-2464-fhr4-w9xw) and in `use cache` functions
  * (GHSA-673q-mjm6-r5xr), and a Server Actions denial of service
  * (GHSA-p3m5-59mp-jv5r). 16.4.1 is the first 16.x release outside all three.
+ *
+ * The pinned 16.4.3 is not free of known advisories. Seven moderate ones,
+ * published on vercel/next.js on 3 Nov 2026, reach up to 16.4.4 and are fixed
+ * in 16.4.5; npm audit does not report them because the global advisory
+ * database did not list them yet. 16.4.5 is 14 days old on 17 Nov 2026, so move
+ * next and eslint-config-next to it (or later) on or after that date. Until
+ * then:
+ * - GHSA-7qx7-33qx-rqx2 (SVG through /_next/image): closed in next.config.ts,
+ *   whose localPatterns admit raster files only
+ *   (tests/image-optimizer-allowlist.test.mjs).
+ * - GHSA-pc58-hwjq-p385 (self-hosted, a route handler returning a fetched
+ *   response unchanged): no route handler here does that.
+ * - GHSA-f3mh-rxg3-f5g2 (cookies on Edge runtime routes): no route uses the
+ *   Edge runtime.
+ * - GHSA-rhh4-g77r-r9qj, GHSA-vc7v-qv4w-wrv8, GHSA-mfr8-8qww-v76h ('use cache')
+ *   and GHSA-vvgp-ww4w-46vf (cacheComponents): neither is used.
  */
 
 const readJson = async (file) => JSON.parse(await readFile(new URL(file, import.meta.url), 'utf8'));
