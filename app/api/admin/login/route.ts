@@ -28,6 +28,21 @@ const MAX_EMAIL_LENGTH = 254;
  * accepts any padding and case: without that, ` staff@…` would be a fresh
  * bucket that still signs in.
  *
+ * The cost, accepted for now and awaiting Sky's decision: the console has one
+ * login (ADMIN_EMAIL), and its address bucket does not care where a failure
+ * came from. So five wrong passwords from anywhere in 15 minutes refuse the
+ * right one from everywhere, including the staff's own network, until the
+ * oldest failure ages out; an anonymous caller can keep that up with five
+ * requests every 15 minutes (twenty an hour, inside one network's limit). The
+ * login page prefills an address, which makes guessing it unnecessary. And
+ * because the network bucket is shared, twenty customer failures behind the
+ * same office NAT refuse staff sign-in from there for up to an hour. Options
+ * if this is not acceptable: key the staff address bucket by address and
+ * network, so a remote caller cannot close it for other networks; delay
+ * rather than refuse for the staff key; give staff a network bucket of their
+ * own. Recovery today is to wait out the window, or to delete the
+ * `login-failure:email` rows keyed `staff:<address>` from rate_limit_hits.
+ *
  * Without a database there is nowhere to count failures. Production refuses
  * staff sign-in rather than run unlimited (lib/env.ts already refuses to boot
  * without DATABASE_URL; this holds if that check is ever bypassed). A
