@@ -6,7 +6,10 @@
 > 24 Oct 2026 (`splash_spend`, `ed3fc12b`; `splash_upgrade_delay`,
 > `2b2f8f66`). On Sui CLI `mainnet-v1.82.3` they pass 613, 308 and 74 Move
 > tests, 995 in all. `splash_custody` and `splash_meter` are retired from the
-> mainnet path (v2, D11) and run on testnet only.
+> mainnet path (v2, D11). Neither has been published as its own package, to
+> mainnet or to testnet: the repository records no package id for either, and
+> none of the testnet runs under `experiments/` uses them. CI still builds and
+> tests both.
 >
 > The executive summary below and the `## Findings` section (C-01 to C-03,
 > H-01 to H-06, M-01 to M-08, L-01 to L-06, I-01 to I-04, dated 2026-05-29)
@@ -29,9 +32,9 @@
 >
 > v2's own review notes are in the sections headed "v2 Phase 1" (the Move
 > packages, 24 Oct 2026), "v2 Phase 2" and "v2 Phase 3"; the design and its
-> reviews are in `docs/v2/phase1-move-design.md`. The independent Move review
-> is with HackenProof, under the Sui Foundation program, and has not signed
-> off yet.
+> reviews are in `docs/v2/phase1-move-design.md`. The planned independent Move
+> review is HackenProof, under the Sui Foundation program. It has not started
+> and nothing is signed yet.
 
 **Scope**: All Move modules under `move/sources/` (8 modules)
 **Methodology**: OtterSec-style review — capability access control, resource handling, integer arithmetic, authorization, event traceability, upgrade & pause posture, Move-specific patterns (hot-potato, abilities, UID hygiene).
