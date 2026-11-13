@@ -167,6 +167,9 @@ test('the refusal says nothing about whether the email is the staff address', as
   assert.equal(nobody.status, 429);
   assert.deepEqual(await staff.json(), await nobody.json(), 'the same refusal for the staff address and any other');
 
+  // And below the limit, the same failure for a wrong password and an unknown
+  // address. Start clean: the staff address is closed from above.
+  await client.exec('DELETE FROM rate_limit_hits');
   const wrongPassword = await signIn(STAFF, 'wrong', '198.51.100.12');
   const unknownEmail = await signIn('nobody-else@splash.test', 'wrong', '198.51.100.13');
   assert.equal(wrongPassword.status, 401);
