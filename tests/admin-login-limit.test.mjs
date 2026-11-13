@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict';
+import { randomBytes } from 'node:crypto';
 import { readdir, readFile } from 'node:fs/promises';
 import { registerHooks } from 'node:module';
 import os from 'node:os';
@@ -278,6 +279,25 @@ test('a burst from one network spraying addresses is answered no more often than
   const counts = tally(responses);
   assert.ok((counts[401] ?? 0) <= limiter.IP_LIMIT, `at most ${limiter.IP_LIMIT} passwords checked, got ${JSON.stringify(counts)}`);
   assert.equal((counts[401] ?? 0) + (counts[429] ?? 0), burst, `every other guess is refused, got ${JSON.stringify(counts)}`);
+});
+
+// ── Input the limiter cannot store ─────────────────────────────────────────
+
+test('an address too long to be one is refused like any wrong pair, not with a server error', async () => {
+  // The address bucket's key goes into a btree index, which refuses a row of
+  // more than 2704 bytes: an unbounded address made the route throw. The
+  // customer route caps the address at 254 characters (RFC 5321) and so does
+  // this one, before the limiter is touched.
+  // Random characters, because a repeated one compresses under the limit.
+  for (const length of [255, 3000, 100_000]) {
+    const local = randomBytes(length).toString('hex').slice(0, length - '@splash.test'.length);
+    const email = `${local}@splash.test`;
+    const response = await signIn(email, 'wrong');
+    assert.equal(response.status, 401, `a ${length}-character address is a wrong pair`);
+    assert.deepEqual(await response.json(), { error: 'Invalid staff credentials' }, 'with the same answer as any other');
+  }
+  const ok = await signIn(STAFF, PASSWORD);
+  assert.equal(ok.status, 200, 'and the staff address still signs in');
 });
 
 // ── Without a database ──────────────────────────────────────────────────────
