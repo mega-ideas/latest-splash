@@ -145,8 +145,10 @@ The code as committed supports A and C unchanged. B is a follow-up.
 
 - A Sui CLI that can reach a **gRPC-capable** fullnode on the network you publish to.
   The public JSON-RPC is retired (v1.76.0 line). The testnet publish in
-  `move/splash_core/Published.toml` was built with toolchain 1.77.2; use that CLI,
-  or publish from the deploy server.
+  `move/splash_core/Published.toml` is the pre-v2 one, built with toolchain
+  1.77.2. The v2 packages build and test only on Sui CLI `mainnet-v1.82.3`
+  (1.77.2 fails every v2 Move test); use that CLI, as
+  `docs/MAINNET-CHECKLIST.md` requires, or publish from the deploy server.
 - The three signer addresses for the 2-of-3 multisig (spec §10.1). **Open decision:**
   the third signer is not chosen. You + Sebastian + who? Each signer generates their own key on their own
   machine. Nobody types anybody else's seed.
