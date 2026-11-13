@@ -9,8 +9,10 @@
  *     `current_spend`;
  *   - its `SpendPolicy` for the current wallet generation: the spenders with
  *     their own per-payment maximum, the verified recipients and
- *     beneficiaries, the limits, the running-total window, and the running
- *     totals per (payer, recipient) toward the second-approval threshold;
+ *     beneficiaries, the limits, the running-total window, the running
+ *     totals per (payer, recipient) toward the second-approval threshold,
+ *     and (pre-audit B1) the policy-wide totals per recipient of what every
+ *     payer paid it without an owner's approval;
  *   - `splash_spend::RuleSpend` events (one per payment under a rule: intent,
  *     allowance, approval, recipient, kind charged, fee).
  *
@@ -42,6 +44,25 @@ export type PolicyState = SpendPolicyHead & {
   recipients: Array<{ domain: number; address: string; kind: number }>;
   beneficiaries: Array<{ commitment: string; partnerDeposit: string }>;
   runningTotals: RunningEntry[];
+  /** Pre-audit B1: the policy-wide totals (payer @0x0), per recipient. Absent reads as none. */
+  policyTotals?: RunningEntry[];
+};
+
+/**
+ * Pre-audit B1: what every payer has paid one recipient without an owner's
+ * approval, as `spend_policy::policy_threshold_total` counts it. The chain's
+ * second-approval check counts the larger of this and the payer's own total.
+ */
+export type RecipientTotalView = {
+  /** The recipient address, or null for a bank payout. */
+  recipient: string | null;
+  /** The beneficiary commitment (hex) of a bank payout, or null. */
+  beneficiary: string | null;
+  /** What the check counts now, for any payer. */
+  countedMinor: string;
+  countsUntilMs: string;
+  /** How much more anyone can pay this recipient without an approval, by this total alone. */
+  beforeApprovalMinor: string;
 };
 
 /** An allowance with the cap the wallet holds for it. */
@@ -129,6 +150,8 @@ export type SpendView = {
     generation: string;
     recipients: Array<{ address: string; tag: 'wallet' | 'exchange' }>;
     beneficiaries: Array<{ commitment: string; partnerDeposit: string }>;
+    /** Pre-audit B1: the policy-wide totals that count now. */
+    recipientTotals: RecipientTotalView[];
   } | null;
   rules: RuleView[];
   /** Allowances of the current wallet and policy whose spender is no longer on the policy: they cannot pay; revoke them. */
@@ -182,6 +205,25 @@ function allowanceView(a: HeldAllowance, now: bigint, current: boolean): Allowan
     window,
     spendableNowMinor: state === 'active' ? s(spendable ?? 0n) : '0',
   };
+}
+
+/** Pre-audit B1: the policy-wide totals that still count at `now`, as the chain counts them. */
+function recipientTotals(policy: PolicyState, now: bigint): RecipientTotalView[] {
+  const threshold = policy.secondApprovalThreshold;
+  const out: RecipientTotalView[] = [];
+  for (const e of policy.policyTotals ?? []) {
+    const { countedMinor, countsUntilMs } = thresholdCounted(e, now);
+    if (countedMinor === 0n) continue;
+    const bank = e.beneficiary.length > 0;
+    out.push({
+      recipient: bank ? null : e.recipient,
+      beneficiary: bank ? e.beneficiary : null,
+      countedMinor: s(countedMinor),
+      countsUntilMs: s(countsUntilMs),
+      beforeApprovalMinor: s(countedMinor >= threshold ? 0n : threshold - countedMinor),
+    });
+  }
+  return out;
 }
 
 /** Does this allowance pay under this policy, from this wallet? The checks pay_intent makes. */
@@ -279,6 +321,7 @@ export function buildSpendView(input: {
           generation: s(current.generation),
           recipients: current.recipients.map((r) => ({ address: r.address, tag: r.kind === 1 ? ('wallet' as const) : ('exchange' as const) })),
           beneficiaries: current.beneficiaries,
+          recipientTotals: recipientTotals(current, now),
         }
       : null,
     rules,

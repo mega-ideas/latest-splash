@@ -6,7 +6,7 @@
  *
  *   policy       getObjects(policy id), then every entry of its tables
  *                (listDynamicFields, getObjects) for spenders, recipients,
- *                beneficiaries and running totals;
+ *                beneficiaries, running totals and policy-wide totals;
  *   allowances   listOwnedObjects(wallet, AllowanceCap<Balance<USDC>>), then
  *                getObjects of the allowances they point to: an allowance
  *                whose cap the wallet no longer holds was revoked;
@@ -85,11 +85,12 @@ export function liveSpendReader(spendPackageId: string, usdcType: string): Spend
       if (!o) return null;
       if (!o.type.endsWith('::spend_policy::SpendPolicy') || normalizeSuiAddress(o.type.split('::')[0]) !== pkg) throw new Error(`${id} is not a SpendPolicy of this package`);
       const head = parseSpendPolicy(o.content);
-      const [spenders, recipients, beneficiaries, running] = await Promise.all([
+      const [spenders, recipients, beneficiaries, running, policyWide] = await Promise.all([
         tableEntries(sui, head.tables.spenders),
         tableEntries(sui, head.tables.recipients),
         tableEntries(sui, head.tables.beneficiaries),
         tableEntries(sui, head.tables.runningTotals),
+        tableEntries(sui, head.tables.policyTotals),
       ]);
       const policy: PolicyState = {
         ...head,
@@ -98,6 +99,8 @@ export function liveSpendReader(spendPackageId: string, usdcType: string): Spend
         recipients: recipients.map(parseRecipientField),
         beneficiaries: beneficiaries.map(parseBeneficiaryField),
         runningTotals: running.map(parseRunningField),
+        // Pre-audit B1: the same key and value types as running_totals.
+        policyTotals: policyWide.map(parseRunningField),
       };
       return policy;
     },
