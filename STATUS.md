@@ -89,8 +89,20 @@ Do not publish `splash_core` until every line is checked.
       `splash_spend` **308**, `splash_upgrade_delay` **74** (995 in all).
       Before v2, `splash_core` had 14 (was 0 runnable).
 - [x] `sui move test` green for `splash_custody` — **16 tests** (was blocked).
+      It is testnet only since v2 (D11). On `mainnet-v1.82.3`, as of `main`
+      at `cbb96a6a`, it passes 16 of 16 and `splash_meter` 23 of 23.
       DeepBook pin is `daa5a951`; see the CLI item below for how it got there.
-- [x] **Sui CLI upgraded to 1.77.2 and the DeepBook pin moved forward** to
+- [x] **The v2 packages need Sui CLI `mainnet-v1.82.3`**, the version
+      `docs/MAINNET-CHECKLIST.md` requires before any publish. Older CLIs do
+      not run them: on 1.77.2, as of `main` at `cbb96a6a`, `splash_core` fails
+      613 of 613, `splash_spend` 308 of 308 and `splash_upgrade_delay` 74 of
+      74, every one with `MISSING_DEPENDENCY` on `sui::funds_accumulator`, a
+      framework linkage failure, not a code failure. Do not use 1.77.2 or
+      1.61.1 for this gate.
+      *Pre-v2 history, kept for the record.* Everything from here to the end
+      of this item held for the v1 suites (`splash_core` 14, `splash_meter`
+      22, `splash_custody` 16) and does not describe the v2 packages.
+      **Sui CLI upgraded to 1.77.2 and the DeepBook pin moved forward** to
       `daa5a951` (2026-08-18). The toolchain floor was 1.61.1:
       `std::unit_test::destroy` arrived in sui `d95572e1c1` (#24078) and first
       shipped in `testnet-v1.61.1`, while DeepBook's tests began using it in
@@ -99,19 +111,20 @@ Do not publish `splash_core` until every line is checked.
       after. Re-verified at the new rev rather than assumed: `FLOAT_SCALING ==
       1_000_000_000` matching `DEEPBOOK_PRICE_SCALING`, the three view
       signatures byte-identical, and no `published-at`.
-      **Minimum CLI for this repo is now 1.61.1.**
+      The minimum CLI for the v1 suites was then 1.61.1.
       **2026-09-05: re-verified.** The dev machine had drifted to 1.75.1, on
       which `splash_custody` fails 0/16 with `MISSING_DEPENDENCY` in
       `0x2::object` — a whole-package linkage failure, not a code failure
       (`splash_core` and `splash_meter` have no dependencies and stayed
       green). 1.77.2 was reinstalled and all three suites re-run: **14 + 22 +
-      16 = 52, no failures.** The checkboxes above hold, on 1.77.2 and not
+      16 = 52, no failures.** The v1 checkboxes held then, on 1.77.2 and not
       below it.
-      Note the committed `Move.lock` still records `compiler-version =
-      "1.59.1"` and pins framework `494fa6ed`. Any `sui move build` rewrites
-      it to lock format 4 with that CLI's own framework rev (1.75.1 →
-      `b9149cbf`, 1.77.2 → `06734f6f`); those rewrites have been reverted, so
-      the pin on record is not the framework these tests ran against.
+      At that time the committed `Move.lock` recorded `compiler-version =
+      "1.59.1"` and pinned framework `494fa6ed`, and builds on 1.75.1 and
+      1.77.2 rewrote it (to `b9149cbf` and `06734f6f`); those rewrites were
+      reverted. That is no longer the case: since v2 Phase 1 (`a5baf349`) every
+      package's committed `Move.lock` is lock format 4 and pins framework
+      `719fb296`.
 - [x] No value-bearing field in `splash_core` — `scripts/check-core-no-balance.mjs`,
       run by `.github/workflows/core-invariant.yml` on every push and PR, and by
       `npm run lint` locally. The checker parses struct BODIES out of
