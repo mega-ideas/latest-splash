@@ -33,6 +33,7 @@
 import { createHash } from 'node:crypto';
 
 import { isProductionRuntime } from './runtime-mode.ts';
+import { MAX_WALRUS_BLOB_ID_BYTES } from './sui-v2-builders.ts';
 
 /** Who started a payment and under what: the audit trail the sealed record always holds. */
 export type PaymentTrail = {
@@ -124,7 +125,8 @@ export function makeRecordSealer(deps: SealDeps): RecordSealer {
       if (production && sealed.policy.mode !== 'live') return { ok: false };
       const blob = await deps.store(sealed.ciphertext);
       if (production && blob.mode !== 'live') return { ok: false };
-      if (!blob.blobId) return { ok: false };
+      // B3: the blob id is anchored as its UTF-8 bytes, and audit_anchor::anchor refuses more than 64 of them.
+      if (!blob.blobId || Buffer.byteLength(blob.blobId, 'utf8') > MAX_WALRUS_BLOB_ID_BYTES) return { ok: false };
       return { ok: true, contentHash: new Uint8Array(contentHash), blobId: blob.blobId, mode: sealed.policy.mode === 'live' && blob.mode === 'live' ? 'live' : 'sandbox' };
     } catch {
       return { ok: false };
