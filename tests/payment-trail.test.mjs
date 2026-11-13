@@ -297,6 +297,21 @@ test('a record that cannot be sealed never stops the decision: it waits, unseale
   await t.w.client.close();
 });
 
+// B3 (pre-audit, 13 Nov 2026): audit_anchor::anchor refuses a Walrus blob id
+// over 64 bytes (E_BLOB_TOO_LONG). The record's blob id is anchored as its
+// UTF-8 bytes, so a store that hands back a longer one makes no bundle.
+test('a sealed record whose blob id is longer than the chain anchors (64 bytes) is a refusal, not a bundle', async () => {
+  const at = sealing({ store: async () => ({ blobId: 'b'.repeat(64), mode: 'live' }) });
+  const ok = await at.sealer('{"a":1}', 'acme');
+  assert.equal(ok.ok, true);
+  assert.equal(ok.blobId, 'b'.repeat(64));
+  const over = sealing({ store: async () => ({ blobId: 'b'.repeat(65), mode: 'live' }) });
+  assert.deepEqual(await over.sealer('{"a":1}', 'acme'), { ok: false });
+  // Bytes, not characters: 22 three-byte characters are 66 bytes.
+  const wide = sealing({ store: async () => ({ blobId: '€'.repeat(22), mode: 'live' }) });
+  assert.deepEqual(await wide.sealer('{"a":1}', 'acme'), { ok: false });
+});
+
 test('the hook that records a decision is wired into signing, the asks and the live context', () => {
   const signing = read('lib/server/wallet-signing.ts');
   assert.match(signing, /onDecision/);

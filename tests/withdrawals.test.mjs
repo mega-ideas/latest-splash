@@ -583,6 +583,33 @@ test('an all-zero bundle is never accepted, and a retry of a withdrawal already 
   await t.w.client.close();
 });
 
+// B3 (pre-audit, 13 Nov 2026): audit_anchor::anchor refuses a Walrus blob id
+// over 64 bytes (E_BLOB_TOO_LONG), so a bundle the chain would refuse is
+// refused here, before a partner is asked for anything.
+test('an audit bundle whose blob id is longer than the chain anchors (64 bytes) is refused before anything is instructed', async () => {
+  const hash = '04'.repeat(32);
+  for (const what of ['withdraw', 'pay']) {
+    assert.deepEqual(W.parseAuditBundle({ contentHash: hash, walrusBlobId: 'ab'.repeat(64) }, what), { contentHash: hash, walrusBlobId: 'ab'.repeat(64) });
+    assert.equal(W.parseAuditBundle({ contentHash: hash, walrusBlobId: 'ab'.repeat(65) }, what).code, 'no_audit_bundle', `${what}: 65 bytes`);
+  }
+  const t = await setup();
+  const { destination } = await readyToWithdraw(t);
+  const q = await quoted(t, destination.id);
+  const long = await createWithdrawal(t.deps(), 'u-founder', {
+    destinationId: destination.id,
+    amountMinor: '1000000000',
+    maxFeeMinor: q.maxFeeMinor,
+    acceptedReceiveMinor: q.receiveMinor,
+    clientKey: 'ck_long_blob',
+    contentHash: hex32(),
+    walrusBlobId: 'ab'.repeat(65),
+  });
+  assert.equal(long.code, 'no_audit_bundle');
+  assert.equal(t.partner.called('createPayout').length, 0);
+  assert.equal((await t.w.db.select().from(schema.withdrawals)).length, 0);
+  await t.w.client.close();
+});
+
 test('the partner is never sent an account the intent does not commit to', async () => {
   const t = await setup();
   const { destination } = await readyToWithdraw(t);
