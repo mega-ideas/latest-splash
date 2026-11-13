@@ -29,15 +29,40 @@ export interface WalrusBlob {
 }
 
 export class WalrusAdapterError extends Error {
-  // A plain field rather than a constructor parameter property: the Node test
+  // Plain fields rather than constructor parameter properties: the Node test
   // runner strips types only, and a parameter property is a transform.
   readonly status: number;
+  /**
+   * What a customer may be told. Usually the message itself; for a
+   * configuration error it is generic, because the message names an
+   * environment key and what it must be, which is the operator's business.
+   */
+  readonly publicMessage: string;
 
-  constructor(message: string, status = 502) {
+  constructor(message: string, status = 502, publicMessage = message) {
     super(message);
     this.status = status;
+    this.publicMessage = publicMessage;
     this.name = 'WalrusAdapterError';
   }
+}
+
+const CONFIG_PUBLIC_MESSAGE = 'Walrus storage is not available right now. Nothing was stored; try again later.';
+
+/** A server misconfiguration: the detail is for the log, never the customer. */
+function walrusConfigError(detail: string, status = 500): WalrusAdapterError {
+  return new WalrusAdapterError(detail, status, CONFIG_PUBLIC_MESSAGE);
+}
+
+/**
+ * The answer a route gives a customer for a WalrusAdapterError. When the
+ * customer is told less than the error says (a configuration error), the
+ * full message is logged here, with where it happened, so the operator can
+ * still find which key is wrong.
+ */
+export function walrusErrorReply(error: WalrusAdapterError, where: string): { status: number; error: string } {
+  if (error.publicMessage !== error.message) console.error(`${where}: ${error.message}`);
+  return { status: error.status, error: error.publicMessage };
 }
 
 /**
@@ -64,7 +89,7 @@ export function walrusStoreEpochs(env: NodeJS.ProcessEnv = process.env): number 
   if (!raw) return WALRUS_MAX_EPOCHS;
   const n = Number(raw);
   if (!Number.isInteger(n) || n < 1 || n > WALRUS_MAX_EPOCHS) {
-    throw new WalrusAdapterError(`WALRUS_STORE_EPOCHS must be a whole number from 1 to ${WALRUS_MAX_EPOCHS}.`, 500);
+    throw walrusConfigError(`WALRUS_STORE_EPOCHS must be a whole number from 1 to ${WALRUS_MAX_EPOCHS}.`);
   }
   return n;
 }
@@ -77,7 +102,7 @@ export function walrusStoreUrl(publisher: string, env: NodeJS.ProcessEnv = proce
   if (owner) {
     // lib/env.ts checks this at boot too; a store must not send the Blob
     // object to an address nobody can sign for.
-    if (!SUI_ADDRESS.test(owner)) throw new WalrusAdapterError('WALRUS_BLOB_OWNER must be a 0x + 64 hex Sui address.', 500);
+    if (!SUI_ADDRESS.test(owner)) throw walrusConfigError('WALRUS_BLOB_OWNER must be a 0x + 64 hex Sui address.');
     url.searchParams.set('send_object_to', owner);
   }
   return url.toString();
@@ -206,7 +231,9 @@ export async function retrieveBlob(blobId: string): Promise<WalrusBlob | null> {
     return blobs.get(blobId) ?? null;
   }
   const base = process.env.WALRUS_AGGREGATOR_URL;
-  if (!base) throw new WalrusAdapterError('WALRUS_AGGREGATOR_URL is not configured.');
+  // The status a missing aggregator has always answered with is kept; only
+  // what the customer is told changes.
+  if (!base) throw walrusConfigError('WALRUS_AGGREGATOR_URL is not configured.', 502);
   try {
     const response = await fetch(`${base}/v1/blobs/${encodeURIComponent(blobId)}`);
     if (response.status === 404) return null;
