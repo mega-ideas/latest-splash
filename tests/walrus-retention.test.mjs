@@ -160,6 +160,55 @@ test('a new blob Walrus holds for fewer epochs than asked, or as deletable, is r
   assert.match(warnings[0], /1 epoch/);
 });
 
+// The publisher may reuse a storage resource bought earlier (the response's
+// resourceOperation is then reuseStorage, not registerFromScratch). Its
+// storage.startEpoch is when THAT resource began, not when this blob was
+// stored, so endEpoch - startEpoch can look like 60 epochs while only 10 are
+// left. The latest epoch the response itself names for this blob (it was
+// registered and certified then, so the network was at least there) is the
+// honest floor to measure from.
+test('a blob on reused storage is measured from when it was stored, not from when the storage began', async () => {
+  goLive();
+  respondWith({
+    newlyCreated: {
+      blobObject: {
+        id: `0x${'11'.repeat(32)}`,
+        registeredEpoch: 140,
+        blobId: 'ReusedBlob789',
+        size: 24,
+        encodingType: 'RS2',
+        certifiedEpoch: 140,
+        storage: { id: `0x${'22'.repeat(32)}`, startEpoch: 90, endEpoch: 150, storageSize: 66034000 },
+        deletable: false,
+      },
+      resourceOperation: { reuseStorage: { encodedLength: 66034000 } },
+      cost: 0,
+    },
+  });
+
+  const blob = await storeEncryptedInvoice(CIPHERTEXT);
+
+  assert.equal(blob.endEpoch, 150);
+  assert.equal(warnings.length, 1, 'ten epochs left is short of the 53 asked for');
+  assert.match(warnings[0], /ReusedBlob789/);
+  assert.match(warnings[0], /\b10 epochs\b/);
+  assert.match(warnings[0], /epoch 140/, 'says which epoch it measured from');
+  assert.doesNotMatch(warnings[0], /\b60 epochs\b/);
+});
+
+test('a blob whose response names no epoch to measure from is not called short or long', async () => {
+  goLive();
+  respondWith({ newlyCreated: { blobObject: { blobId: 'NoStartBlob', storage: { endEpoch: 150 }, deletable: false } } });
+
+  const blob = await storeEncryptedInvoice(CIPHERTEXT);
+
+  assert.equal(blob.endEpoch, 150);
+  assert.equal(warnings.length, 1);
+  assert.match(warnings[0], /NoStartBlob/);
+  assert.match(warnings[0], /epoch 150/);
+  assert.match(warnings[0], /cannot tell|could not be measured|not measured/);
+});
+
 test('an already-certified blob keeps the end epoch Walrus reports, and is flagged as held elsewhere', async () => {
   goLive();
   process.env.WALRUS_BLOB_OWNER = OWNER;
