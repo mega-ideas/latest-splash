@@ -2,8 +2,9 @@
 
 **Target:** Sui mainnet once the independent Move review (HackenProof, under
 the Sui Foundation program) has signed off and the key ceremony in
-[`docs/MAINNET-CHECKLIST.md`](docs/MAINNET-CHECKLIST.md) has run. The earlier
-target, week 2 September 2026, has passed; no new date is set here.
+[`docs/KEY-CEREMONY-RUNBOOK.md`](docs/KEY-CEREMONY-RUNBOOK.md) has run; the
+full publish gate is [`docs/MAINNET-CHECKLIST.md`](docs/MAINNET-CHECKLIST.md).
+The earlier target, week 2 September 2026, has passed; no new date is set here.
 **Governing constraint:** Splash **cannot hold client funds** — self-imposed, enforced by the type system and by CI, and a precondition for operating before an e-money licence exists. No licence is held today.
 E-money tier (RM 1.5M, Labuan money broking paras 6.1 + 6.2) is Phase 2, the name the code uses
 (`PHASE_2_CUSTODY` in `lib/server/custody-phase.ts`). The build phases 0–7 below are a separate numbering.
