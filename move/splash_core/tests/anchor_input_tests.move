@@ -57,32 +57,32 @@ fun a_64_byte_blob_id_anchors() {
 }
 
 #[test]
-#[expected_failure(abort_code = 503, location = splash_core::audit_anchor)]
+#[expected_failure(abort_code = audit_anchor::E_BAD_HASH_LENGTH)]
 fun a_31_byte_hash_is_refused() {
     settle_and_anchor(b"0123456789abcdef0123456789abcde", BLOB);
 }
 
 #[test]
-#[expected_failure(abort_code = 503, location = splash_core::audit_anchor)]
+#[expected_failure(abort_code = audit_anchor::E_BAD_HASH_LENGTH)]
 fun a_33_byte_hash_is_refused() {
     settle_and_anchor(b"0123456789abcdef0123456789abcdef0", BLOB);
 }
 
 #[test]
-#[expected_failure(abort_code = 503, location = splash_core::audit_anchor)]
+#[expected_failure(abort_code = audit_anchor::E_BAD_HASH_LENGTH)]
 fun the_64_characters_of_a_hex_hash_are_refused() {
     // What scripts/e2e-testnet.mjs passed before B3: the hex TEXT of a sha256.
     settle_and_anchor(b"0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef", BLOB);
 }
 
 #[test]
-#[expected_failure(abort_code = 504, location = splash_core::audit_anchor)]
+#[expected_failure(abort_code = audit_anchor::E_BLOB_TOO_LONG)]
 fun a_65_byte_blob_id_is_refused() {
     settle_and_anchor(HASH, BLOB_65);
 }
 
 #[test]
-#[expected_failure(abort_code = 500, location = splash_core::audit_anchor)]
+#[expected_failure(abort_code = audit_anchor::E_EMPTY_HASH)]
 fun an_empty_hash_is_still_refused_as_empty() {
     settle_and_anchor(b"", BLOB);
 }

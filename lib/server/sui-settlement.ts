@@ -303,9 +303,11 @@ const ABORT_CODES: Record<number, string> = {
   412: 'E_STILL_PENDING — payment_intent::delete_finalized called on a pending intent; confirm or cancel it first.',
 
   // ── audit_anchor ─────────────────────────────────────────────────────────
-  500: 'E_EMPTY_HASH — audit_anchor::anchor_audit_hash called with an empty audit_hash string.',
+  500: 'E_EMPTY_HASH — an empty hash: audit_anchor::anchor_audit_hash called with an empty audit_hash string, or audit_anchor::anchor with an empty content hash.',
   501: 'E_EMPTY_ANCHOR — audit_anchor::anchor_audit_hash called with an empty anchor_id.',
   502: 'E_EMPTY_BLOB — audit_anchor::anchor called with an empty Walrus blob id.',
+  503: 'E_BAD_HASH_LENGTH — audit_anchor::anchor called with a content hash that is not 32 bytes. It takes the raw digest, not its hex text.',
+  504: 'E_BLOB_TOO_LONG — audit_anchor::anchor called with a Walrus blob id longer than 64 bytes.',
 
   // ── dual_treasury ────────────────────────────────────────────────────────
   600: 'E_USDT_TTL_EXCEEDED — USDT settlement attempted past USDT_MAX_HOLD_MS (30 minutes). Sweep expected.',

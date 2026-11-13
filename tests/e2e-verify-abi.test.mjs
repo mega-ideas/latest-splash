@@ -394,11 +394,18 @@ test('the payment check anchors the raw 32-byte hash and a blob id the chain acc
   assert.equal(args.length, 4, 'receipt, content hash, blob id, clock');
   const bytesOf = (expr) => new Function('tx', 'Buffer', 'auditHash', 'blobId', `return ${expr};`)(pureBytes, Buffer, auditHash, blobId);
 
+  const hashBytes = await moveConstant('audit_anchor', 'CONTENT_HASH_BYTES');
+  const maxBlobBytes = await moveConstant('audit_anchor', 'MAX_BLOB_ID_BYTES');
+  assert.deepEqual([hashBytes, maxBlobBytes], [32, 64]);
+  // The server's bound on an audit bundle's blob id is the chain's.
+  const { MAX_WALRUS_BLOB_ID_BYTES } = await import('../lib/server/sui-v2-builders.ts');
+  assert.equal(MAX_WALRUS_BLOB_ID_BYTES, maxBlobBytes, 'lib/server/sui-v2-builders.ts MAX_WALRUS_BLOB_ID_BYTES is audit_anchor::MAX_BLOB_ID_BYTES');
+
   const contentHash = bytesOf(args[1]);
-  assert.equal(contentHash.length, 32, `the content hash is ${contentHash.length} bytes; audit_anchor::anchor takes 32 (${args[1]})`);
+  assert.equal(contentHash.length, hashBytes, `the content hash is ${contentHash.length} bytes; audit_anchor::anchor takes ${hashBytes} (${args[1]})`);
   assert.deepEqual(contentHash, new Uint8Array(createHash('sha256').update(`e2e:${toHex(seed)}`).digest()), 'it is the sha256 digest itself');
   const walrusBlobId = bytesOf(args[2]);
-  assert.ok(walrusBlobId.length > 0 && walrusBlobId.length <= 64, `the blob id is ${walrusBlobId.length} bytes; audit_anchor::anchor takes 1 to 64`);
+  assert.ok(walrusBlobId.length > 0 && walrusBlobId.length <= maxBlobBytes, `the blob id is ${walrusBlobId.length} bytes; audit_anchor::anchor takes 1 to ${maxBlobBytes}`);
 
   // anchor_audit_hash takes Strings, and the app passes the hex text: unchanged.
   assert.equal(callArguments(script, 'audit_anchor::anchor_audit_hash')[2], 'tx.pure.string(auditHash)');
