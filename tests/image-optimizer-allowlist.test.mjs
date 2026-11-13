@@ -96,6 +96,56 @@ test('local images are limited to public/ asset paths without query strings', as
   }
 });
 
+async function publicFiles(dir = 'public') {
+  const entries = await readdir(new URL(`../${dir}/`, import.meta.url), { withFileTypes: true });
+  const files = [];
+  for (const entry of entries) {
+    const path = `${dir}/${entry.name}`;
+    if (entry.isDirectory()) files.push(...(await publicFiles(path)));
+    else files.push(path);
+  }
+  return files;
+}
+
+/** True when the bytes are PNG, JPEG, GIF, WebP or AVIF; false for SVG or anything else. */
+function isRaster(bytes) {
+  const ascii = (from, to) => String.fromCharCode(...bytes.subarray(from, to));
+  if (bytes[0] === 0x89 && ascii(1, 4) === 'PNG') return true;
+  if (bytes[0] === 0xff && bytes[1] === 0xd8 && bytes[2] === 0xff) return true;
+  if (ascii(0, 4) === 'GIF8') return true;
+  if (ascii(0, 4) === 'RIFF' && ascii(8, 12) === 'WEBP') return true;
+  if (ascii(4, 8) === 'ftyp' && ['avif', 'avis'].includes(ascii(8, 12))) return true;
+  return false;
+}
+
+test('the optimizer admits no SVG from public/', async () => {
+  // dangerouslyAllowSVG is off, so the <Image> component serves every .svg
+  // src as a plain file and never asks /_next/image for one. A direct request
+  // still can: next 16.0.0 to 16.4.4 lets the optimizer process an SVG with
+  // dangerouslyAllowSVG off (GHSA-7qx7-33qx-rqx2, published 3 Nov 2026,
+  // fixed in 16.4.5). Refusing .svg paths in localPatterns closes that
+  // surface whatever the next version.
+  const { localPatterns } = await config();
+  const admitted = (await publicFiles())
+    .filter((file) => file.toLowerCase().endsWith('.svg'))
+    .map((file) => file.slice('public'.length))
+    .filter((path) => hasLocalMatch(localPatterns, path));
+  assert.deepEqual(admitted, [], 'images.localPatterns admits these SVGs to /_next/image');
+});
+
+test('every public/ file the local patterns admit is a raster image by its bytes', async () => {
+  // An extension filter alone would admit an SVG saved under a .png name.
+  const { localPatterns } = await config();
+  const notRaster = [];
+  for (const file of await publicFiles()) {
+    const path = file.slice('public'.length);
+    if (!hasLocalMatch(localPatterns, path)) continue;
+    const bytes = await readFile(new URL(`../${file}`, import.meta.url));
+    if (!isRaster(bytes)) notRaster.push(path);
+  }
+  assert.deepEqual(notRaster, [], 'images.localPatterns admits files that are not raster images');
+});
+
 test('every raster image the UI references exists and is admitted by localPatterns', async () => {
   const { localPatterns } = await config();
   const paths = await rasterPaths();
