@@ -128,7 +128,13 @@ function demoMode() {
 
 type PublisherResult = {
   newlyCreated?: {
-    blobObject?: { blobId?: string; deletable?: boolean; storage?: { startEpoch?: number; endEpoch?: number } };
+    blobObject?: {
+      blobId?: string;
+      deletable?: boolean;
+      registeredEpoch?: number;
+      certifiedEpoch?: number;
+      storage?: { startEpoch?: number; endEpoch?: number };
+    };
     blobId?: string;
   };
   alreadyCertified?: { blobId?: string; endEpoch?: number };
@@ -138,17 +144,45 @@ type PublisherResult = {
 const epochOrNull = (v: unknown) => (typeof v === 'number' && Number.isInteger(v) && v >= 0 ? v : null);
 
 /**
+ * The epoch to measure a new blob's retention from: the latest epoch the
+ * publisher's response names for it. `epochs` is counted ahead of the epoch
+ * the store happened in, which the response does not state; but the blob was
+ * registered and certified in the epochs it reports, so the network was at
+ * least that far on. `storage.startEpoch` alone is not enough: a reused
+ * storage resource (resourceOperation `reuseStorage`) can have started long
+ * before this blob. The latest of the three is a floor for the store's
+ * epoch, so the epochs counted from it are never fewer than the blob truly
+ * has left: a blob this calls short is short. One it passes could still be
+ * short by however far the network had moved past that floor, which the
+ * response does not say. null when the response names none of them.
+ */
+function measuredFrom(created: NonNullable<PublisherResult['newlyCreated']>['blobObject']): number | null {
+  const known = [created?.registeredEpoch, created?.certifiedEpoch, created?.storage?.startEpoch]
+    .map(epochOrNull)
+    .filter((e): e is number => e !== null);
+  return known.length > 0 ? Math.max(...known) : null;
+}
+
+/**
  * What the evidence will not get, said once, by blob id, in the server log.
  * Nothing is refused: the payment behind the evidence has already happened,
  * and whether a short or deletable blob should stop it is a product decision.
  */
-function retentionShortfalls(blob: WalrusBlob, asked: number, startEpoch: number | null): string[] {
+function retentionShortfalls(blob: WalrusBlob, asked: number, fromEpoch: number | null): string[] {
   const problems: string[] = [];
   if (blob.endEpoch === null || blob.endEpoch === undefined) {
     problems.push('the publisher reported no end epoch, so how long Walrus keeps it is unknown');
-  } else if (blob.publisherOutcome === 'newlyCreated' && startEpoch !== null && blob.endEpoch - startEpoch < asked) {
-    const held = blob.endEpoch - startEpoch;
-    problems.push(`Walrus holds it for ${held} epoch${held === 1 ? '' : 's'} (to epoch ${blob.endEpoch}), not the ${asked} asked for`);
+  } else if (blob.publisherOutcome === 'newlyCreated') {
+    if (fromEpoch === null) {
+      problems.push(
+        `it lasts to epoch ${blob.endEpoch}, but the publisher named no epoch it was stored in, so whether that is the ${asked} asked for could not be measured`,
+      );
+    } else if (blob.endEpoch - fromEpoch < asked) {
+      const left = Math.max(0, blob.endEpoch - fromEpoch);
+      problems.push(
+        `Walrus holds it to epoch ${blob.endEpoch}, at most ${left} epoch${left === 1 ? '' : 's'} on from epoch ${fromEpoch} (the latest epoch the publisher reported for it), not the ${asked} asked for`,
+      );
+    }
   }
   if (blob.deletable === true) {
     problems.push('the blob is deletable: the publisher ignored permanent=true, so the Blob object\'s owner can delete it before it expires');
@@ -183,7 +217,7 @@ export async function storeEncryptedInvoice(encryptedData: string): Promise<Walr
 
   let epochs: number;
   let blob: WalrusBlob;
-  let startEpoch: number | null;
+  let fromEpoch: number | null;
   try {
     // A configuration error is thrown here, before anything is sent.
     epochs = walrusStoreEpochs();
@@ -202,7 +236,7 @@ export async function storeEncryptedInvoice(encryptedData: string): Promise<Walr
     if (!blobId) throw new Error('publisher response did not include a blob ID');
     const created = result.newlyCreated?.blobObject;
     const outcome = result.newlyCreated ? 'newlyCreated' : result.alreadyCertified ? 'alreadyCertified' : null;
-    startEpoch = epochOrNull(created?.storage?.startEpoch);
+    fromEpoch = measuredFrom(created);
     blob = {
       blobId,
       encryptedData,
@@ -219,7 +253,7 @@ export async function storeEncryptedInvoice(encryptedData: string): Promise<Walr
     throw new WalrusAdapterError(`Walrus publish failed: ${error instanceof Error ? error.message : 'unknown error'}`);
   }
 
-  const problems = retentionShortfalls(blob, epochs, startEpoch);
+  const problems = retentionShortfalls(blob, epochs, fromEpoch);
   if (problems.length > 0) {
     console.warn(`walrus store: evidence blob ${blob.blobId} may not be retained as asked: ${problems.join('; ')}.`);
   }
