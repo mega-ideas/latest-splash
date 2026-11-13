@@ -67,6 +67,8 @@ let savedFetch;
 let requests;
 let warnings;
 let savedWarn;
+let errors;
+let savedError;
 
 function respondWith(body, status = 200) {
   globalThis.fetch = async (input, init) => {
@@ -83,6 +85,9 @@ beforeEach(() => {
   warnings = [];
   savedWarn = console.warn;
   console.warn = (...args) => warnings.push(args.map((a) => (typeof a === 'string' ? a : JSON.stringify(a))).join(' '));
+  errors = [];
+  savedError = console.error;
+  console.error = (...args) => errors.push(args.map((a) => (typeof a === 'string' ? a : JSON.stringify(a))).join(' '));
 });
 
 afterEach(() => {
@@ -92,6 +97,7 @@ afterEach(() => {
   }
   globalThis.fetch = savedFetch;
   console.warn = savedWarn;
+  console.error = savedError;
 });
 
 function goLive() {
@@ -191,6 +197,59 @@ test('a bad WALRUS_STORE_EPOCHS stops a live store before the publisher is calle
 
   await assert.rejects(storeEncryptedInvoice(CIPHERTEXT), /WALRUS_STORE_EPOCHS/);
   assert.equal(requests.length, 0);
+});
+
+/* ── Configuration errors stay on the server ─────────────────────────── */
+
+// A bad WALRUS_STORE_EPOCHS, WALRUS_BLOB_OWNER or a missing aggregator URL is
+// the operator's mistake. The detail (which key, what it must be) belongs in
+// the server log; the customer whose invoice failed is told storage is not
+// available, not the name of an environment variable.
+const CONFIG_KEY = /WALRUS_|epoch|Sui address|0x|hex/i;
+
+test('a bad store setting is logged by name on the server and answered generically', async () => {
+  for (const [key, value] of [['WALRUS_STORE_EPOCHS', '60'], ['WALRUS_BLOB_OWNER', '0xabc']]) {
+    goLive();
+    process.env[key] = value;
+    respondWith(newlyCreated());
+    errors.length = 0;
+
+    const error = await storeEncryptedInvoice(CIPHERTEXT).then(() => null, (e) => e);
+
+    assert.ok(error instanceof walrus.WalrusAdapterError, `${key}: a WalrusAdapterError`);
+    assert.equal(requests.length, 0, `${key}: nothing sent`);
+    const reply = walrus.walrusErrorReply(error, 'invoice create');
+    assert.equal(reply.status, 500, key);
+    assert.doesNotMatch(reply.error, CONFIG_KEY, `${key}: the customer is not told the key`);
+    assert.ok(reply.error.length > 0, key);
+    assert.equal(errors.length, 1, `${key}: one server log line`);
+    assert.match(errors[0], new RegExp(key), `${key}: the server log names the key`);
+    assert.match(errors[0], /invoice create/, `${key}: and where it happened`);
+    delete process.env[key];
+  }
+});
+
+test('a missing aggregator URL is logged by name on the server and answered generically', async () => {
+  process.env.WALRUS_PUBLISHER_URL = 'https://publisher.example';
+  respondWith(CIPHERTEXT);
+
+  const error = await retrieveBlob('SomeLiveBlob').then(() => null, (e) => e);
+
+  assert.ok(error instanceof walrus.WalrusAdapterError);
+  assert.equal(requests.length, 0);
+  const reply = walrus.walrusErrorReply(error, 'walrus proof');
+  assert.doesNotMatch(reply.error, CONFIG_KEY);
+  assert.equal(errors.length, 1);
+  assert.match(errors[0], /WALRUS_AGGREGATOR_URL/);
+});
+
+test('the routes that answer a customer use the generic reply, never the raw adapter message', async () => {
+  const { readFile } = await import('node:fs/promises');
+  for (const file of ['app/api/invoices/route.ts', 'app/api/walrus/[blobId]/route.ts']) {
+    const text = await readFile(new URL(`../${file}`, import.meta.url), 'utf8');
+    assert.match(text, /walrusErrorReply\(/, `${file} answers through walrusErrorReply`);
+    assert.doesNotMatch(text, /error:\s*error\.message/, `${file} must not echo the adapter's message`);
+  }
 });
 
 /* ── Honest values where nothing was bought or nothing is known ───────── */
