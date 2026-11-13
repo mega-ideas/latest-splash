@@ -79,6 +79,20 @@ export function walrusErrorReply(error: WalrusAdapterError, where: string): { st
  * Maximum epochs: https://docs.wal.app/usage/networks.html (53 on Mainnet and
  * Testnet). `deletable` is deprecated and is never sent: with `permanent=true`
  * it is an INVALID_BLOB_PERSISTENCE error.
+ *
+ * The publisher also takes `force` and `share`, defined in its OpenAPI spec
+ * (https://github.com/MystenLabs/walrus/blob/main/crates/walrus-service/publisher_openapi.yaml,
+ * linked from the web-api page above). Neither is sent, by choice:
+ * - `force=true` always stores the blob as a new Blob object, even when it
+ *   is already certified for the asked epochs. It would turn an
+ *   `alreadyCertified` answer into a Blob object sent to `WALRUS_BLOB_OWNER`,
+ *   at the price of buying the same storage again on every repeat store;
+ *   whether to pay that is a product decision, so today such a blob is
+ *   flagged in the server log instead.
+ * - `share` makes the Blob object shared rather than owned. It is the
+ *   exclusive alternative to `send_object_to` (the spec's `send_or_share`),
+ *   so the two are never sent together, and Splash sends the object to its
+ *   own address.
  */
 export const WALRUS_MAX_EPOCHS = 53;
 
