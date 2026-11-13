@@ -210,6 +210,33 @@ test('staff and customer failures never share an email bucket', async () => {
   );
 });
 
+test('no address a customer can type reaches the staff address bucket', async () => {
+  // The customer route takes any string of up to 254 characters as the
+  // address. When the staff bucket was the customer one with keys spelled
+  // `staff:<address>`, a customer sign-in naming `staff:<ADMIN_EMAIL>` wrote
+  // into it, and five of those closed the console. Through the real customer
+  // route, from networks of their own, so only the address bucket is in play.
+  const { POST: customerPOST } = await import('../app/api/auth/login/route.ts');
+  const customerSignIn = (email, ip) =>
+    customerPOST(
+      new Request('https://splash.test/api/auth/login', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json', 'x-forwarded-for': ip },
+        body: JSON.stringify({ email, password: 'wrong' }),
+      }),
+    );
+
+  for (let i = 0; i < limiter.EMAIL_LIMIT; i++) {
+    assert.equal((await customerSignIn(`staff:${STAFF}`, `192.0.2.${i + 1}`)).status, 401, `customer guess ${i + 1} is answered`);
+  }
+  assert.equal(
+    (await customerSignIn(`staff:${STAFF}`, '192.0.2.99')).status,
+    429,
+    'the customer address bucket for that string is closed, so the failures were counted',
+  );
+  assert.equal((await signIn(STAFF, PASSWORD, '192.0.2.200')).status, 200, 'and the staff console is still open');
+});
+
 test('a successful staff sign-in clears that address’s failures', async () => {
   for (let i = 0; i < limiter.EMAIL_LIMIT - 1; i++) await signIn(STAFF, 'wrong');
   const ok = await signIn(STAFF, PASSWORD);
