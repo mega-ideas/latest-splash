@@ -4976,3 +4976,127 @@ fun the_payers_own_total_decides_when_it_is_the_larger() {
     pay(&mut s, &fx, STAFF, fx.staff, small, false);
     s.end();
 }
+
+// ─── Pre-audit B1: the policy-wide total at the window's edge ───────────────
+//
+// The window opens at the first part paid. A part counts until a window
+// length after the LAST part (whoever paid it), so a payment at the exact
+// end of a window whose last part was its first one meets nothing, and a
+// payment just after the end of a window with a late part opens a new
+// window carrying the old one's total until it stops counting.
+
+#[test]
+/// A part paid at the window's start counts until one millisecond before
+/// the window ends, and not at the end itself: the next payment there needs
+/// no approval and opens a new window with nothing carried, replacing the
+/// ended entry.
+fun the_policy_wide_total_stops_at_the_exact_window_end() {
+    let (mut s, fx) = setup();
+    lower_threshold(&mut s, &fx, 1_500_000_000);
+    let window = spend_policy::default_running_window_ms();
+    let wallet = payment_intent::kind_wallet();
+    let first = open(&mut s, &fx, STAFF, 1, wallet, SUPPLIER, 1_000_000_000);
+    pay(&mut s, &fx, STAFF, fx.staff, first, false);
+    advance(&mut s, window - 1);
+    assert_eq!(policy_total(&mut s, &fx, wallet, SUPPLIER, vector[]), 1_000_000_000);
+    advance(&mut s, 1);
+    assert_eq!(policy_total(&mut s, &fx, wallet, SUPPLIER, vector[]), 0);
+    let second = open(&mut s, &fx, JUNIOR, 2, wallet, SUPPLIER, 1_000_000_000);
+    pay(&mut s, &fx, JUNIOR, fx.junior, second, false);
+    assert_eq!(intent_status(&mut s, second), payment_intent::status_confirmed());
+    assert_eq!(policy_total(&mut s, &fx, wallet, SUPPLIER, vector[]), 1_000_000_000);
+    assert_eq!(policy_entries(&mut s, &fx), 1);
+    s.end();
+}
+
+#[test]
+#[expected_failure(abort_code = splash_spend::E_APPROVAL_REQUIRED)]
+/// One millisecond before the window ends, a second staff member may take
+/// the policy-wide total exactly to the threshold without an approval, and
+/// any part above it then needs one.
+fun one_millisecond_before_the_window_end_the_policy_wide_total_still_decides() {
+    let (mut s, fx) = setup();
+    lower_threshold(&mut s, &fx, 1_500_000_000);
+    let window = spend_policy::default_running_window_ms();
+    let wallet = payment_intent::kind_wallet();
+    let first = open(&mut s, &fx, STAFF, 1, wallet, SUPPLIER, 1_000_000_000);
+    pay(&mut s, &fx, STAFF, fx.staff, first, false);
+    advance(&mut s, window - 1);
+    let second = open(&mut s, &fx, JUNIOR, 2, wallet, SUPPLIER, 500_000_000);
+    pay(&mut s, &fx, JUNIOR, fx.junior, second, false);
+    assert_eq!(intent_status(&mut s, second), payment_intent::status_confirmed());
+    assert_eq!(policy_total(&mut s, &fx, wallet, SUPPLIER, vector[]), 1_500_000_000);
+    let third = open(&mut s, &fx, STAFF, 3, wallet, SUPPLIER, 1_000_000);
+    pay(&mut s, &fx, STAFF, fx.staff, third, false);
+    s.end();
+}
+
+#[test]
+/// Carry-over: STAFF pays at the window's start and JUNIOR one millisecond
+/// before its end; STAFF pays again at the end, which opens a new window
+/// carrying the 900 the old one still counts. The carry counts until a
+/// window after JUNIOR's part, then only the new window's own total does,
+/// and a payment then needs no approval for what was carried.
+fun the_policy_wide_total_carries_a_late_part_into_the_next_window() {
+    let (mut s, fx) = setup();
+    lower_threshold(&mut s, &fx, 1_500_000_000);
+    let window = spend_policy::default_running_window_ms();
+    let wallet = payment_intent::kind_wallet();
+    let a = open(&mut s, &fx, STAFF, 1, wallet, SUPPLIER, 400_000_000);
+    pay(&mut s, &fx, STAFF, fx.staff, a, false);
+    advance(&mut s, window - 1);
+    let b = open(&mut s, &fx, JUNIOR, 2, wallet, SUPPLIER, 500_000_000);
+    pay(&mut s, &fx, JUNIOR, fx.junior, b, false);
+    assert_eq!(policy_total(&mut s, &fx, wallet, SUPPLIER, vector[]), 900_000_000);
+    // The window's end: the late part still counts.
+    advance(&mut s, 1);
+    assert_eq!(policy_total(&mut s, &fx, wallet, SUPPLIER, vector[]), 900_000_000);
+    let c = open(&mut s, &fx, STAFF, 3, wallet, SUPPLIER, 300_000_000);
+    pay(&mut s, &fx, STAFF, fx.staff, c, false);
+    assert_eq!(intent_status(&mut s, c), payment_intent::status_confirmed());
+    // A new window: 300 of its own and 900 carried, in one entry.
+    assert_eq!(policy_total(&mut s, &fx, wallet, SUPPLIER, vector[]), 1_200_000_000);
+    assert_eq!(policy_entries(&mut s, &fx), 1);
+    // The carry counts until a window length after JUNIOR's part...
+    advance(&mut s, window - 2);
+    assert_eq!(policy_total(&mut s, &fx, wallet, SUPPLIER, vector[]), 1_200_000_000);
+    // ...and not from then: only the new window's 300 counts.
+    advance(&mut s, 1);
+    assert_eq!(policy_total(&mut s, &fx, wallet, SUPPLIER, vector[]), 300_000_000);
+    // JUNIOR's 1,000 now takes it to 1,300, under the threshold: no approval.
+    let d = open(&mut s, &fx, JUNIOR, 4, wallet, SUPPLIER, 1_000_000_000);
+    pay(&mut s, &fx, JUNIOR, fx.junior, d, false);
+    assert_eq!(intent_status(&mut s, d), payment_intent::status_confirmed());
+    assert_eq!(policy_total(&mut s, &fx, wallet, SUPPLIER, vector[]), 1_300_000_000);
+    // A window after the new window's last part, nothing counts.
+    advance(&mut s, window);
+    assert_eq!(policy_total(&mut s, &fx, wallet, SUPPLIER, vector[]), 0);
+    s.end();
+}
+
+#[test]
+#[expected_failure(abort_code = splash_spend::E_APPROVAL_REQUIRED)]
+/// The carried amount decides: just after the window's end, JUNIOR's own
+/// total counts 500 and STAFF's 300, both far from the threshold, but the
+/// policy-wide total counts 1,200 (900 carried), so JUNIOR's 400 needs an
+/// approval.
+fun a_carried_policy_wide_total_needs_an_approval_for_the_part_above_it() {
+    let (mut s, fx) = setup();
+    lower_threshold(&mut s, &fx, 1_500_000_000);
+    let window = spend_policy::default_running_window_ms();
+    let wallet = payment_intent::kind_wallet();
+    let a = open(&mut s, &fx, STAFF, 1, wallet, SUPPLIER, 400_000_000);
+    pay(&mut s, &fx, STAFF, fx.staff, a, false);
+    advance(&mut s, window - 1);
+    let b = open(&mut s, &fx, JUNIOR, 2, wallet, SUPPLIER, 500_000_000);
+    pay(&mut s, &fx, JUNIOR, fx.junior, b, false);
+    advance(&mut s, 1);
+    let c = open(&mut s, &fx, STAFF, 3, wallet, SUPPLIER, 300_000_000);
+    pay(&mut s, &fx, STAFF, fx.staff, c, false);
+    advance(&mut s, 1);
+    assert_eq!(total_paid(&mut s, &fx, JUNIOR, wallet, SUPPLIER), 500_000_000);
+    assert_eq!(policy_total(&mut s, &fx, wallet, SUPPLIER, vector[]), 1_200_000_000);
+    let d = open(&mut s, &fx, JUNIOR, 4, wallet, SUPPLIER, 400_000_000);
+    pay(&mut s, &fx, JUNIOR, fx.junior, d, false);
+    s.end();
+}
