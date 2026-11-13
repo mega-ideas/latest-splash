@@ -1,0 +1,220 @@
+// Pre-audit C1 (13 Nov 2026): settlement evidence on Walrus must outlive the
+// publisher's defaults. A `PUT /v1/blobs` with no parameters buys ONE epoch
+// (two weeks on Mainnet) and, since Walrus 1.33, a DELETABLE blob whose Blob
+// object stays with whoever runs the publisher. Audit anchors would then point
+// at evidence that is gone in two weeks, or that someone else can delete.
+//
+// Publisher API, as documented at https://docs.wal.app/usage/web-api.html
+// ("Storing Blobs"): `epochs`, `permanent=true`, `send_object_to`; the
+// response is either `newlyCreated.blobObject` (with `storage.startEpoch`,
+// `storage.endEpoch` and `deletable`) or `alreadyCertified` (with `endEpoch`
+// directly under it). The most epochs storage can be bought for is 53 on
+// Mainnet and Testnet (https://docs.wal.app/usage/networks.html).
+import assert from 'node:assert/strict';
+import { afterEach, beforeEach, test } from 'node:test';
+
+// A namespace import, so each test fails on its own claim if a helper is missing.
+import * as walrus from '../lib/server/walrus.ts';
+
+const { WALRUS_MAX_EPOCHS, retrieveBlob, storeEncryptedInvoice, walrusStoreEpochs, walrusStoreUrl } = walrus;
+
+const OWNER = `0x${'ab'.repeat(32)}`;
+const CIPHERTEXT = 'c2VhbGVkLWNpcGhlcnRleHQ=';
+
+/* ── The store URL ───────────────────────────────────────────────────── */
+
+test('the network maximum is 53 epochs, as Walrus documents it', () => {
+  assert.equal(WALRUS_MAX_EPOCHS, 53);
+});
+
+test('a store asks for the network maximum, as a permanent blob, by default', () => {
+  const url = new URL(walrusStoreUrl('https://publisher.example/', {}));
+  assert.equal(url.pathname, '/v1/blobs');
+  assert.equal(url.searchParams.get('epochs'), String(WALRUS_MAX_EPOCHS));
+  assert.equal(url.searchParams.get('permanent'), 'true');
+  // `deletable` is deprecated and, sent with `permanent=true`, is an
+  // INVALID_BLOB_PERSISTENCE error: never send it.
+  assert.equal(url.searchParams.has('deletable'), false);
+  assert.equal(url.searchParams.has('send_object_to'), false);
+});
+
+test('the epochs and the Blob owner come from the environment', () => {
+  const url = new URL(walrusStoreUrl('https://publisher.example', { WALRUS_STORE_EPOCHS: '26', WALRUS_BLOB_OWNER: OWNER }));
+  assert.equal(url.searchParams.get('epochs'), '26');
+  assert.equal(url.searchParams.get('permanent'), 'true');
+  assert.equal(url.searchParams.get('send_object_to'), OWNER);
+});
+
+test('an epoch count Walrus would refuse is refused before anything is sent', () => {
+  for (const bad of ['0', '54', '1.5', 'max', '-3']) {
+    assert.throws(() => walrusStoreEpochs({ WALRUS_STORE_EPOCHS: bad }), /WALRUS_STORE_EPOCHS/);
+  }
+  assert.equal(walrusStoreEpochs({ WALRUS_STORE_EPOCHS: ' 53 ' }), 53);
+  assert.equal(walrusStoreEpochs({ WALRUS_STORE_EPOCHS: '' }), WALRUS_MAX_EPOCHS);
+});
+
+test('a Blob owner that is not a Sui address is refused rather than sent to the publisher', () => {
+  for (const bad of ['0xabc', 'splash', `${OWNER}00`]) {
+    assert.throws(() => walrusStoreUrl('https://publisher.example', { WALRUS_BLOB_OWNER: bad }), /WALRUS_BLOB_OWNER/);
+  }
+});
+
+/* ── A live store ────────────────────────────────────────────────────── */
+
+const ENV_KEYS = ['USE_MOCK_APIS', 'WALRUS_PUBLISHER_URL', 'WALRUS_AGGREGATOR_URL', 'WALRUS_STORE_EPOCHS', 'WALRUS_BLOB_OWNER'];
+let savedEnv;
+let savedFetch;
+let requests;
+let warnings;
+let savedWarn;
+
+function respondWith(body, status = 200) {
+  globalThis.fetch = async (input, init) => {
+    requests.push({ url: String(input), method: init?.method ?? 'GET' });
+    return new Response(typeof body === 'string' ? body : JSON.stringify(body), { status });
+  };
+}
+
+beforeEach(() => {
+  savedEnv = Object.fromEntries(ENV_KEYS.map((k) => [k, process.env[k]]));
+  for (const k of ENV_KEYS) delete process.env[k];
+  savedFetch = globalThis.fetch;
+  requests = [];
+  warnings = [];
+  savedWarn = console.warn;
+  console.warn = (...args) => warnings.push(args.map((a) => (typeof a === 'string' ? a : JSON.stringify(a))).join(' '));
+});
+
+afterEach(() => {
+  for (const k of ENV_KEYS) {
+    if (savedEnv[k] === undefined) delete process.env[k];
+    else process.env[k] = savedEnv[k];
+  }
+  globalThis.fetch = savedFetch;
+  console.warn = savedWarn;
+});
+
+function goLive() {
+  process.env.WALRUS_PUBLISHER_URL = 'https://publisher.example';
+  process.env.WALRUS_AGGREGATOR_URL = 'https://aggregator.example';
+}
+
+const newlyCreated = ({ start = 100, end = 153, deletable = false } = {}) => ({
+  newlyCreated: {
+    blobObject: {
+      id: `0x${'11'.repeat(32)}`,
+      registeredEpoch: start,
+      blobId: 'NewBlobId123',
+      size: 24,
+      encodingType: 'RS2',
+      certifiedEpoch: start,
+      storage: { id: `0x${'22'.repeat(32)}`, startEpoch: start, endEpoch: end, storageSize: 66034000 },
+      deletable,
+    },
+    resourceOperation: { registerFromScratch: { encodedLength: 66034000, epochsAhead: end - start } },
+    cost: 132300,
+  },
+});
+
+test('a live store sends the retention parameters and records the end epoch Walrus reports', async () => {
+  goLive();
+  process.env.WALRUS_BLOB_OWNER = OWNER;
+  respondWith(newlyCreated());
+
+  const blob = await storeEncryptedInvoice(CIPHERTEXT);
+
+  assert.equal(requests.length, 1);
+  assert.equal(requests[0].method, 'PUT');
+  const sent = new URL(requests[0].url);
+  assert.equal(sent.origin + sent.pathname, 'https://publisher.example/v1/blobs');
+  assert.equal(sent.searchParams.get('epochs'), '53');
+  assert.equal(sent.searchParams.get('permanent'), 'true');
+  assert.equal(sent.searchParams.get('send_object_to'), OWNER);
+
+  assert.equal(blob.mode, 'live');
+  assert.equal(blob.blobId, 'NewBlobId123');
+  assert.equal(blob.epochs, 53);
+  assert.equal(blob.endEpoch, 153);
+  assert.equal(blob.deletable, false);
+  assert.equal(blob.publisherOutcome, 'newlyCreated');
+  assert.deepEqual(warnings, []);
+});
+
+test('a new blob Walrus holds for fewer epochs than asked, or as deletable, is recorded and flagged', async () => {
+  goLive();
+  respondWith(newlyCreated({ start: 100, end: 101, deletable: true }));
+
+  const blob = await storeEncryptedInvoice(CIPHERTEXT);
+
+  assert.equal(blob.endEpoch, 101);
+  assert.equal(blob.deletable, true);
+  assert.equal(warnings.length, 1);
+  assert.match(warnings[0], /NewBlobId123/);
+  assert.match(warnings[0], /deletable/);
+  assert.match(warnings[0], /1 epoch/);
+});
+
+test('an already-certified blob keeps the end epoch Walrus reports, and is flagged as held elsewhere', async () => {
+  goLive();
+  process.env.WALRUS_BLOB_OWNER = OWNER;
+  respondWith({ alreadyCertified: { blobId: 'OldBlobId456', event: { txDigest: 'Digest1', eventSeq: '0' }, endEpoch: 140 } });
+
+  const blob = await storeEncryptedInvoice(CIPHERTEXT);
+
+  assert.equal(blob.blobId, 'OldBlobId456');
+  assert.equal(blob.epochs, 53);
+  assert.equal(blob.endEpoch, 140);
+  assert.equal(blob.deletable, null);
+  assert.equal(blob.publisherOutcome, 'alreadyCertified');
+  assert.equal(warnings.length, 1);
+  assert.match(warnings[0], /OldBlobId456/);
+  assert.match(warnings[0], /already certified/);
+  assert.match(warnings[0], /140/);
+});
+
+test('a publisher that reports no end epoch is recorded as unknown and flagged', async () => {
+  goLive();
+  respondWith({ newlyCreated: { blobObject: { blobId: 'NoEpochBlob' } } });
+
+  const blob = await storeEncryptedInvoice(CIPHERTEXT);
+
+  assert.equal(blob.endEpoch, null);
+  assert.equal(warnings.length, 1);
+  assert.match(warnings[0], /NoEpochBlob/);
+  assert.match(warnings[0], /end epoch/);
+});
+
+test('a bad WALRUS_STORE_EPOCHS stops a live store before the publisher is called', async () => {
+  goLive();
+  process.env.WALRUS_STORE_EPOCHS = '60';
+  respondWith(newlyCreated());
+
+  await assert.rejects(storeEncryptedInvoice(CIPHERTEXT), /WALRUS_STORE_EPOCHS/);
+  assert.equal(requests.length, 0);
+});
+
+/* ── Honest values where nothing was bought or nothing is known ───────── */
+
+test('a demo store buys no Walrus storage and says so', async () => {
+  process.env.USE_MOCK_APIS = 'true';
+  respondWith(newlyCreated());
+
+  const blob = await storeEncryptedInvoice(CIPHERTEXT);
+
+  assert.equal(requests.length, 0);
+  assert.equal(blob.mode, 'demo');
+  assert.equal(blob.epochs, 0);
+  assert.equal(blob.endEpoch, null);
+});
+
+test('a live read does not invent a retention the aggregator never reported', async () => {
+  goLive();
+  respondWith(CIPHERTEXT);
+
+  const blob = await retrieveBlob('SomeLiveBlob');
+
+  assert.equal(requests[0].url, 'https://aggregator.example/v1/blobs/SomeLiveBlob');
+  assert.equal(blob.encryptedData, CIPHERTEXT);
+  assert.equal(blob.epochs, null);
+  assert.equal(blob.endEpoch, null);
+});
