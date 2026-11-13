@@ -223,6 +223,63 @@ test('a successful staff sign-in clears that address’s failures', async () => 
   assert.equal((await signIn(STAFF, PASSWORD)).status, 200);
 });
 
+// ── Requests in flight together ─────────────────────────────────────────────
+
+/** How many of the responses came back with each status. */
+function tally(responses) {
+  const counts = {};
+  for (const response of responses) counts[response.status] = (counts[response.status] ?? 0) + 1;
+  return counts;
+}
+
+test('a burst of guesses sent together is answered no more often than five sent one by one', async () => {
+  // Reading the count, checking the password and then recording the failure
+  // lets every request in flight read the same stale count: a parallel client
+  // got its password checked as often as it liked. From networks of their
+  // own, so only the address bucket is in play.
+  const burst = 30;
+  const responses = await Promise.all(
+    Array.from({ length: burst }, (_, i) => signIn(STAFF, `wrong-${i}`, `192.0.2.${i + 1}`)),
+  );
+  const counts = tally(responses);
+  assert.ok((counts[401] ?? 0) <= limiter.EMAIL_LIMIT, `at most ${limiter.EMAIL_LIMIT} passwords checked, got ${JSON.stringify(counts)}`);
+  assert.equal((counts[401] ?? 0) + (counts[429] ?? 0), burst, `every other guess is refused, got ${JSON.stringify(counts)}`);
+
+  // A refused guess is not counted, so what the burst left unanswered is still
+  // there to be used one by one, and not a guess more: five in all.
+  let answered = counts[401] ?? 0;
+  for (let i = 0; i <= limiter.EMAIL_LIMIT; i++) {
+    const status = (await signIn(STAFF, `after-${i}`, `192.0.2.${150 + i}`)).status;
+    if (status === 429) break;
+    assert.equal(status, 401);
+    answered += 1;
+  }
+  assert.equal(answered, limiter.EMAIL_LIMIT, 'five passwords checked across the burst and after it');
+  assert.equal((await signIn(STAFF, PASSWORD, '192.0.2.200')).status, 429, 'and then the right one waits too');
+});
+
+test('a burst hiding the right password among wrong ones does not reach it past the limit', async () => {
+  const wrong = 29;
+  const responses = await Promise.all([
+    ...Array.from({ length: wrong }, (_, i) => signIn(STAFF, `wrong-${i}`, `192.0.2.${i + 1}`)),
+    signIn(STAFF, PASSWORD, '192.0.2.100'),
+  ]);
+  const counts = tally(responses);
+  const answered = (counts[401] ?? 0) + (counts[200] ?? 0);
+  assert.ok(answered <= limiter.EMAIL_LIMIT, `at most ${limiter.EMAIL_LIMIT} passwords checked, got ${JSON.stringify(counts)}`);
+});
+
+test('a burst from one network spraying addresses is answered no more often than the network limit', async () => {
+  const burst = 60;
+  const ip = '203.0.113.50';
+  const responses = await Promise.all(
+    Array.from({ length: burst }, (_, i) => signIn(`spray${i}@splash.test`, 'wrong', ip)),
+  );
+  const counts = tally(responses);
+  assert.ok((counts[401] ?? 0) <= limiter.IP_LIMIT, `at most ${limiter.IP_LIMIT} passwords checked, got ${JSON.stringify(counts)}`);
+  assert.equal((counts[401] ?? 0) + (counts[429] ?? 0), burst, `every other guess is refused, got ${JSON.stringify(counts)}`);
+});
+
 // ── Without a database ──────────────────────────────────────────────────────
 
 test('production without a database refuses staff sign-in rather than run unlimited', async () => {
