@@ -1,0 +1,243 @@
+import assert from 'node:assert/strict';
+import { readdir, readFile } from 'node:fs/promises';
+import { registerHooks } from 'node:module';
+import os from 'node:os';
+import path from 'node:path';
+import test, { after as afterAll, before, beforeEach } from 'node:test';
+
+import { PGlite } from '@electric-sql/pglite';
+import { drizzle } from 'drizzle-orm/pglite';
+
+import * as schema from '../lib/db/schema.ts';
+
+/**
+ * C5 (pre-audit fix, 13 Nov 2026): staff sign-in is limited like customer
+ * sign-in.
+ *
+ * The staff console approves KYB, which verifies a business on chain, and
+ * /api/admin/login used to answer every guess at the one configured staff
+ * password for as long as anyone kept asking. It now goes through the same
+ * failed-attempt limiter as the customer login (lib/auth/login-rate-limit.ts:
+ * five per email per 15 minutes, twenty per network per hour), consulted
+ * BEFORE the password is checked, under an email key of its own.
+ *
+ * This file drives the real route on PGlite with the repository's migrations.
+ * The only stand-in is `cookies()` from next/headers, which exists only inside
+ * a Next request; here it records the session cookie the route sets.
+ */
+
+process.env.DATABASE_URL = 'postgres://pglite.invalid/admin-login-limit';
+process.env.ADMIN_EMAIL = 'staff@splash.test';
+process.env.ADMIN_PASSWORD = 'correct-staff-password-for-tests';
+process.env.ADMIN_SESSION_SECRET = 'admin-login-limit-session-secret-0123456789abcdef0123456789';
+// The revocation epoch file is read from here; keep it out of the repo.
+process.env.SPLASH_DATA_DIR = path.join(os.tmpdir(), 'splash-admin-login-limit-no-data');
+// One proxy in front (nginx): the client is the last X-Forwarded-For entry.
+delete process.env.TRUSTED_PROXY_HOPS;
+delete process.env.CLIENT_IP_HEADER;
+
+const STAFF = process.env.ADMIN_EMAIL;
+const PASSWORD = process.env.ADMIN_PASSWORD;
+
+// ── A request scope outside Next ────────────────────────────────────────────
+
+const scope = { cookiesSet: [] };
+globalThis.__adminLoginLimitScope = scope;
+
+const NEXT_HEADERS = `data:text/javascript,${encodeURIComponent(`
+  export async function cookies() {
+    const jar = globalThis.__adminLoginLimitScope;
+    return {
+      get: () => undefined,
+      getAll: () => [],
+      has: () => false,
+      set: (name, value) => { jar.cookiesSet.push(name); },
+      delete: () => {},
+    };
+  }
+  export async function headers() {
+    return new Headers();
+  }
+`)}`;
+
+registerHooks({
+  resolve(specifier, context, nextResolve) {
+    if (specifier === 'next/headers') return { url: NEXT_HEADERS, shortCircuit: true };
+    // A route imports 'next/server', which plain Node resolves only with its extension.
+    if (specifier === 'next/server') return nextResolve('next/server.js', context);
+    return nextResolve(specifier, context);
+  },
+});
+
+let client;
+let db;
+let POST;
+let limiter;
+
+before(async () => {
+  client = new PGlite();
+  const files = (await readdir(new URL('../drizzle', import.meta.url))).filter((f) => f.endsWith('.sql')).sort();
+  for (const file of files) {
+    const sqlText = await readFile(new URL(`../drizzle/${file}`, import.meta.url), 'utf8');
+    for (const statement of sqlText.split('--> statement-breakpoint')) {
+      const trimmed = statement.trim();
+      if (trimmed) await client.exec(trimmed);
+    }
+  }
+  db = drizzle(client, { schema });
+  globalThis.splashDb = { pool: { end: async () => {} }, db };
+  ({ POST } = await import('../app/api/admin/login/route.ts'));
+  limiter = await import('../lib/auth/login-rate-limit.ts');
+});
+
+afterAll(async () => {
+  delete globalThis.splashDb;
+  await client?.close();
+});
+
+beforeEach(async () => {
+  await client.exec('DELETE FROM rate_limit_hits');
+  scope.cookiesSet.length = 0;
+});
+
+/** One sign-in attempt from `ip`, as nginx would forward it. */
+function signIn(email, password, ip = '198.51.100.1') {
+  return POST(
+    new Request('https://splash.test/api/admin/login', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json', 'x-forwarded-for': ip },
+      body: JSON.stringify({ email, password }),
+    }),
+  );
+}
+
+/** Run `fn` with the environment changed, and put it back afterwards. */
+async function withEnv(changes, fn) {
+  const saved = Object.fromEntries(Object.keys(changes).map((key) => [key, process.env[key]]));
+  for (const [key, value] of Object.entries(changes)) {
+    if (value === undefined) delete process.env[key];
+    else process.env[key] = value;
+  }
+  try {
+    return await fn();
+  } finally {
+    for (const [key, value] of Object.entries(saved)) {
+      if (value === undefined) delete process.env[key];
+      else process.env[key] = value;
+    }
+  }
+}
+
+// ── The limit ───────────────────────────────────────────────────────────────
+
+test('five wrong passwords close the staff sign-in, and the right one is then refused before it is checked', async () => {
+  for (let i = 0; i < limiter.EMAIL_LIMIT; i++) {
+    assert.equal((await signIn(STAFF, `wrong-${i}`)).status, 401, `guess ${i + 1} is answered`);
+  }
+
+  const refused = await signIn(STAFF, PASSWORD);
+  assert.equal(refused.status, 429, 'the limit is consulted before the password, so even the right one waits');
+  const retryAfter = Number(refused.headers.get('Retry-After'));
+  assert.ok(retryAfter > 0 && retryAfter <= 15 * 60, `Retry-After is inside the 15-minute window (got ${retryAfter})`);
+  assert.equal((await refused.json()).session, undefined);
+  assert.deepEqual(scope.cookiesSet, [], 'no staff session is minted while the limit holds');
+});
+
+test('changing the case or padding of the email does not open a fresh bucket', async () => {
+  // Every one of these signs in with the right password: the credential check
+  // trims and lowercases. So each must count against the same staff address,
+  // or an attacker gets five more guesses per spelling.
+  const spellings = ['STAFF@SPLASH.TEST', ' staff@splash.test', '\tStaff@Splash.Test', 'staff@splash.test  ', '  STAFF@splash.test\n'];
+  assert.equal((await signIn(spellings[1], PASSWORD)).status, 200, 'a padded spelling is a real sign-in');
+
+  for (const spelling of spellings) {
+    assert.equal((await signIn(spelling, 'wrong')).status, 401);
+  }
+  assert.equal((await signIn(STAFF, PASSWORD)).status, 429, 'five failures across spellings close the one address');
+});
+
+test('the refusal says nothing about whether the email is the staff address', async () => {
+  for (let i = 0; i < limiter.EMAIL_LIMIT; i++) {
+    await signIn(STAFF, 'wrong', '198.51.100.10');
+    await signIn('nobody@splash.test', 'wrong', '198.51.100.11');
+  }
+  const staff = await signIn(STAFF, 'wrong', '198.51.100.10');
+  const nobody = await signIn('nobody@splash.test', 'wrong', '198.51.100.11');
+  assert.equal(staff.status, 429);
+  assert.equal(nobody.status, 429);
+  assert.deepEqual(await staff.json(), await nobody.json(), 'the same refusal for the staff address and any other');
+
+  const wrongPassword = await signIn(STAFF, 'wrong', '198.51.100.12');
+  const unknownEmail = await signIn('nobody-else@splash.test', 'wrong', '198.51.100.13');
+  assert.equal(wrongPassword.status, 401);
+  assert.equal(unknownEmail.status, 401);
+  assert.deepEqual(await wrongPassword.json(), await unknownEmail.json(), 'the same failure for both');
+});
+
+test('a failure counts against the network too: one source spraying addresses is stopped', async () => {
+  const ip = '203.0.113.7';
+  // Four guesses each at distinct addresses: every address stays under its own
+  // limit of five, so only the per-network count can catch this.
+  for (let i = 0; i < limiter.IP_LIMIT; i++) {
+    assert.equal((await signIn(`guess${Math.floor(i / 4)}@splash.test`, 'wrong', ip)).status, 401);
+  }
+  assert.equal((await signIn(STAFF, PASSWORD, ip)).status, 429, 'the network is closed, staff address included');
+  assert.equal((await signIn(STAFF, PASSWORD, '203.0.113.8')).status, 200, 'another network is not');
+});
+
+test('staff and customer failures never share an email bucket', async () => {
+  // A customer account with the same address as the staff login fails five
+  // times (from other networks, so only the email bucket is in play).
+  for (let i = 0; i < limiter.EMAIL_LIMIT; i++) {
+    await limiter.recordFailedLogin(db, { email: STAFF, ip: `192.0.2.${i}` });
+  }
+  assert.equal((await limiter.checkLoginRateLimit(db, { email: STAFF, ip: '192.0.2.99' })).allowed, false);
+  assert.equal((await signIn(STAFF, PASSWORD)).status, 200, 'customer failures do not lock the staff console');
+
+  await client.exec('DELETE FROM rate_limit_hits');
+  for (let i = 0; i < limiter.EMAIL_LIMIT; i++) {
+    await signIn(STAFF, 'wrong', `192.0.2.${i}`);
+  }
+  assert.equal((await signIn(STAFF, PASSWORD, '192.0.2.99')).status, 429);
+  assert.equal(
+    (await limiter.checkLoginRateLimit(db, { email: STAFF, ip: '192.0.2.99' })).allowed,
+    true,
+    'staff failures do not lock the customer account with the same address',
+  );
+});
+
+test('a successful staff sign-in clears that address’s failures', async () => {
+  for (let i = 0; i < limiter.EMAIL_LIMIT - 1; i++) await signIn(STAFF, 'wrong');
+  const ok = await signIn(STAFF, PASSWORD);
+  assert.equal(ok.status, 200);
+  assert.equal((await ok.json()).session.email, STAFF);
+  assert.deepEqual(scope.cookiesSet, ['splash_admin_session']);
+
+  // Without the clear these would be failures six to nine, and refused.
+  for (let i = 0; i < limiter.EMAIL_LIMIT - 1; i++) {
+    assert.equal((await signIn(STAFF, 'wrong')).status, 401);
+  }
+  assert.equal((await signIn(STAFF, PASSWORD)).status, 200);
+});
+
+// ── Without a database ──────────────────────────────────────────────────────
+
+test('production without a database refuses staff sign-in rather than run unlimited', async () => {
+  const response = await withEnv({ DATABASE_URL: undefined, NODE_ENV: 'production' }, () => signIn(STAFF, PASSWORD));
+  assert.equal(response.status, 401);
+  assert.equal((await response.json()).session, undefined);
+  assert.deepEqual(scope.cookiesSet, [], 'no staff session without somewhere to count failures');
+});
+
+test('a development machine without a database signs staff in as before', async () => {
+  await withEnv({ DATABASE_URL: undefined }, async () => {
+    for (let i = 0; i < limiter.EMAIL_LIMIT * 2; i++) {
+      assert.equal((await signIn(STAFF, 'wrong')).status, 401);
+    }
+    const ok = await signIn(STAFF, PASSWORD);
+    assert.equal(ok.status, 200, 'no limit is enforced where there is nowhere to count');
+    assert.equal((await ok.json()).session.email, STAFF);
+  });
+  const { rows } = await client.query('select count(*)::int as n from rate_limit_hits');
+  assert.equal(rows[0].n, 0, 'nothing was written to the database the route was told it does not have');
+});
