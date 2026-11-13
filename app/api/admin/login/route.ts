@@ -8,6 +8,9 @@ import { readJsonBody } from '@/lib/server/http';
  *  business, and saying would confirm the staff address. */
 const INVALID = 'Invalid staff credentials';
 
+/** The longest an address can be (RFC 5321), as the customer route uses. */
+const MAX_EMAIL_LENGTH = 254;
+
 /**
  * Staff sign-in.
  *
@@ -34,6 +37,17 @@ export async function POST(request: Request) {
   const body = await readJsonBody(request);
   const email = String(body.email ?? '');
   const password = String(body.password ?? '');
+
+  // No address is longer than 254 characters (RFC 5321), the customer route
+  // refuses one, and the limiter cannot store one: its key goes into a btree
+  // index that refuses a row over 2704 bytes, which made the route throw.
+  // Such an address can never be the staff one, so it gets the answer any
+  // wrong pair gets, before the limiter is touched. The password is not
+  // capped: ADMIN_PASSWORD has no length rule, and it never reaches the
+  // database.
+  if (email.length > MAX_EMAIL_LENGTH) {
+    return NextResponse.json({ error: INVALID }, { status: 401 });
+  }
 
   if (!process.env.DATABASE_URL) {
     if (process.env.NODE_ENV === 'production') {
