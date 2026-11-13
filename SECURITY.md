@@ -12,12 +12,20 @@
 > H-01 to H-06, M-01 to M-08, L-01 to L-06, I-01 to I-04, dated 2026-05-29)
 > describe the May scaffold under `move/sources/`, which no longer exists.
 > Their "Open" statuses are history; the 2026-07-13 re-audit records the
-> rewrites. The dated passes from July and August (S-01 to S-12, A-01 to
-> A-19, the A-11/A-12 ruling, and the M-01 to M-09 rows that reuse those IDs)
-> describe the pre-v2 packages, `splash_custody` and `splash_meter` among
-> them. Each row keeps the status it was last given; the rows still marked
-> Open there (A-12 to A-16, A-19) have not been re-checked against v2 in this
-> note. All of it is kept for the record.
+> rewrites. All of that is kept for the record.
+>
+> The dated passes from July and August are of two kinds. S-01 to S-12, the
+> M-01 to M-09 rows that reuse the May IDs, and the A-11/A-12 ruling and build
+> describe the pre-v2 Move code: the `move/sources/` package and the packages
+> later split out of it, `splash_custody` and `splash_meter` among them (M-05
+> and M-06 are app-side fixes made in the same pass). A-01 to A-19 come from
+> the 2026-08-13 adversarial pass, which its own heading calls the
+> application tier: most of them are about the TypeScript server, its routes
+> and its keys as they stood then, not about a Move package. Each row keeps the
+> status it was last given. The A rows still marked Open (A-12 to A-16, A-19)
+> are app or operations issues that may still apply today; they have not been
+> re-checked against v2 in this note, and retiring the old packages does not
+> close them.
 >
 > v2's own review notes are in the sections headed "v2 Phase 1" (the Move
 > packages, 24 Oct 2026), "v2 Phase 2" and "v2 Phase 3"; the design and its
