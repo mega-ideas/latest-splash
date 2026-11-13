@@ -115,9 +115,13 @@ export type RunningTotalView = {
    * from it still counts.
    */
   countsFromMs?: string;
-  /** How much more this payer can pay this recipient before an owner must approve. */
+  /**
+   * How much more this payer can pay this recipient before an owner must
+   * approve: the threshold less the larger of `countedMinor` and the
+   * recipient's policy-wide total (pre-audit B1), as the chain's check counts.
+   */
   beforeApprovalMinor: string;
-  /** At or above 80% of the threshold. */
+  /** What the check counts (the larger of the two) is at or above 80% of the threshold. */
   nearThreshold: boolean;
 };
 
@@ -207,6 +211,9 @@ function allowanceView(a: HeldAllowance, now: bigint, current: boolean): Allowan
   };
 }
 
+/** Which recipient a running total is to: the bank beneficiary's commitment, or the address. */
+const destinationKey = (e: { recipient: string; beneficiary: string }) => (e.beneficiary.length > 0 ? `b:${e.beneficiary.toLowerCase()}` : `r:${e.recipient}`);
+
 /** Pre-audit B1: the policy-wide totals that still count at `now`, as the chain counts them. */
 function recipientTotals(policy: PolicyState, now: bigint): RecipientTotalView[] {
   const threshold = policy.secondApprovalThreshold;
@@ -261,6 +268,11 @@ export function buildSpendView(input: {
   const unattached: AllowanceView[] = [];
   if (current) {
     const threshold = current.secondApprovalThreshold;
+    // Pre-audit B1: what every payer paid each recipient without an approval,
+    // counted now. The chain's check counts the larger of this and the
+    // payer's own total, so the room before an approval and the near flag do too.
+    const policyWide = new Map<string, bigint>();
+    for (const e of current.policyTotals ?? []) policyWide.set(destinationKey(e), thresholdCounted(e, now).countedMinor);
     for (const sp of current.spenders) {
       const mine = bound.filter((a) => a.spender === sp.spender).map((a) => allowanceView(a, now, true));
       const status: RuleView['status'] =
@@ -269,6 +281,8 @@ export function buildSpendView(input: {
         .filter((e) => e.payer === sp.spender)
         .map((e) => {
           const { countedMinor, countsUntilMs } = thresholdCounted(e, now);
+          const all = policyWide.get(destinationKey(e)) ?? 0n;
+          const checked = all > countedMinor ? all : countedMinor;
           const bank = e.beneficiary.length > 0;
           return {
             recipient: bank ? null : e.recipient,
@@ -279,8 +293,8 @@ export function buildSpendView(input: {
             countedMinor: s(countedMinor),
             countsUntilMs: s(countsUntilMs),
             countsFromMs: s(now < e.carriedUntilMs && e.carried > 0n ? e.windowStartMs - (e.windowEndMs - e.windowStartMs) : e.windowStartMs),
-            beforeApprovalMinor: s(countedMinor >= threshold ? 0n : threshold - countedMinor),
-            nearThreshold: threshold > 0n && countedMinor * 100n >= threshold * 80n,
+            beforeApprovalMinor: s(checked >= threshold ? 0n : threshold - checked),
+            nearThreshold: threshold > 0n && checked * 100n >= threshold * 80n,
           };
         })
         .filter((t) => t.countedMinor !== '0' || t.totalMinor !== '0');

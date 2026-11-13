@@ -190,20 +190,32 @@ nothing else moves.
 ## Near-threshold alerts (detective only)
 
 The chain enforces the second-approval threshold over a running total per
-(payer, recipient). Two patterns stay under it, and
+(payer, recipient) and, since pre-audit B1, a policy-wide total per
+recipient of what every payer paid it without an owner's approval; the
+check counts the larger of the two. Two patterns come close to it, and
 `lib/server/near-threshold.ts` flags them for the owners from the same
-index (running totals counted as `threshold_total` counts them, and
+index (running totals counted as `threshold_total` counts them, the
+policy-wide totals as `policy_threshold_total` counts them, and
 `RuleSpend`):
 
 - **`near_threshold_repeat`**: one spender has paid one recipient (or one
   bank beneficiary) two or more times (`RuleSpend`) and what the check counts
-  now is at least 80% of the threshold and below it. At or above the
-  threshold the chain itself asks for an approval, so that is not flagged.
+  now (the larger of their own total and the policy-wide one) is at least
+  80% of the threshold and below it. At or above the threshold the chain
+  itself asks for an approval, so that is not flagged.
 - **`same_recipient_many_spenders`**: two or more spenders (the operator's
   executor rule included) each have a total to the same recipient or
-  beneficiary, together at least 80% of the threshold; `over_threshold`
-  when together they reach it, since each total was checked alone and no
-  approval was asked for.
+  beneficiary, and the larger of their own totals added up and the
+  policy-wide total is at least 80% of the threshold; `over_threshold` when
+  it reaches it. Before B1 each total was checked alone, so a split could
+  pass the threshold with no approval; now the chain asks for an owner's
+  approval for any payment that would take the policy-wide total above it,
+  and the alert says so rather than that no approval was asked for (part of
+  what they paid may have carried one).
+
+The spend view's `nearThreshold` flag and `beforeApprovalMinor` on each
+running total count the same larger total; `countedMinor` stays the
+payer's own.
 
 RuleSpend carries no principal: the amounts are the policy's totals. A
 bank payout's RuleSpend names the partner deposit address, so its payments

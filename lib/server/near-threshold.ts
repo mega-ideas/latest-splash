@@ -1,30 +1,40 @@
 /**
  * Near-threshold alerts for spending rules (v2 Phase 2; A1 §6; Phase 1 R5).
  *
- * The second-approval threshold is enforced on chain over a running total
- * per (payer, recipient): one staff member splitting one invoice into
- * several payments needs an owner's approval for the part over it. Two
- * patterns stay under it, and this module flags them for the owners. It is
- * DETECTIVE only: it blocks nothing, signs nothing and changes no rule. A
- * staff member can build and submit a payment alone, without Splash's
- * backend, so a flag is all an off-chain check can be.
+ * The second-approval threshold is enforced on chain over running totals:
+ * one staff member splitting one invoice into several payments needs an
+ * owner's approval for the part over it, and (pre-audit B1) so do several
+ * staff splitting one recipient's payments, because the check counts the
+ * larger of the payer's own total and what EVERY payer paid that recipient
+ * without an owner's approval (the policy-wide total). Two patterns come
+ * close to it, and this module flags them for the owners. It is DETECTIVE
+ * only: it blocks nothing, signs nothing and changes no rule. A staff
+ * member can build and submit a payment alone, without Splash's backend,
+ * so a flag is all an off-chain check can be.
  *
  *   near_threshold_repeat
  *     One spender has paid one recipient (or one bank beneficiary) two or
- *     more times, and what the threshold check counts for them now is at or
- *     above 80% of the threshold but still below it: the next payment
- *     could be the one that needs an approval, or the payments are being
- *     kept just under it.
+ *     more times, and what the threshold check counts for them now (the
+ *     larger of their own total and the policy-wide one) is at or above 80%
+ *     of the threshold but still below it: the next payment could be the
+ *     one that needs an approval, or the payments are being kept just
+ *     under it.
  *
  *   same_recipient_many_spenders
  *     Two or more spenders each have a running total to the same recipient
  *     (or beneficiary), and together they count at or above 80% of the
- *     threshold. Each total is checked on its own, so together they can
- *     pass the threshold with no approval at all (`over_threshold`).
+ *     threshold: the larger of their own totals added up and the
+ *     policy-wide total. `over_threshold` once that reaches the threshold.
+ *     The chain asks for an owner's approval for any payment that would
+ *     take the policy-wide total above it, so this is no longer a way
+ *     around the threshold; it shows the owners several people paying one
+ *     recipient that much.
  *
  * Inputs are what the chain shows, through the spending-rule index
  * (lib/server/spend-rules-index.ts): the running totals the SpendPolicy
- * keeps, counted as `spend_policy::threshold_total` counts them, and the
+ * keeps, counted as `spend_policy::threshold_total` counts them, the
+ * policy-wide totals (`recipientTotals`), counted as
+ * `spend_policy::policy_threshold_total` counts them, and the
  * `RuleSpend` events (who paid whom). RuleSpend carries no principal; the
  * amounts are the policy's totals. A bank payout's RuleSpend names the
  * partner deposit address, so its payments are counted per deposit address
@@ -88,6 +98,8 @@ function list(names: string[]): string {
   return `${names.slice(0, -1).join(', ')} and ${names[names.length - 1]}`;
 }
 
+/** Pre-audit B1: how the chain counts several payers to one recipient. */
+const TOGETHER = "What anyone pays it without an owner's approval counts together, so any payment to it that would take that above the threshold needs an owner's approval.";
 const ACT = 'Check these payments in your spending rules. Splash blocks nothing on this alert; to stop further payments, change or revoke a rule.';
 
 export function deriveNearThresholdAlerts(view: SpendView, opts: { nameOf?: NameOf } = {}): NearThresholdAlert[] {
@@ -98,13 +110,28 @@ export function deriveNearThresholdAlerts(view: SpendView, opts: { nameOf?: Name
   const near = (n: bigint) => n * 100n >= threshold * NEAR_PERCENT;
   const depositOf = new Map(policy.beneficiaries.map((b) => [b.commitment.toLowerCase(), b.partnerDeposit]));
   const role = new Map(view.rules.map((r) => [r.spender, r.role]));
+  const targetOf = (t: { recipient: string | null; beneficiary: string | null }) => (t.recipient ? t.recipient.toLowerCase() : `b:${(t.beneficiary ?? '').toLowerCase()}`);
+  // Pre-audit B1: what every payer paid each recipient without an approval,
+  // counted now. An index built without it reads as none.
+  const policyWide = new Map<string, { counted: bigint; countsUntilMs: bigint }>();
+  for (const t of policy.recipientTotals ?? []) {
+    const counted = BigInt(t.countedMinor);
+    if (counted > 0n) policyWide.set(targetOf(t), { counted, countsUntilMs: BigInt(t.countsUntilMs) });
+  }
 
-  type Entry = { spender: string; recipient: string | null; beneficiary: string | null; counted: bigint; windowStartMs: string; countsUntilMs: bigint; payments: number };
+  type Entry = { spender: string; recipient: string | null; beneficiary: string | null; own: bigint; counted: bigint; windowStartMs: string; countsUntilMs: bigint; payments: number };
   const entries: Entry[] = [];
   for (const rule of view.rules) {
     for (const t of rule.runningTotals) {
-      const counted = BigInt(t.countedMinor);
-      if (counted <= 0n) continue;
+      const own = BigInt(t.countedMinor);
+      if (own <= 0n) continue;
+      // What the chain's check counts for this payer: the larger of their own
+      // total and the policy-wide one, shown until the one counted stops.
+      const all = policyWide.get(targetOf(t));
+      const wider = all !== undefined && all.counted > own;
+      const counted = wider ? all.counted : own;
+      const ownUntil = BigInt(t.countsUntilMs);
+      const countsUntilMs = wider && all.countsUntilMs > ownUntil ? all.countsUntilMs : ownUntil;
       // Who RuleSpend names for this total: the address, or the bank
       // beneficiary's partner deposit address.
       const paidTo = t.recipient ?? (t.beneficiary ? depositOf.get(t.beneficiary.toLowerCase()) ?? null : null);
@@ -114,7 +141,7 @@ export function deriveNearThresholdAlerts(view: SpendView, opts: { nameOf?: Name
       const from = t.countsFromMs === undefined ? null : BigInt(t.countsFromMs);
       const inWindow = (x: { timestampMs?: string }) => from === null || x.timestampMs === undefined || BigInt(x.timestampMs) >= from;
       const payments = paidTo ? rule.recentSpends.filter((x) => x.recipient === paidTo && inWindow(x)).length : 0;
-      entries.push({ spender: rule.spender, recipient: t.recipient, beneficiary: t.beneficiary, counted, windowStartMs: t.windowStartMs, countsUntilMs: BigInt(t.countsUntilMs), payments });
+      entries.push({ spender: rule.spender, recipient: t.recipient, beneficiary: t.beneficiary, own, counted, windowStartMs: t.windowStartMs, countsUntilMs, payments });
     }
   }
 
@@ -139,12 +166,17 @@ export function deriveNearThresholdAlerts(view: SpendView, opts: { nameOf?: Name
       payments: e.payments,
       activeUntilMs: e.countsUntilMs.toString(),
       supersedesKey: null,
-      summary: `${who(e.spender, role.get(e.spender), opts.nameOf)} has paid ${to(e)} ${e.payments} times, ${usdc(e.counted)} in all, close to the ${usdc(threshold)} that needs a second approval.`,
+      summary:
+        e.counted > e.own
+          ? `${who(e.spender, role.get(e.spender), opts.nameOf)} has paid ${to(e)} ${e.payments} times, ${usdc(e.own)} in all. With what everyone paid it without an owner's approval, ${usdc(e.counted)} counts toward the ${usdc(threshold)} that needs a second approval.`
+          : `${who(e.spender, role.get(e.spender), opts.nameOf)} has paid ${to(e)} ${e.payments} times, ${usdc(e.counted)} in all, close to the ${usdc(threshold)} that needs a second approval.`,
       detail: `${full(e)} What counts toward the second approval now: ${usdc(e.counted)} of ${usdc(threshold)}. ${ACT}`,
     });
   }
 
-  // Several spenders, one recipient: each total is checked on its own.
+  // Several spenders, one recipient: the larger of their own totals added up
+  // and the policy-wide total (pre-audit B1), which can be the larger: it
+  // keeps counting until a window after its last part, whoever paid it.
   const groups = new Map<string, Entry[]>();
   for (const e of entries) {
     const target = e.recipient ?? `b:${e.beneficiary}`;
@@ -153,11 +185,13 @@ export function deriveNearThresholdAlerts(view: SpendView, opts: { nameOf?: Name
   for (const [target, group] of groups) {
     const spenders = [...new Set(group.map((e) => e.spender))].sort();
     if (spenders.length < 2) continue;
-    const counted = group.reduce((n, e) => n + e.counted, 0n);
+    const ownSum = group.reduce((n, e) => n + e.own, 0n);
+    const all = policyWide.get(targetOf(group[0]));
+    const counted = all !== undefined && all.counted > ownSum ? all.counted : ownSum;
     if (!near(counted)) continue;
     const over = counted >= threshold;
     const sorted = [...group].sort((a, b) => (a.spender < b.spender ? -1 : a.spender > b.spender ? 1 : 0));
-    const until = group.reduce((m, e) => (e.countsUntilMs > m ? e.countsUntilMs : m), 0n);
+    const until = group.reduce((m, e) => (e.countsUntilMs > m ? e.countsUntilMs : m), all?.countsUntilMs ?? 0n);
     const names = list(spenders.map((s) => who(s, role.get(s), opts.nameOf)));
     const e0 = group[0];
     // Severity is part of the key: the same spenders, in the same windows,
@@ -177,10 +211,13 @@ export function deriveNearThresholdAlerts(view: SpendView, opts: { nameOf?: Name
       payments: group.reduce((n, e) => n + e.payments, 0),
       activeUntilMs: until.toString(),
       supersedesKey: over ? `${base}|near_threshold` : null,
+      // Pre-audit B1: not "each stayed under it alone, so no approval was
+      // asked for" any more: the chain counts their unapproved payments
+      // together, and part of what they paid may have carried an approval.
       summary: over
-        ? `${names} have together paid ${to(e0)} ${usdc(counted)}, above the ${usdc(threshold)} that needs a second approval for one person. Each stayed under it alone, so no approval was asked for.`
-        : `${names} have together paid ${to(e0)} ${usdc(counted)}, close to the ${usdc(threshold)} that needs a second approval for one person.`,
-      detail: `${full(e0)} ${sorted.map((e) => `${who(e.spender, role.get(e.spender), opts.nameOf)}: ${usdc(e.counted)}`).join('; ')}. ${ACT}`,
+        ? `${names} have together paid ${to(e0)} ${usdc(counted)}, ${counted > threshold ? 'above' : 'at'} the ${usdc(threshold)} that needs a second approval. ${TOGETHER}`
+        : `${names} have together paid ${to(e0)} ${usdc(counted)}, close to the ${usdc(threshold)} that needs a second approval. ${TOGETHER}`,
+      detail: `${full(e0)} ${sorted.map((e) => `${who(e.spender, role.get(e.spender), opts.nameOf)}: ${usdc(e.own)}`).join('; ')}.${all ? ` Paid to it without an owner's approval, counted together: ${usdc(all.counted)}.` : ''} ${ACT}`,
     });
   }
   return alerts;
