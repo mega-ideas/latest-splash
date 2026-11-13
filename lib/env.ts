@@ -295,6 +295,9 @@ export const envSchema = z.object({
   /* Walrus. lib/server/walrus.ts. Mocked when USE_MOCK_APIS or unset. */
   WALRUS_PUBLISHER_URL: url,
   WALRUS_AGGREGATOR_URL: url,
+  /* Pre-audit C1: how long settlement evidence is bought for (1-53 epochs; 53, the default, is about two years on Mainnet), and who holds the Blob object a renewal extends (unset: the publisher's own wallet keeps it). */
+  WALRUS_STORE_EPOCHS: opt(z.coerce.number().int().min(1).max(53)),
+  WALRUS_BLOB_OWNER: suiAddress,
 
   /* Storage and data directory. */
   DATABASE_URL: opt(str.regex(/^postgres(ql)?:\/\//, 'must be a postgres:// or postgresql:// URL')),

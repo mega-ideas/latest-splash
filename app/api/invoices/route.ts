@@ -108,7 +108,7 @@ export async function POST(request: Request) {
   }
 
   let document:
-    | { walrusBlobId: string; sealPolicyId: string; documentSha256: string; walrus: { sizeBytes: number; epochs: number; mode: string } }
+    | { walrusBlobId: string; sealPolicyId: string; documentSha256: string; walrus: { sizeBytes: number; epochs: number | null; mode: string } }
     | undefined;
 
   // A document is sealed and stored on Walrus, neither of which this launch
