@@ -140,3 +140,14 @@ test('a SpendPolicy read from the chain carries its policy-wide totals table', (
   assert.equal(head.tables.policyTotals, addr(0x26));
   assert.deepEqual([head.counts.runningTotals, head.counts.policyTotals], [2n, 1n]);
 });
+
+test("a payer's running total is near the threshold, and has less room before an approval, by the policy-wide total when it is the larger", () => {
+  // JUNIOR's own 500 is a third of the 1,500 threshold, but the chain counts
+  // the 1,300 every payer paid the supplier without an approval: 200 more
+  // and the next payment needs an owner.
+  const p = policyAfterASplit();
+  p.policyTotals = [entry(ZERO, t0, t0 + DAY - 1n, 1_300n * USDC_1)];
+  const v = buildSpendView({ now: NOW, wallet: WALLET, walletEpoch: 1n, policy: p, earlierPolicies: [], allowances: [], spends: [], appName: 'x' });
+  const [t] = v.rules.find((r) => r.spender === JUNIOR).runningTotals;
+  assert.deepEqual([t.countedMinor, t.beforeApprovalMinor, t.nearThreshold], [String(500n * USDC_1), String(200n * USDC_1), true], 'countedMinor stays the payer\'s own; the room and the flag are the chain\'s');
+});
