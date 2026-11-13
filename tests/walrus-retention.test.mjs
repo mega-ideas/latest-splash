@@ -292,6 +292,39 @@ test('a missing aggregator URL is logged by name on the server and answered gene
   assert.match(errors[0], /WALRUS_AGGREGATOR_URL/);
 });
 
+// The other side of the line drawn above: a publisher failure is not a
+// configuration error. It is still wrapped as a 502 WalrusAdapterError, and
+// what it says is what the customer is told, with nothing extra logged.
+test('a publisher failure is still wrapped as a 502 and told as it is', async () => {
+  const failures = [
+    ['an error status', () => respondWith('busy', 503), /Walrus publish failed: publisher returned 503/],
+    ['a network error', () => {
+      globalThis.fetch = async (input, init) => {
+        requests.push({ url: String(input), method: init?.method ?? 'GET' });
+        throw new TypeError('fetch failed');
+      };
+    }, /Walrus publish failed: fetch failed/],
+    ['no blob id', () => respondWith({ newlyCreated: { blobObject: {} } }), /Walrus publish failed: publisher response did not include a blob ID/],
+    ['a body that is not JSON', () => respondWith('<html>gateway</html>'), /^Walrus publish failed: /],
+  ];
+  for (const [what, arrange, message] of failures) {
+    goLive();
+    arrange();
+    requests.length = 0;
+    errors.length = 0;
+
+    const error = await storeEncryptedInvoice(CIPHERTEXT).then(() => null, (e) => e);
+
+    assert.ok(error instanceof walrus.WalrusAdapterError, `${what}: a WalrusAdapterError`);
+    assert.equal(requests.length, 1, `${what}: the publisher was called`);
+    assert.equal(error.status, 502, what);
+    assert.match(error.message, message, what);
+    const reply = walrus.walrusErrorReply(error, 'invoice create');
+    assert.deepEqual(reply, { status: 502, error: error.message }, `${what}: told as it is`);
+    assert.deepEqual(errors, [], `${what}: nothing extra logged`);
+  }
+});
+
 test('the routes that answer a customer use the generic reply, never the raw adapter message', async () => {
   const { readFile } = await import('node:fs/promises');
   for (const file of ['app/api/invoices/route.ts', 'app/api/walrus/[blobId]/route.ts']) {
