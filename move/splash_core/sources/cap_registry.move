@@ -147,8 +147,9 @@ public struct BreakGlassArmed has copy, drop {
 
 /// Emitted when an arming is abandoned without revoking anything
 /// (`business_account::cancel_break_glass`). A lapse emits nothing: the execute
-/// that finds it lapsed aborts, which reverts its emit, so `expired` is `false`
-/// in every event that lands.
+/// that finds it lapsed aborts with `E_ARM_EXPIRED` and writes nothing, so
+/// `expired` is `false` in every event that lands. The field is kept so the
+/// event's shape does not change.
 public struct BreakGlassCleared has copy, drop {
     registry_id: address,
     kind: u8,
@@ -274,21 +275,13 @@ public(package) fun bump(
     assert!(registry.armed.borrow().kind == kind, E_NOTHING_ARMED);
 
     let now = clock::timestamp_ms(clock);
-    if (now >= registry.armed.borrow().expires_at_ms) {
-        // The abort below reverts this clear and this event, so neither lands:
-        // a lapsed arming stays in the registry until the next `arm`
-        // overwrites it (an expired arming counts as nothing) or
-        // `cancel_break_glass` clears it, emitting BreakGlassCleared with
-        // `expired` false.
-        let dead = registry.armed.extract();
-        event::emit(BreakGlassCleared {
-            registry_id: object::uid_to_address(&registry.id),
-            kind: dead.kind,
-            armed_by: dead.armed_by,
-            expired: true,
-        });
-        abort E_ARM_EXPIRED
-    };
+    // A lapsed arming aborts and changes nothing. It is deliberately not
+    // cleared here: an abort reverts every write in the transaction, so a clear
+    // or an event placed before it could never land. The lapsed arming stays in
+    // the registry, inert, until the next `arm` overwrites it (`arm` and
+    // `is_armed` treat an expired arming as nothing) or `cancel_break_glass`
+    // clears it, emitting BreakGlassCleared with `expired` false.
+    assert!(now < registry.armed.borrow().expires_at_ms, E_ARM_EXPIRED);
 
     let armed = registry.armed.extract();
     let holder = armed.holder;
