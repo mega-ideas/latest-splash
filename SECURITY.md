@@ -1,5 +1,30 @@
 # Splash Protocol — Security Audit & Monitoring Report
 
+> **Status, 14 Nov 2026, as of `main` at `cbb96a6a`.** The mainnet scope is
+> v2: `move/splash_core`, `move/splash_spend` and `move/splash_upgrade_delay`.
+> Their sources last changed on 25 Oct 2026 (`splash_core`, `408d04e6`) and
+> 24 Oct 2026 (`splash_spend`, `ed3fc12b`; `splash_upgrade_delay`,
+> `2b2f8f66`). On Sui CLI `mainnet-v1.82.3` they pass 613, 308 and 74 Move
+> tests, 995 in all. `splash_custody` and `splash_meter` are retired from the
+> mainnet path (v2, D11) and run on testnet only.
+>
+> The executive summary below and the `## Findings` section (C-01 to C-03,
+> H-01 to H-06, M-01 to M-08, L-01 to L-06, I-01 to I-04, dated 2026-05-29)
+> describe the May scaffold under `move/sources/`, which no longer exists.
+> Their "Open" statuses are history; the 2026-07-13 re-audit records the
+> rewrites. The dated passes from July and August (S-01 to S-12, A-01 to
+> A-19, the A-11/A-12 ruling, and the M-01 to M-09 rows that reuse those IDs)
+> describe the pre-v2 packages, `splash_custody` and `splash_meter` among
+> them. Each row keeps the status it was last given; the rows still marked
+> Open there (A-12 to A-16, A-19) have not been re-checked against v2 in this
+> note. All of it is kept for the record.
+>
+> v2's own review notes are in the sections headed "v2 Phase 1" (the Move
+> packages, 24 Oct 2026), "v2 Phase 2" and "v2 Phase 3"; the design and its
+> reviews are in `docs/v2/phase1-move-design.md`. The independent Move review
+> is with HackenProof, under the Sui Foundation program, and has not signed
+> off yet.
+
 **Scope**: All Move modules under `move/sources/` (8 modules)
 **Methodology**: OtterSec-style review — capability access control, resource handling, integer arithmetic, authorization, event traceability, upgrade & pause posture, Move-specific patterns (hot-potato, abilities, UID hygiene).
 **Audit date**: 2026-05-29
