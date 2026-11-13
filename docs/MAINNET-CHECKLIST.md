@@ -283,8 +283,8 @@ procedure in [`docs/UPGRADE-POLICY.md`](UPGRADE-POLICY.md).
 - Postgres host: **DigitalOcean Managed PostgreSQL**
 - W4 KYT: **stub + provider interface** until the Elliptic contract signs
 - Audit: ~~**OtterSec first** inquiry (Zellic backup) — 0xSky books~~
-  **Superseded:** the independent Move review is with HackenProof, under the
-  Sui Foundation program.
+  **Superseded:** the planned independent Move review is HackenProof, under
+  the Sui Foundation program. It has not started and nothing is signed yet.
 - PR #2 (IA restructure): **closed**, branch kept for post-launch
 
 ## W1 — persistence (remaining)
@@ -380,7 +380,8 @@ procedure in [`docs/UPGRADE-POLICY.md`](UPGRADE-POLICY.md).
 
 ## Standing items for 0xSky
 - [ ] ~~Send OtterSec inquiry (calendar is the August risk)~~ Superseded: the
-      review is with HackenProof, under the Sui Foundation program.
+      planned review is HackenProof, under the Sui Foundation program; it has
+      not started and nothing is signed yet.
 - [ ] Provision DO Postgres + DATABASE_URL
 - [ ] Elliptic contract status
 - [ ] Second PH payout partner: agreement signed, then sandbox access
