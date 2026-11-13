@@ -2,12 +2,7 @@ import { NextResponse } from 'next/server';
 import { z } from 'zod';
 
 import { verifyAccountPassword } from '@/lib/auth/accounts';
-import {
-  checkLoginRateLimit,
-  clearLoginFailures,
-  clientIp,
-  recordFailedLogin,
-} from '@/lib/auth/login-rate-limit';
+import { beginLoginAttempt, clientIp, loginAttemptSucceeded } from '@/lib/auth/login-rate-limit';
 import { setCustomerSessionCookie, sessionForAccount } from '@/lib/server/customer-auth';
 import { readJsonBody } from '@/lib/server/http';
 
@@ -51,7 +46,9 @@ export async function POST(request: Request) {
 
   // Before the password check, not after: a limiter consulted afterwards
   // still lets an attacker test every candidate it then declines to answer.
-  const verdict = await checkLoginRateLimit(db, { email, ip });
+  // The attempt is counted as a failure now and taken back on success, so
+  // guesses sent together cannot all read the same count.
+  const verdict = await beginLoginAttempt(db, { email, ip });
   if (!verdict.allowed) {
     return NextResponse.json(
       {
@@ -65,12 +62,10 @@ export async function POST(request: Request) {
   }
 
   const account = await verifyAccountPassword(db, { email, password });
-  if (!account) {
-    await recordFailedLogin(db, { email, ip });
-    return NextResponse.json({ error: INVALID }, { status: 401 });
-  }
+  // A wrong pair is already counted: beginLoginAttempt recorded it.
+  if (!account) return NextResponse.json({ error: INVALID }, { status: 401 });
 
-  await clearLoginFailures(db, account.email);
+  await loginAttemptSucceeded(db, verdict.attempt);
 
   const session = sessionForAccount(account);
   const refreshedSession = await setCustomerSessionCookie(session, { remember: parsed.data.remember });

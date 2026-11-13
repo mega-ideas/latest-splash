@@ -1,11 +1,6 @@
 import { NextResponse } from 'next/server';
 
-import {
-  checkLoginRateLimit,
-  clearLoginFailures,
-  clientIp,
-  recordFailedLogin,
-} from '@/lib/auth/login-rate-limit';
+import { beginLoginAttempt, clientIp, loginAttemptSucceeded } from '@/lib/auth/login-rate-limit';
 import { setAdminSessionCookie, validateAdminCredentials } from '@/lib/server/admin-auth';
 import { readJsonBody } from '@/lib/server/http';
 
@@ -58,9 +53,11 @@ export async function POST(request: Request) {
 
   // Before the password check, not after: a limiter consulted afterwards
   // still lets an attacker test every candidate it then declines to answer.
-  // One message for both scopes, and the same for any address, so a refusal
-  // says nothing about which address is the staff one.
-  const verdict = await checkLoginRateLimit(db, { email: key, ip });
+  // The attempt is counted as a failure now and taken back on success, so
+  // guesses sent together cannot all read the same count. One message for
+  // both scopes, and the same for any address, so a refusal says nothing
+  // about which address is the staff one.
+  const verdict = await beginLoginAttempt(db, { email: key, ip });
   if (!verdict.allowed) {
     return NextResponse.json(
       { error: 'Too many failed attempts. Try again shortly.' },
@@ -69,12 +66,10 @@ export async function POST(request: Request) {
   }
 
   const session = validateAdminCredentials(email, password);
-  if (!session) {
-    await recordFailedLogin(db, { email: key, ip });
-    return NextResponse.json({ error: INVALID }, { status: 401 });
-  }
+  // A wrong pair is already counted: beginLoginAttempt recorded it.
+  if (!session) return NextResponse.json({ error: INVALID }, { status: 401 });
 
-  await clearLoginFailures(db, key);
+  await loginAttemptSucceeded(db, verdict.attempt);
 
   // Cookie is `secure` in production (HTTPS) and non-secure only in local dev,
   // derived from NODE_ENV inside setAdminSessionCookie — never from the
