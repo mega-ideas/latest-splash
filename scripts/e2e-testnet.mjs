@@ -596,6 +596,8 @@ async function checkPeg() {
   record('Peg refresh (simulated)', 'PASS', 'PegUpdated, on the AnchorCap and CapRegistry.');
 }
 
+/** A sha256 as hex text, an anchor id and a blob id (36 bytes, inside
+ *  audit_anchor::anchor's 64). */
 function auditValues(seed) {
   const auditHash = createHash('sha256').update(`e2e:${toHex(seed)}`).digest('hex');
   return { auditHash, anchorId: `e2e:${Date.now().toString(36)}`, blobId: `e2e-no-blob:${auditHash.slice(0, 24)}` };
@@ -734,11 +736,14 @@ async function checkWalletPaymentSimulated() {
       tx.object(CLOCK),
     ],
   });
+  // The content hash is the 32 raw bytes of the digest, as the app anchors it
+  // (lib/server/payment-record.ts): audit_anchor::anchor refuses any other
+  // length (E_BAD_HASH_LENGTH). anchor_audit_hash above takes the hex text.
   tx.moveCall({
     target: `${PACKAGE}::audit_anchor::anchor`,
     arguments: [
       receipt,
-      tx.pure.vector('u8', Array.from(Buffer.from(auditHash, 'utf8'))),
+      tx.pure.vector('u8', Array.from(Buffer.from(auditHash, 'hex'))),
       tx.pure.vector('u8', Array.from(Buffer.from(blobId, 'utf8'))),
       tx.object(CLOCK),
     ],
