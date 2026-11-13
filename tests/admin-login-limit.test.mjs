@@ -20,7 +20,7 @@ import * as schema from '../lib/db/schema.ts';
  * password for as long as anyone kept asking. It now goes through the same
  * failed-attempt limiter as the customer login (lib/auth/login-rate-limit.ts:
  * five per email per 15 minutes, twenty per network per hour), consulted
- * BEFORE the password is checked, under an email key of its own.
+ * BEFORE the password is checked, with an address bucket of its own.
  *
  * This file drives the real route on PGlite with the repository's migrations.
  * The only stand-in is `cookies()` from next/headers, which exists only inside
@@ -208,6 +208,13 @@ test('staff and customer failures never share an email bucket', async () => {
     true,
     'staff failures do not lock the customer account with the same address',
   );
+
+  // Not two key spellings in one bucket, which a customer could type their
+  // way into (see the next test), but two buckets.
+  const { rows } = await client.query(
+    "select bucket, key, count(*)::int as n from rate_limit_hits where bucket like 'login-failure%:email' group by bucket, key",
+  );
+  assert.deepEqual(rows, [{ bucket: 'login-failure-staff:email', key: STAFF, n: limiter.EMAIL_LIMIT }], 'staff address failures are in the staff bucket only');
 });
 
 test('no address a customer can type reaches the staff address bucket', async () => {

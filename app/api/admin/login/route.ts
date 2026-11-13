@@ -20,13 +20,18 @@ const MAX_EMAIL_LENGTH = 254;
  * 15 minutes, twenty per network per hour), consulted before the password is
  * checked, as app/api/auth/login/route.ts does.
  *
- * The address bucket is keyed `staff:<address>`, so a customer account that
- * shares the staff address never locks the console and the console never
- * locks it. The network bucket is shared on purpose: one source guessing
- * passwords is one source, whichever form it uses. The address is trimmed and
- * lowercased BEFORE the prefix is added, because validateAdminCredentials
- * accepts any padding and case: without that, ` staff@…` would be a fresh
- * bucket that still signs in.
+ * Staff address failures are counted in a bucket of their own
+ * (`login-failure-staff:email`, the `staff` realm of the limiter), not the
+ * customer one, so staff and customer failures never share an address
+ * bucket: no address typed into either form, whatever its spelling or
+ * prefix, is counted against the other form's addresses. A customer account
+ * that shares the staff address never locks the console and the console
+ * never locks it. (Keys spelled `staff:<address>` inside the customer bucket
+ * did not hold: the customer form takes `staff:<ADMIN_EMAIL>` as an address.)
+ * The network bucket is shared on purpose: one source guessing passwords is
+ * one source, whichever form it uses. The limiter trims and lowercases the
+ * address, because validateAdminCredentials accepts any padding and case:
+ * without that, ` staff@…` would be a fresh bucket that still signs in.
  *
  * The cost, accepted for now and awaiting Sky's decision: the console has one
  * login (ADMIN_EMAIL), and its address bucket does not care where a failure
@@ -41,7 +46,7 @@ const MAX_EMAIL_LENGTH = 254;
  * network, so a remote caller cannot close it for other networks; delay
  * rather than refuse for the staff key; give staff a network bucket of their
  * own. Recovery today is to wait out the window, or to delete the
- * `login-failure:email` rows keyed `staff:<address>` from rate_limit_hits.
+ * `login-failure-staff:email` rows from rate_limit_hits.
  *
  * Without a database there is nowhere to count failures. Production refuses
  * staff sign-in rather than run unlimited (lib/env.ts already refuses to boot
@@ -78,7 +83,6 @@ export async function POST(request: Request) {
   const { getDb } = await import('@/lib/db/client');
   const db = getDb();
   const ip = clientIp(request);
-  const key = `staff:${email.trim().toLowerCase()}`;
 
   // Before the password check, not after: a limiter consulted afterwards
   // still lets an attacker test every candidate it then declines to answer.
@@ -86,7 +90,7 @@ export async function POST(request: Request) {
   // guesses sent together cannot all read the same count. One message for
   // both scopes, and the same for any address, so a refusal says nothing
   // about which address is the staff one.
-  const verdict = await beginLoginAttempt(db, { email: key, ip });
+  const verdict = await beginLoginAttempt(db, { email, ip, realm: 'staff' });
   if (!verdict.allowed) {
     return NextResponse.json(
       { error: 'Too many failed attempts. Try again shortly.' },

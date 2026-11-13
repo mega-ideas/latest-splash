@@ -38,14 +38,30 @@ export { clientIp } from '../server/rate-limit.ts';
  * let every request in flight read the same count, so a client sending its
  * guesses together had all of them checked (found reviewing C5, pre-audit
  * fix, 13 Nov 2026). `checkLoginRateLimit`, `recordFailedLogin` and
- * `clearLoginFailures` remain for tests and the health surface.
+ * `clearLoginFailures` remain for tests and the health surface; they count the
+ * customer realm.
+ *
+ * Staff sign-in passes `realm: 'staff'`, which counts its address failures
+ * in a bucket of its own (`login-failure-staff:email`). The network bucket is
+ * shared by both realms.
  */
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 type DrizzleDb = PgDatabase<any, typeof schemaModule, any>;
 
 const EMAIL_RULE = RATE_LIMITS.loginFailureEmail;
+const STAFF_EMAIL_RULE = RATE_LIMITS.loginFailureStaffEmail;
 const IP_RULE = RATE_LIMITS.loginFailureIp;
+
+/**
+ * Whose sign-in an attempt is. Staff addresses are counted in a bucket of
+ * their own, so no string a customer submits as an address can reach the
+ * staff count, nor the other way round: within one bucket every key is
+ * whatever the caller typed, and a prefix such as `staff:` can be typed too.
+ */
+export type LoginRealm = 'customer' | 'staff';
+
+const emailRule = (realm: LoginRealm = 'customer') => (realm === 'staff' ? STAFF_EMAIL_RULE : EMAIL_RULE);
 
 export const EMAIL_LIMIT = EMAIL_RULE.limit;
 export const EMAIL_WINDOW_MS = EMAIL_RULE.windowMs;
@@ -59,7 +75,7 @@ export type RateLimitVerdict =
 const norm = (email: string) => email.trim().toLowerCase();
 
 /** An attempt let through, already counted as a failure in both buckets. */
-export type LoginAttempt = { email: string; emailHitId: string; ipHitId: string };
+export type LoginAttempt = { emailBucket: string; email: string; emailHitId: string; ipHitId: string };
 
 export type LoginAttemptVerdict =
   | { allowed: true; attempt: LoginAttempt }
@@ -79,10 +95,11 @@ export type LoginAttemptVerdict =
  */
 export async function beginLoginAttempt(
   db: DrizzleDb,
-  input: { email: string; ip: string; now?: Date },
+  input: { email: string; ip: string; realm?: LoginRealm; now?: Date },
 ): Promise<LoginAttemptVerdict> {
   const email = norm(input.email);
-  const byEmail = await reserveHit(db, { ...EMAIL_RULE, key: email, now: input.now });
+  const rule = emailRule(input.realm);
+  const byEmail = await reserveHit(db, { ...rule, key: email, now: input.now });
   if (!byEmail.allowed) return { allowed: false, scope: 'email', retryAfterSeconds: byEmail.retryAfterSeconds };
 
   const byIp = await reserveHit(db, { ...IP_RULE, key: input.ip, now: input.now });
@@ -91,7 +108,7 @@ export async function beginLoginAttempt(
     return { allowed: false, scope: 'ip', retryAfterSeconds: byIp.retryAfterSeconds };
   }
 
-  return { allowed: true, attempt: { email, emailHitId: byEmail.hitId, ipHitId: byIp.hitId } };
+  return { allowed: true, attempt: { emailBucket: rule.bucket, email, emailHitId: byEmail.hitId, ipHitId: byIp.hitId } };
 }
 
 /**
@@ -100,7 +117,7 @@ export async function beginLoginAttempt(
  * failures count. The network's earlier failures stay.
  */
 export async function loginAttemptSucceeded(db: DrizzleDb, attempt: LoginAttempt): Promise<void> {
-  await clearHits(db, { bucket: EMAIL_RULE.bucket, key: attempt.email });
+  await clearHits(db, { bucket: attempt.emailBucket, key: attempt.email });
   await deleteHit(db, attempt.ipHitId);
 }
 

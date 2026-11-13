@@ -52,6 +52,11 @@ export const RATE_LIMITS = {
    *  source spraying a common password across many. */
   loginFailureEmail: { bucket: 'login-failure:email', limit: 5, windowMs: 15 * MINUTE },
   loginFailureIp: { bucket: 'login-failure:ip', limit: 20, windowMs: HOUR },
+  /** Staff sign-in's address failures: the same limit, in a bucket of its own.
+   *  A key prefix inside the customer bucket would not do, because a
+   *  customer can type any address, prefix included (C5, pre-audit fix). The
+   *  network bucket above is shared by both sign-ins on purpose. */
+  loginFailureStaffEmail: { bucket: 'login-failure-staff:email', limit: 5, windowMs: 15 * MINUTE },
 
   /* ── Money, documents, model credits (WS7) ─────────────────────────── */
   /** The public pay link: marks an invoice paid and creates a recipient. */
