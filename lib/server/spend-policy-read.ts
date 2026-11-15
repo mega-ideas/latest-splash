@@ -5,6 +5,11 @@
  * decides WHAT is read and how it is parsed, so a test can drive it with
  * the bytes a chain would return.
  *
+ * Both `SpendPolicy` layouts are read (lib/wallet/spend-rules-bcs.ts): a
+ * policy of a package published before pre-audit B1 has no policy-wide
+ * totals table, so none is asked of the chain and its policy-wide totals
+ * read as none, which is what that chain counts.
+ *
  * Fails closed: an object that is not a `SpendPolicy` of the configured
  * package is refused, never read as one.
  */
@@ -37,7 +42,8 @@ export async function readPolicyState(source: PolicySource, id: string, spendPac
     source.tableEntries(head.tables.recipients),
     source.tableEntries(head.tables.beneficiaries),
     source.tableEntries(head.tables.runningTotals),
-    source.tableEntries(head.tables.policyTotals),
+    // Pre-audit B1's table, where the policy's package has one.
+    head.tables.policyTotals === null ? Promise.resolve([]) : source.tableEntries(head.tables.policyTotals),
   ]);
   return {
     ...head,

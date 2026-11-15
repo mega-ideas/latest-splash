@@ -44,7 +44,11 @@ export type PolicyState = SpendPolicyHead & {
   recipients: Array<{ domain: number; address: string; kind: number }>;
   beneficiaries: Array<{ commitment: string; partnerDeposit: string }>;
   runningTotals: RunningEntry[];
-  /** Pre-audit B1: the policy-wide totals (payer @0x0), per recipient. Absent reads as none. */
+  /**
+   * Pre-audit B1: the policy-wide totals (payer @0x0), per recipient. Absent
+   * reads as none, and a policy of a package published before B1
+   * (`tables.policyTotals` is null) has none.
+   */
   policyTotals?: RunningEntry[];
 };
 
@@ -154,6 +158,14 @@ export type SpendView = {
     generation: string;
     recipients: Array<{ address: string; tag: 'wallet' | 'exchange' }>;
     beneficiaries: Array<{ commitment: string; partnerDeposit: string }>;
+    /**
+     * Does this policy's chain count what EVERY payer paid a recipient
+     * without an owner's approval toward the second approval (pre-audit B1)?
+     * False for a policy of a package published before B1, such as the one
+     * on testnet: there each payer's own total is checked alone, and
+     * `recipientTotals` is always empty.
+     */
+    countsAcrossPayers: boolean;
     /** Pre-audit B1: the policy-wide totals that count now. */
     recipientTotals: RecipientTotalView[];
   } | null;
@@ -335,6 +347,7 @@ export function buildSpendView(input: {
           generation: s(current.generation),
           recipients: current.recipients.map((r) => ({ address: r.address, tag: r.kind === 1 ? ('wallet' as const) : ('exchange' as const) })),
           beneficiaries: current.beneficiaries,
+          countsAcrossPayers: current.tables.policyTotals !== null,
           recipientTotals: recipientTotals(current, now),
         }
       : null,

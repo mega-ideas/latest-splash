@@ -252,6 +252,10 @@ test('bytes that are neither layout are refused by name, never guessed at', () =
   assert.throws(() => parseSpendPolicy(plus(beforeB1Bytes, [0, 0, 0, 0, 0])), /neither SpendPolicy layout/);
   // A whole LinkedTable and then more.
   assert.throws(() => parseSpendPolicy(plus(b1Bytes, [0])), /neither SpendPolicy layout/);
+  // Long enough, but not a LinkedTable: an option tag that is neither none (0) nor some (1).
+  assert.throws(() => parseSpendPolicy(plus(beforeB1Bytes, [...new Array(40).fill(0), 2, 0])), /neither SpendPolicy layout/);
+  // Not a SpendPolicy at all (cut short inside the shared fields): still an error, never a policy.
+  assert.throws(() => parseSpendPolicy(beforeB1Bytes.subarray(0, 100)));
 });
 
 // ─── 2. Reading a policy from the chain ─────────────────────────────────────

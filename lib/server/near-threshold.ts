@@ -30,6 +30,12 @@
  *     around the threshold; it shows the owners several people paying one
  *     recipient that much.
  *
+ * A policy of a package published before B1 (`countsAcrossPayers` is false
+ * in the view; the package on testnet is one) has no policy-wide total: its
+ * chain checks each payer's own total alone, so there several spenders CAN
+ * together pass the threshold with no approval, and the alert says that,
+ * never that the chain counts them together.
+ *
  * Inputs are what the chain shows, through the spending-rule index
  * (lib/server/spend-rules-index.ts): the running totals the SpendPolicy
  * keeps, counted as `spend_policy::threshold_total` counts them, the
@@ -214,9 +220,15 @@ export function deriveNearThresholdAlerts(view: SpendView, opts: { nameOf?: Name
       // Pre-audit B1: not "each stayed under it alone, so no approval was
       // asked for" any more: the chain counts their unapproved payments
       // together, and part of what they paid may have carried an approval.
-      summary: over
-        ? `${names} have together paid ${to(e0)} ${usdc(counted)}, ${counted > threshold ? 'above' : 'at'} the ${usdc(threshold)} that needs a second approval. ${TOGETHER}`
-        : `${names} have together paid ${to(e0)} ${usdc(counted)}, close to the ${usdc(threshold)} that needs a second approval. ${TOGETHER}`,
+      // Unless the policy's package was published before B1: that chain
+      // checks each payer alone, and the alert must not say otherwise.
+      summary: !policy.countsAcrossPayers
+        ? over
+          ? `${names} have together paid ${to(e0)} ${usdc(counted)}, above the ${usdc(threshold)} that needs a second approval for one person. Each stayed under it alone, so no approval was asked for.`
+          : `${names} have together paid ${to(e0)} ${usdc(counted)}, close to the ${usdc(threshold)} that needs a second approval for one person.`
+        : over
+          ? `${names} have together paid ${to(e0)} ${usdc(counted)}, ${counted > threshold ? 'above' : 'at'} the ${usdc(threshold)} that needs a second approval. ${TOGETHER}`
+          : `${names} have together paid ${to(e0)} ${usdc(counted)}, close to the ${usdc(threshold)} that needs a second approval. ${TOGETHER}`,
       detail: `${full(e0)} ${sorted.map((e) => `${who(e.spender, role.get(e.spender), opts.nameOf)}: ${usdc(e.own)}`).join('; ')}.${all ? ` Paid to it without an owner's approval, counted together: ${usdc(all.counted)}.` : ''} ${ACT}`,
     });
   }

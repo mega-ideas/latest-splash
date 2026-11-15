@@ -9,6 +9,11 @@
  * field, in declaration order (`tests/spend-rules.test.mjs` checks the
  * order against the Move sources and the framework's allowance module).
  *
+ * `SpendPolicy` has two layouts, and both are read (`parseSpendPolicy`):
+ * pre-audit B1 added `policy_totals` as its last field, and a published
+ * package's struct layouts never change, so a policy of a package published
+ * before B1 (the one on testnet, 0x59c3…1112) ends at `running_totals`.
+ *
  * Also the two names Splash computes before proposing anything: the
  * allowance name a policy requires (`splash_spend::allowance_name`) and a
  * policy's object id (derived from the account and its wallet generation
@@ -53,8 +58,8 @@ export const AllowanceCapBcs = struct('AllowanceCap', { id: UID, allowance: bcs.
 const Table = struct('Table', { id: UID, size: bcs.u64() });
 export const RunningKeyBcs = struct('RunningKey', { payer: bcs.Address, beneficiary: bcs.vector(bcs.u8()), recipient: bcs.Address });
 const LinkedTable = struct('LinkedTable', { id: UID, size: bcs.u64(), head: bcs.option(RunningKeyBcs), tail: bcs.option(RunningKeyBcs) });
-/** `splash_spend::spend_policy::SpendPolicy`. */
-export const SpendPolicyBcs = struct('SpendPolicy', {
+/** Every `SpendPolicy` field up to and including `running_totals`: the whole struct before pre-audit B1, and the start of it since. */
+const SPEND_POLICY_BEFORE_B1 = {
   id: UID,
   account: bcs.Address,
   wallet: bcs.Address,
@@ -76,9 +81,21 @@ export const SpendPolicyBcs = struct('SpendPolicy', {
   generation: bcs.u64(),
   running_window_ms: bcs.u64(),
   running_totals: LinkedTable,
+};
+/**
+ * `splash_spend::spend_policy::SpendPolicy` as a package published before
+ * pre-audit B1 lays it out: no policy-wide totals. That chain's
+ * second-approval check counts each payer's own total alone.
+ */
+export const SpendPolicyPreB1Bcs = struct('SpendPolicyPreB1', SPEND_POLICY_BEFORE_B1);
+/** `splash_spend::spend_policy::SpendPolicy`, as the Move source in this repository declares it. */
+export const SpendPolicyBcs = struct('SpendPolicy', {
+  ...SPEND_POLICY_BEFORE_B1,
   /** Pre-audit B1: per recipient, what every payer paid it without an owner's approval (payer @0x0). */
   policy_totals: LinkedTable,
 });
+/** The fewest bytes a `LinkedTable` takes: its id, its size and two empty options. */
+const MIN_LINKED_TABLE_BYTES = 32 + 8 + 1 + 1;
 export const SpenderBcs = struct('Spender', { role: bcs.u8(), per_payment_max: bcs.u64() });
 export const DestinationBcs = struct('Destination', { domain: bcs.u32(), addr: bcs.Address });
 export const RunningTotalBcs = struct('RunningTotal', {
@@ -130,7 +147,13 @@ export type SpendPolicyHead = {
   walletEpoch: bigint;
   asset: string;
   owners: string[];
-  tables: { spenders: string; recipients: string; beneficiaries: string; partnerDeposits: string; runningTotals: string; policyTotals: string };
+  /**
+   * `policyTotals` is null for a policy of a package published before
+   * pre-audit B1: it keeps no policy-wide totals (there is no such table to
+   * read), and its chain counts each payer's own total alone.
+   */
+  tables: { spenders: string; recipients: string; beneficiaries: string; partnerDeposits: string; runningTotals: string; policyTotals: string | null };
+  /** `policyTotals` is zero where the policy keeps none. */
   counts: { spenders: bigint; recipients: bigint; beneficiaries: bigint; runningTotals: bigint; policyTotals: bigint };
   perPaymentMax: bigint;
   secondApprovalThreshold: bigint;
@@ -171,8 +194,33 @@ export function parseAllowanceCap(bytes: Uint8Array): AllowanceCapState {
   return { id: normalizeSuiAddress(c.id), allowance: normalizeSuiAddress(c.allowance) };
 }
 
+/**
+ * A `SpendPolicy` object's contents, in either layout.
+ *
+ * Which layout is told by the bytes themselves, exactly: BCS writes a
+ * struct's fields one after another with nothing between or after them, and
+ * the two layouts are the same up to `running_totals`. So a policy of a
+ * package published before B1 has NO bytes left after that field, and one
+ * with B1 has exactly one more `LinkedTable` (`policy_totals`, 42 bytes at
+ * least). The count of bytes left is the discriminator: the newer layout is
+ * not tried first and its failure caught, and bytes that fit neither are
+ * refused by name. (How many bytes the shared fields took is the length
+ * they serialize back to: BCS is canonical, and the chain only ever stores
+ * canonical bytes.) The caller has already checked the object's type and
+ * package (lib/server/spend-policy-read.ts).
+ */
 export function parseSpendPolicy(bytes: Uint8Array): SpendPolicyHead {
-  const p = SpendPolicyBcs.parse(bytes);
+  const p = SpendPolicyPreB1Bcs.parse(bytes);
+  const rest = bytes.subarray(SpendPolicyPreB1Bcs.serialize(p).toBytes().length);
+  let policyTotals: { id: string; size: string } | null = null;
+  if (rest.length > 0) {
+    policyTotals = rest.length < MIN_LINKED_TABLE_BYTES ? null : wholeLinkedTable(rest);
+    if (policyTotals === null) {
+      throw new Error(
+        `these bytes are neither SpendPolicy layout: ${rest.length} bytes follow running_totals, which is neither none (a package published before pre-audit B1) nor one LinkedTable (policy_totals)`,
+      );
+    }
+  }
   return {
     id: normalizeSuiAddress(p.id),
     account: normalizeSuiAddress(p.account),
@@ -186,20 +234,32 @@ export function parseSpendPolicy(bytes: Uint8Array): SpendPolicyHead {
       beneficiaries: normalizeSuiAddress(p.beneficiaries.id),
       partnerDeposits: normalizeSuiAddress(p.partner_deposits.id),
       runningTotals: normalizeSuiAddress(p.running_totals.id),
-      policyTotals: normalizeSuiAddress(p.policy_totals.id),
+      policyTotals: policyTotals ? normalizeSuiAddress(policyTotals.id) : null,
     },
     counts: {
       spenders: big(p.spender_count),
       recipients: big(p.recipient_count),
       beneficiaries: big(p.beneficiary_count),
       runningTotals: big(p.running_totals.size),
-      policyTotals: big(p.policy_totals.size),
+      policyTotals: policyTotals ? big(policyTotals.size) : 0n,
     },
     perPaymentMax: big(p.per_payment_max),
     secondApprovalThreshold: big(p.second_approval_threshold),
     generation: big(p.generation),
     runningWindowMs: big(p.running_window_ms),
   };
+}
+
+/** These bytes as one `LinkedTable`, if they are exactly one: null when they are cut short or go on after it. */
+function wholeLinkedTable(bytes: Uint8Array): { id: string; size: string } | null {
+  let table: ReturnType<typeof LinkedTable.parse>;
+  try {
+    table = LinkedTable.parse(bytes);
+  } catch {
+    // Not a LinkedTable at all: the reader ran off the end, or met an option tag that is neither none nor some.
+    return null;
+  }
+  return LinkedTable.serialize(table).toBytes().length === bytes.length ? table : null;
 }
 
 export type RunningEntry = RunningTotalState & { payer: string; beneficiary: string; recipient: string };
