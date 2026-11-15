@@ -46,7 +46,9 @@ function rule(spender, { totals = [], spends = [], role = 'staff' } = {}) {
   return { spender, role, standing: 'member', perPaymentMaxMinor: String(T), status: 'active', allowances: [], runningTotals: totals, recentSpends: spends };
 }
 
-function view(rules, { threshold = T, recipientTotals } = {}) {
+// `countsAcrossPayers`: does the policy's package keep the policy-wide totals
+// (pre-audit B1)? True unless a test is about a package published before it.
+function view(rules, { threshold = T, recipientTotals, countsAcrossPayers = true } = {}) {
   return {
     walletEpoch: '1',
     wallet: '0x' + 'aa'.repeat(32),
@@ -58,6 +60,7 @@ function view(rules, { threshold = T, recipientTotals } = {}) {
       generation: '1',
       recipients: [{ address: SUPPLIER, tag: 'wallet' }],
       beneficiaries: [{ commitment: BENEFICIARY, partnerDeposit: DEPOSIT }],
+      countsAcrossPayers,
       ...(recipientTotals ? { recipientTotals } : {}),
     },
     rules,
@@ -413,6 +416,24 @@ test('the policy-wide total of a bank beneficiary is matched by its commitment',
   const [a] = deriveNearThresholdAlerts(v);
   assert.equal(a.beneficiary, BENEFICIARY);
   assert.equal(a.countedMinor, String(8_200n * USDC));
+});
+
+// A package published before B1 (the one on testnet) keeps no policy-wide
+// totals and checks each payer's own total alone. For its policies the alert
+// must say what that chain does, as it did before B1.
+test('a policy whose package counts each payer alone: several spenders over the threshold together are told no approval was asked for', () => {
+  const rules = (a, b) => [rule(STAFF_A, { totals: [total({ counted: a })], spends: [spend(SUPPLIER, 1)] }), rule(STAFF_B, { totals: [total({ counted: b })], spends: [spend(SUPPLIER, 2)] })];
+  const [over] = deriveNearThresholdAlerts(view(rules(6_000n * USDC, 5_000n * USDC), { countsAcrossPayers: false }));
+  assert.deepEqual([over.kind, over.severity, over.countedMinor], ['same_recipient_many_spenders', 'over_threshold', String(11_000n * USDC)]);
+  assert.equal(
+    over.summary,
+    '0xa1a1…a1a1 and 0xb2b2…b2b2 have together paid 0x5a5a…5a5a 11,000 USDC, above the 10,000 USDC that needs a second approval for one person. Each stayed under it alone, so no approval was asked for.',
+  );
+  const [near] = deriveNearThresholdAlerts(view(rules(4_500n * USDC, 3_600n * USDC), { countsAcrossPayers: false }));
+  assert.equal(near.summary, '0xa1a1…a1a1 and 0xb2b2…b2b2 have together paid 0x5a5a…5a5a 8,100 USDC, close to the 10,000 USDC that needs a second approval for one person.');
+  for (const a of [over, near]) assert.doesNotMatch(`${a.summary} ${a.detail}`, /counts together|counted together/, 'that chain does not count them together');
+  // The key does not depend on which package the policy is of.
+  assert.equal(over.key, deriveNearThresholdAlerts(view(rules(6_000n * USDC, 5_000n * USDC)))[0].key);
 });
 
 test('the cron route refuses without CRON_SECRET', async () => {
