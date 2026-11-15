@@ -6,7 +6,8 @@
  *
  *   policy       getObjects(policy id), then every entry of its tables
  *                (listDynamicFields, getObjects) for spenders, recipients,
- *                beneficiaries, running totals and policy-wide totals;
+ *                beneficiaries, running totals and policy-wide totals
+ *                (lib/server/spend-policy-read.ts);
  *   allowances   listOwnedObjects(wallet, AllowanceCap<Balance<USDC>>), then
  *                getObjects of the allowances they point to: an allowance
  *                whose cap the wallet no longer holds was revoked;
@@ -19,23 +20,13 @@ import 'server-only';
 
 import { normalizeStructTag, normalizeSuiAddress } from '@mysten/sui/utils';
 
-import {
-  parseAllowance,
-  parseAllowanceCap,
-  parseBeneficiaryField,
-  parseRecipientField,
-  parseRuleSpend,
-  parseRunningField,
-  parseSpenderField,
-  parseSpendPolicy,
-  type RuleSpendEvent,
-} from '@/lib/wallet/spend-rules-bcs';
+import { parseAllowance, parseAllowanceCap, parseRuleSpend, type RuleSpendEvent } from '@/lib/wallet/spend-rules-bcs';
 import { dbOwnershipGate } from '@/lib/server/ownership-proofs';
 import { scheduledPayerAddress } from '@/lib/server/scheduled-payer-signer';
 import { readSpenderStanding } from '@/lib/server/spend-standing';
 import type { SecondApprovalOpener } from '@/lib/server/payment-approval-asks';
 import { balanceType } from '@/lib/server/spend-rules-builders';
-import type { PolicyState } from '@/lib/server/spend-rules-index';
+import { readPolicyState, sharedVersion } from '@/lib/server/spend-policy-read';
 import { openSecondApproval, type SpendContext, type SpendReader } from '@/lib/server/spend-rules';
 import { orgWalletMembers } from '@/lib/server/wallet-deps';
 import type { WalletRoute } from '@/lib/server/wallet-route';
@@ -47,12 +38,6 @@ type Sui = (typeof import('@/lib/sui'))['suiClient'];
 
 async function client(): Promise<Sui> {
   return (await import('@/lib/sui')).suiClient;
-}
-
-function sharedVersion(owner: unknown): string {
-  const o = owner as { $kind?: string; Shared?: { initialSharedVersion: string } };
-  if (o?.$kind !== 'Shared' || !o.Shared) throw new Error('not a shared object');
-  return String(o.Shared.initialSharedVersion);
 }
 
 async function contents(sui: Sui, ids: string[]): Promise<Array<{ objectId: string; type: string; owner: unknown; content: Uint8Array } | null>> {
@@ -81,28 +66,8 @@ export function liveSpendReader(spendPackageId: string, usdcType: string): Spend
   return {
     async readPolicy(id) {
       const sui = await client();
-      const [o] = await contents(sui, [normalizeSuiAddress(id)]);
-      if (!o) return null;
-      if (!o.type.endsWith('::spend_policy::SpendPolicy') || normalizeSuiAddress(o.type.split('::')[0]) !== pkg) throw new Error(`${id} is not a SpendPolicy of this package`);
-      const head = parseSpendPolicy(o.content);
-      const [spenders, recipients, beneficiaries, running, policyWide] = await Promise.all([
-        tableEntries(sui, head.tables.spenders),
-        tableEntries(sui, head.tables.recipients),
-        tableEntries(sui, head.tables.beneficiaries),
-        tableEntries(sui, head.tables.runningTotals),
-        tableEntries(sui, head.tables.policyTotals),
-      ]);
-      const policy: PolicyState = {
-        ...head,
-        initialSharedVersion: sharedVersion(o.owner),
-        spenders: spenders.map(parseSpenderField).map((x) => ({ spender: x.spender, role: x.role, perPaymentMax: x.perPaymentMax })),
-        recipients: recipients.map(parseRecipientField),
-        beneficiaries: beneficiaries.map(parseBeneficiaryField),
-        runningTotals: running.map(parseRunningField),
-        // Pre-audit B1: the same key and value types as running_totals.
-        policyTotals: policyWide.map(parseRunningField),
-      };
-      return policy;
+      // What is read and how it is parsed: lib/server/spend-policy-read.ts. This is the live client under it.
+      return readPolicyState({ object: async (objectId) => (await contents(sui, [objectId]))[0] ?? null, tableEntries: (tableId) => tableEntries(sui, tableId) }, id, pkg);
     },
     async listAllowanceCaps(owner) {
       const sui = await client();
