@@ -32,9 +32,9 @@
 >
 > v2's own review notes are in the sections headed "v2 Phase 1" (the Move
 > packages, 24 Oct 2026), "v2 Phase 2" and "v2 Phase 3"; the design and its
-> reviews are in `docs/v2/phase1-move-design.md`. The planned independent Move
-> review is HackenProof, under the Sui Foundation program. It has not started
-> and nothing is signed yet.
+> reviews are in `docs/v2/phase1-move-design.md`. The independent review is
+> planned with HackenProof (audit and penetration testing). Scope and dates
+> are not agreed, nothing is signed, and it has not started.
 
 **Scope**: All Move modules under `move/sources/` (8 modules)
 **Methodology**: OtterSec-style review — capability access control, resource handling, integer arithmetic, authorization, event traceability, upgrade & pause posture, Move-specific patterns (hot-potato, abilities, UID hygiene).

@@ -1,9 +1,11 @@
 # Splash — mainnet cutover status
 
-**Target:** Sui mainnet once the independent Move review (HackenProof, under
-the Sui Foundation program) has signed off and the key ceremony in
+**Target:** Sui mainnet once the independent Move review has signed off and
+the key ceremony in
 [`docs/KEY-CEREMONY-RUNBOOK.md`](docs/KEY-CEREMONY-RUNBOOK.md) has run; the
 full publish gate is [`docs/MAINNET-CHECKLIST.md`](docs/MAINNET-CHECKLIST.md).
+The independent review is planned with HackenProof (audit and penetration
+testing); scope and dates are not agreed, and it has not started.
 The earlier target, week 2 September 2026, has passed; no new date is set here.
 **Governing constraint:** Splash **cannot hold client funds** — self-imposed, enforced by the type system and by CI, and a precondition for operating before an e-money licence exists. No licence is held today.
 E-money tier (RM 1.5M, Labuan money broking paras 6.1 + 6.2) is Phase 2, the name the code uses
@@ -174,8 +176,10 @@ Do not publish `splash_core` until every line is checked.
       only, behind `splash_upgrade_delay`; `splash_spend` and
       `splash_upgrade_delay` immutable** (below). This replaces the earlier
       decision, an immutable core.
-- [ ] Independent Move review signed off on the audited commit — HackenProof,
-      under the Sui Foundation program (deck slide 6 commits to this)
+- [ ] Independent Move review signed off on the audited commit (deck slide 6
+      commits to this). The review is planned with HackenProof (audit and
+      penetration testing); scope and dates are not agreed, and it has not
+      started.
 - [ ] `splash_core` published; package ID + object IDs here and in `.env`
 - [ ] One end-to-end mainnet settlement executed; digest recorded
 - [x] `SECURITY.md` updated
