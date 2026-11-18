@@ -910,6 +910,11 @@ test('(3) a staff payment over the rule cannot be opened on chain, so staff ask 
   assert.throws(() => w.createStaffIntent(STAFF, { id: '0x' + '42'.repeat(32), recipient: SUPPLIER, amountMinor: 100n * USDC_1, kind: 1, expiresAtMs: t0 + DAY }), /E_UNVERIFIED_DESTINATION/);
   const byIntent = await askOwnersToApprove({ db: w.db, ctx: w.ctx }, { orgId: 'acme', userId: 'u-staff', intentId: '0x' + '41'.repeat(32), contentHash: '04'.repeat(32), walrusBlobId: 'aa', requesterAddresses: [STAFF] });
   assert.equal(byIntent.status, 404, 'the intent path has nothing to ask about');
+  // B3 (pre-audit): audit_anchor::anchor refuses a blob id over 64 bytes, so an ask whose bundle the chain would refuse is refused here.
+  const longBlob = await askOwnersToApprove({ db: w.db, ctx: w.ctx }, { orgId: 'acme', userId: 'u-staff', intentId: '0x' + '41'.repeat(32), contentHash: '04'.repeat(32), walrusBlobId: 'aa'.repeat(65), requesterAddresses: [STAFF] });
+  assert.equal(longBlob.code, 'bad_audit_bundle', 'a 65-byte blob id is not a bundle the chain anchors');
+  const atBound = await askOwnersToApprove({ db: w.db, ctx: w.ctx }, { orgId: 'acme', userId: 'u-staff', intentId: '0x' + '41'.repeat(32), contentHash: '04'.repeat(32), walrusBlobId: 'aa'.repeat(64), requesterAddresses: [STAFF] });
+  assert.equal(atBound.status, 404, 'a 64-byte blob id passes the bundle check');
 
   const { readCurrentPolicy } = await import('../lib/server/spend-rules.ts');
   assert.equal(typeof readCurrentPolicy, 'function', 'the current policy can be read for an ask');

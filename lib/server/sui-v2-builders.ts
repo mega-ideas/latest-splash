@@ -75,6 +75,8 @@ export class V2BuildError extends Error {
 export const V2_KIND = Object.freeze({ SPLASH_BUSINESS: 0, WALLET: 1, EXCHANGE: 2, CROSS_CHAIN: 3, BANK_PAYOUT: 4 });
 /** splash_core::payment_intent::MAX_INTENT_LIFETIME_MS, 30 days (D11). */
 export const MAX_INTENT_LIFETIME_MS = 2_592_000_000n;
+/** splash_core::audit_anchor::MAX_BLOB_ID_BYTES (B3): the longest Walrus blob id `audit_anchor::anchor` takes, in bytes. */
+export const MAX_WALRUS_BLOB_ID_BYTES = 64;
 
 const fn = (chain: V2Chain, target: string) => `${normalizeSuiAddress(chain.corePackageId)}::${target}`;
 

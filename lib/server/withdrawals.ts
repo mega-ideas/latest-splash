@@ -89,7 +89,7 @@ import {
   type WithdrawalStatus,
 } from '../payouts/withdrawal-rules.ts';
 import type { WalletContext, WalletMembers } from './business-wallet.ts';
-import { V2_KIND } from './sui-v2-builders.ts';
+import { MAX_WALRUS_BLOB_ID_BYTES, V2_KIND } from './sui-v2-builders.ts';
 import type { RequestView } from './wallet-signing.ts';
 import type { WithdrawalSigningDetails } from './wallet-signing.ts';
 import { closeSigningRequest, readSigningRequest, type DrizzleDb, type StoredRequest } from './wallet-signing-store.ts';
@@ -794,11 +794,14 @@ export function parseBankPayoutRequest(input: { amountMinor: unknown; acceptedRe
   return { amount, accepted, shownFee };
 }
 
-/** The audit bundle a payout anchors: 32 bytes of hash and a blob id, neither of them all zero (no stand-in is a bundle). */
+/**
+ * The audit bundle a payout anchors: 32 bytes of hash and a blob id of at most 64 bytes (what audit_anchor::anchor takes, B3),
+ * neither of them all zero (no stand-in is a bundle).
+ */
 export function parseAuditBundle(input: { contentHash: unknown; walrusBlobId: unknown }, what: string): { contentHash: string; walrusBlobId: string } | Refusal {
   const contentHash = hexOf(input.contentHash);
   const walrusBlobId = hexOf(input.walrusBlobId);
-  if (!isHexBytes(contentHash, 32, 32) || !isHexBytes(walrusBlobId, 1, 128) || /^0+$/.test(contentHash) || /^0+$/.test(walrusBlobId)) {
+  if (!isHexBytes(contentHash, 32, 32) || !isHexBytes(walrusBlobId, 1, MAX_WALRUS_BLOB_ID_BYTES) || /^0+$/.test(contentHash) || /^0+$/.test(walrusBlobId)) {
     return refuse(400, 'no_audit_bundle', `The ${what === 'withdraw' ? 'withdrawal' : 'payout'} needs its audit bundle (content hash and blob id).`);
   }
   return { contentHash, walrusBlobId };

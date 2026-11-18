@@ -358,6 +358,70 @@ test('the payment runs as the business wallet with the operator paying gas, and 
   assert.match(main, /skipped\.length \? `, \$\{skipped\.length\} skipped` : ''/);
 });
 
+/** The argument expressions the script passes to `${PACKAGE}::<target>`, as written. */
+function callArguments(script, target) {
+  const at = script.indexOf(`target: \`\${PACKAGE}::${target}\``);
+  assert.ok(at >= 0, `scripts/e2e-testnet.mjs calls ${target}`);
+  const open = script.indexOf('[', script.indexOf('arguments:', at));
+  return topLevelItems(script.slice(open + 1, closeOf(script, open) - 1));
+}
+
+/** A stand-in for `tx.pure`, returning the bytes a `vector<u8>` argument carries. */
+const pureBytes = {
+  pure: {
+    vector: (type, values) => {
+      assert.equal(type, 'u8');
+      return Uint8Array.from(values);
+    },
+  },
+};
+
+// B3 (pre-audit, 13 Nov 2026): audit_anchor::anchor takes a content hash of
+// exactly 32 bytes and a Walrus blob id of at most 64. The app passes the raw
+// sha256 digest (lib/server/payment-record.ts); the verify step built the hex
+// TEXT of it, 64 bytes, which the chain refuses with E_BAD_HASH_LENGTH (503).
+// This runs the script's own auditValues and the very argument expressions it
+// passes, so the bytes checked are the bytes the ceremony would send.
+test('the payment check anchors the raw 32-byte hash and a blob id the chain accepts, as the app does', async () => {
+  const script = await source('scripts/e2e-testnet.mjs');
+  const { createHash } = await import('node:crypto');
+  const { toHex } = await import('../lib/evidence/commitment.ts');
+  const auditValues = new Function('createHash', 'toHex', `${functionBody(script, 'auditValues')}\nreturn auditValues;`)(createHash, toHex);
+  const seed = new Uint8Array(32).fill(7);
+  const { auditHash, blobId } = auditValues(seed);
+
+  const args = callArguments(script, 'audit_anchor::anchor');
+  assert.equal(args.length, 4, 'receipt, content hash, blob id, clock');
+  const bytesOf = (expr) => new Function('tx', 'Buffer', 'auditHash', 'blobId', `return ${expr};`)(pureBytes, Buffer, auditHash, blobId);
+
+  const hashBytes = await moveConstant('audit_anchor', 'CONTENT_HASH_BYTES');
+  const maxBlobBytes = await moveConstant('audit_anchor', 'MAX_BLOB_ID_BYTES');
+  assert.deepEqual([hashBytes, maxBlobBytes], [32, 64]);
+  // The server's bound on an audit bundle's blob id is the chain's.
+  const { MAX_WALRUS_BLOB_ID_BYTES } = await import('../lib/server/sui-v2-builders.ts');
+  assert.equal(MAX_WALRUS_BLOB_ID_BYTES, maxBlobBytes, 'lib/server/sui-v2-builders.ts MAX_WALRUS_BLOB_ID_BYTES is audit_anchor::MAX_BLOB_ID_BYTES');
+
+  const contentHash = bytesOf(args[1]);
+  assert.equal(contentHash.length, hashBytes, `the content hash is ${contentHash.length} bytes; audit_anchor::anchor takes ${hashBytes} (${args[1]})`);
+  assert.deepEqual(contentHash, new Uint8Array(createHash('sha256').update(`e2e:${toHex(seed)}`).digest()), 'it is the sha256 digest itself');
+  const walrusBlobId = bytesOf(args[2]);
+  assert.ok(walrusBlobId.length > 0 && walrusBlobId.length <= maxBlobBytes, `the blob id is ${walrusBlobId.length} bytes; audit_anchor::anchor takes 1 to ${maxBlobBytes}`);
+
+  // anchor_audit_hash takes Strings, and the app passes the hex text: unchanged.
+  assert.equal(callArguments(script, 'audit_anchor::anchor_audit_hash')[2], 'tx.pure.string(auditHash)');
+});
+
+test('the testnet e2e anchors a 32-byte hash and a short blob id on every settlement it signs', async () => {
+  const e2e = await source('experiments/v2-phase1/testnet-e2e.mjs');
+  assert.match(e2e, /\nconst ref32 = \(label\) => Array\.from\(sha256\(/, 'ref32 is a sha256 digest, 32 bytes');
+  const anchors = [...e2e.matchAll(/target: `\$\{CORE\}::audit_anchor::anchor`, arguments: \[([^\]]*\])/g)];
+  assert.ok(anchors.length >= 2, 'the testnet e2e anchors its settlements');
+  for (const [, args] of anchors) {
+    assert.match(args, /^receipt, tx\.pure\.vector\('u8', ref32\(`\$\{step\}:hash`\)\), tx\.pure\.vector\('u8', Array\.from\(new TextEncoder\(\)\.encode\('walrus-testnet'\)\)\), tx\.object\(CLOCK\)\]$/);
+  }
+  assert.equal(e2e.match(/audit_anchor::anchor\b(?!_)/g)?.length, anchors.length, 'no other audit_anchor::anchor call');
+});
+
 test('the verify script never calls process.exit once the chain has answered: on Windows it would report 127', async () => {
   const script = await source('scripts/e2e-testnet.mjs');
   const exits = script.match(/process\.exit\(/g)?.length ?? 0;

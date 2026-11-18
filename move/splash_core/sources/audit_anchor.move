@@ -37,6 +37,15 @@ public struct AnchorWitness has drop {}
 const E_EMPTY_HASH:    u64 = 500;
 const E_EMPTY_ANCHOR:  u64 = 501;
 const E_EMPTY_BLOB:    u64 = 502;
+/// B3 (pre-audit, 13 Nov 2026): a settlement's content hash is a 32-byte
+/// digest (`lib/server/payment-record.ts` anchors a sha256), never another
+/// length.
+const E_BAD_HASH_LENGTH: u64 = 503;
+/// B3: a Walrus blob id, as the app anchors it (the base64url text of a
+/// 32-byte id, 43 bytes), is never longer than `MAX_BLOB_ID_BYTES`.
+const E_BLOB_TOO_LONG:   u64 = 504;
+const CONTENT_HASH_BYTES: u64 = 32;
+const MAX_BLOB_ID_BYTES:  u64 = 64;
 
 public struct AuditAnchor has key {
     id: UID,
@@ -155,6 +164,10 @@ public fun verify_anchor(
 }
 
 /// Consume the settlement receipt produced by payment_intent.
+///
+/// `content_hash` must be exactly 32 bytes (a digest, not its hex text) and
+/// `walrus_blob_id` 1 to 64 bytes (B3). An empty one still aborts with its
+/// own code, before the length checks.
 public fun anchor(
     receipt: SettleReceipt,
     content_hash: vector<u8>,
@@ -164,6 +177,8 @@ public fun anchor(
 ) {
     assert!(content_hash.length() > 0, E_EMPTY_HASH);
     assert!(walrus_blob_id.length() > 0, E_EMPTY_BLOB);
+    assert!(content_hash.length() == CONTENT_HASH_BYTES, E_BAD_HASH_LENGTH);
+    assert!(walrus_blob_id.length() <= MAX_BLOB_ID_BYTES, E_BLOB_TOO_LONG);
 
     let (intent_id, commitment, _settled_at) =
         payment_intent::unpack_settle_receipt(AnchorWitness {}, receipt);

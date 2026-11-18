@@ -55,7 +55,7 @@ import { normalizeStructTag, normalizeSuiAddress } from '@mysten/sui/utils';
 
 import { memberships, walletApprovalAsks, walletSigningRequests, walletTransfers } from '../db/schema.ts';
 import { closedWords } from '../approve/wait.ts';
-import { MAX_INTENT_LIFETIME_MS, V2_KIND } from './sui-v2-builders.ts';
+import { MAX_INTENT_LIFETIME_MS, MAX_WALRUS_BLOB_ID_BYTES, V2_KIND } from './sui-v2-builders.ts';
 import { financeLeadOf } from './team-admin.ts';
 import { memberRole, recordAuthorityEvent } from './wallet-authority.ts';
 import type { IntentState, WalletContext, WalletMembers } from './business-wallet.ts';
@@ -288,7 +288,8 @@ export async function askOwnersToApprove(
   if (role === null || role === 'viewer') return fail(403, 'cannot_ask', 'only a member who makes or approves payments can ask the owners');
   const contentHash = String(input.contentHash ?? '').toLowerCase();
   const blob = String(input.walrusBlobId ?? '').toLowerCase();
-  if (!isHex(contentHash, 32, 32) || !isHex(blob, 1, 128)) return fail(400, 'bad_audit_bundle', "the payment's audit bundle reference could not be read");
+  // B3: no longer than audit_anchor::anchor takes, so the owners never sign for a bundle the chain refuses.
+  if (!isHex(contentHash, 32, 32) || !isHex(blob, 1, MAX_WALRUS_BLOB_ID_BYTES)) return fail(400, 'bad_audit_bundle', "the payment's audit bundle reference could not be read");
   const note = input.note == null ? null : String(input.note).slice(0, 500);
   if ((input.draft == null) === (input.intentId == null || input.intentId === '')) {
     return fail(400, 'bad_ask', 'ask about one payment: an open one, or a draft');
