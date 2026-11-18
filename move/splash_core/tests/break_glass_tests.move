@@ -517,6 +517,112 @@ fun the_last_millisecond_of_the_window_still_executes() {
     scenario.end();
 }
 
+// The exact edge of the window, pinned to the registry's own `expires_at_ms`
+// rather than to the constant. The two tests above sit one millisecond either
+// side of the edge and never on it, so `now < expires_at_ms` in
+// `cap_registry::bump` could become `now <= expires_at_ms` (a window one
+// millisecond longer than the one `is_armed` reports) and every other test
+// would still pass. These two fail under that change.
+
+/// Arm an anchor-cap revocation for OPERATOR and return the arming's
+/// `expires_at_ms`, read back from the registry.
+fun arm_anchor(scenario: &mut Scenario): u64 {
+    scenario.next_tx(PUBLISHER);
+    let admin = scenario.take_from_sender<AdminCap>();
+    let mut registry = scenario.take_shared<CapRegistry>();
+    let c = scenario.take_shared<Clock>();
+    let ctx = scenario.ctx();
+    business_account::arm_break_glass_anchor_cap(&admin, &mut registry, OPERATOR, b"lost", &c, ctx);
+    let expires_at_ms = cap_registry::armed_expires_at_ms(&registry);
+    ts::return_shared(c);
+    ts::return_shared(registry);
+    scenario.return_to_sender(admin);
+    expires_at_ms
+}
+
+fun set_clock(scenario: &mut Scenario, ms: u64) {
+    scenario.next_tx(PUBLISHER);
+    let mut c = scenario.take_shared<Clock>();
+    c.set_for_testing(ms);
+    ts::return_shared(c);
+}
+
+fun execute_anchor(scenario: &mut Scenario) {
+    scenario.next_tx(PUBLISHER);
+    let admin = scenario.take_from_sender<AdminCap>();
+    let mut registry = scenario.take_shared<CapRegistry>();
+    let c = scenario.take_shared<Clock>();
+    let ctx = scenario.ctx();
+    business_account::execute_break_glass_anchor_cap(&admin, &mut registry, &c, ctx);
+    ts::return_shared(c);
+    ts::return_shared(registry);
+    scenario.return_to_sender(admin);
+}
+
+#[test]
+#[expected_failure(abort_code = 214, location = splash_core::cap_registry)]
+/// At `now == expires_at_ms` the window has closed. `is_armed` already says
+/// false at this instant, so an execute that still went through here would
+/// revoke on an arming the registry reports as lapsed.
+fun an_execute_at_exactly_expires_at_ms_is_refused() {
+    let mut scenario = publish();
+    let expires_at_ms = arm_anchor(&mut scenario);
+    set_clock(&mut scenario, expires_at_ms);
+    scenario.next_tx(PUBLISHER);
+    {
+        let registry = scenario.take_shared<CapRegistry>();
+        let c = scenario.take_shared<Clock>();
+        assert_eq!(cap_registry::is_armed(&registry, &c), false);
+        ts::return_shared(c);
+        ts::return_shared(registry);
+    };
+    execute_anchor(&mut scenario);
+    scenario.end();
+}
+
+#[test]
+/// At `expires_at_ms - 1` the window is still open and the execute revokes.
+fun an_execute_at_expires_at_ms_minus_one_succeeds() {
+    let mut scenario = publish();
+    let expires_at_ms = arm_anchor(&mut scenario);
+    set_clock(&mut scenario, expires_at_ms - 1);
+    execute_anchor(&mut scenario);
+    scenario.next_tx(PUBLISHER);
+    {
+        let registry = scenario.take_shared<CapRegistry>();
+        assert_eq!(cap_registry::anchor_generation(&registry), 1);
+        ts::return_shared(registry);
+    };
+    scenario.end();
+}
+
+#[test]
+#[expected_failure(abort_code = 213, location = splash_core::cap_registry)]
+/// A lapsed arming stays in the registry, inert, because the execute that finds
+/// it lapsed aborts and cannot clear it. `cancel_break_glass` is the way to
+/// clear it explicitly: it must still work after the lapse, revoke nothing, and
+/// leave the registry with nothing armed — so a later execute is refused as
+/// "nothing armed" (213), not as "lapsed" (214).
+fun a_lapsed_arming_can_still_be_cancelled() {
+    let mut scenario = publish();
+    let expires_at_ms = arm_anchor(&mut scenario);
+    set_clock(&mut scenario, expires_at_ms + 1);
+    scenario.next_tx(PUBLISHER);
+    {
+        let admin = scenario.take_from_sender<AdminCap>();
+        let mut registry = scenario.take_shared<CapRegistry>();
+        let ctx = scenario.ctx();
+        business_account::cancel_break_glass(&admin, &mut registry, ctx);
+        assert_eq!(cap_registry::anchor_generation(&registry), cap_registry::genesis());
+        ts::return_shared(registry);
+        scenario.return_to_sender(admin);
+    };
+    // The publisher's cap was never revoked.
+    anchor_as(&mut scenario, PUBLISHER);
+    execute_anchor(&mut scenario);
+    scenario.end();
+}
+
 #[test]
 /// After a lapse, arming again is a plain arm — not a puzzle about why the
 /// registry still says something is pending.
