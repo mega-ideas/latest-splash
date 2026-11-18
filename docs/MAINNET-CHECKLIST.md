@@ -19,8 +19,10 @@ procedure in [`docs/UPGRADE-POLICY.md`](UPGRADE-POLICY.md).
       date, the 100 bps ceiling is the same in `splash_core`, `splash_spend`
       and `lib/fees/schedule.ts`, no literal fee rate in customer copy, and
       no immediate fee setter but `set_discount`).
-- [ ] The independent Move review (OtterSec, or Zellic as backup) has signed
-      off on this exact source commit. Record the commit.
+- [ ] The independent Move review has signed off on this exact source commit.
+      Record the commit. The review is planned with HackenProof (audit and
+      penetration testing); scope and dates are not agreed, and it has not
+      started.
 - [ ] **The governance multisig exists**: Sky, Sebastian and the cold backup,
       2-of-3, with no single member able to sign alone. Record its address and
       the three public keys. It never signs `0x2::address_alias`.
@@ -282,7 +284,10 @@ procedure in [`docs/UPGRADE-POLICY.md`](UPGRADE-POLICY.md).
 ## Decisions locked (2026-07-18)
 - Postgres host: **DigitalOcean Managed PostgreSQL**
 - W4 KYT: **stub + provider interface** until the Elliptic contract signs
-- Audit: **OtterSec first** inquiry (Zellic backup) — 0xSky books
+- Audit: ~~**OtterSec first** inquiry (Zellic backup) — 0xSky books~~
+  **Superseded:** the independent review is planned with HackenProof (audit
+  and penetration testing). Scope and dates are not agreed, nothing is signed,
+  and it has not started.
 - PR #2 (IA restructure): **closed**, branch kept for post-launch
 
 ## W1 — persistence (remaining)
@@ -331,7 +336,9 @@ procedure in [`docs/UPGRADE-POLICY.md`](UPGRADE-POLICY.md).
       Walrus/Seal) — refuse boot on partial profile
 - [ ] PTB gas headroom, typed retries, digest-before-state-advance recon
 - [ ] AdminCap 2-of-3 transfer drill on testnet; upgrade policy recorded
-- [ ] OtterSec audit booked (0xSky) → engagement → fixes (HARD mainnet blocker)
+- [ ] Independent Move review → engagement → fixes (HARD mainnet blocker).
+      Planned with HackenProof (audit and penetration testing); scope and
+      dates are not agreed, and it has not started.
 - [ ] Audit package prep: module inventory, specs, threat model, coverage
 
 ## W6 — controls hardening
@@ -376,7 +383,10 @@ procedure in [`docs/UPGRADE-POLICY.md`](UPGRADE-POLICY.md).
       and unauthorized-action rates must be 0)
 
 ## Standing items for 0xSky
-- [ ] Send OtterSec inquiry (calendar is the August risk)
+- [ ] ~~Send OtterSec inquiry (calendar is the August risk)~~ Superseded: the
+      independent review is planned with HackenProof (audit and penetration
+      testing); scope and dates are not agreed, nothing is signed, and it has
+      not started.
 - [ ] Provision DO Postgres + DATABASE_URL
 - [ ] Elliptic contract status
 - [ ] Second PH payout partner: agreement signed, then sandbox access

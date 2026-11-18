@@ -1,7 +1,9 @@
 # Commitments: what an event carries instead of the payment
 
-`splash_core` publishes immutable. An event struct's fields freeze at publish,
-and until WS5 six of them carried the payment in cleartext: who paid whom, how
+An event struct's fields freeze at publish. `splash_core` upgrades additive
+only (v2, D11; `docs/UPGRADE-POLICY.md`), and no upgrade can change an existing
+struct, so this holds after the move away from an immutable core. Until WS5
+six of them carried the payment in cleartext: who paid whom, how
 much, in what currency, at what rate, against which beneficiary reference.
 Every one of those events now carries a 32-byte commitment instead.
 

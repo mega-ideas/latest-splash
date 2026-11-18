@@ -1,6 +1,12 @@
 # Splash — mainnet cutover status
 
-**Target:** Sui mainnet, week 2 September 2026
+**Target:** Sui mainnet once the independent Move review has signed off and
+the key ceremony in
+[`docs/KEY-CEREMONY-RUNBOOK.md`](docs/KEY-CEREMONY-RUNBOOK.md) has run; the
+full publish gate is [`docs/MAINNET-CHECKLIST.md`](docs/MAINNET-CHECKLIST.md).
+The independent review is planned with HackenProof (audit and penetration
+testing); scope and dates are not agreed, and it has not started.
+The earlier target, week 2 September 2026, has passed; no new date is set here.
 **Governing constraint:** Splash **cannot hold client funds** — self-imposed, enforced by the type system and by CI, and a precondition for operating before an e-money licence exists. No licence is held today.
 E-money tier (RM 1.5M, Labuan money broking paras 6.1 + 6.2) is Phase 2, the name the code uses
 (`PHASE_2_CUSTODY` in `lib/server/custody-phase.ts`). The build phases 0–7 below are a separate numbering.
@@ -80,11 +86,26 @@ not having one.
 
 Do not publish `splash_core` until every line is checked.
 
-- [x] `sui move build` clean for both packages
-- [x] `sui move test` green for `splash_core` — **14 tests** (was 0 runnable)
+- [x] `sui move build` clean for the three mainnet packages
+- [x] `sui move test` green for the three mainnet packages on Sui CLI
+      `mainnet-v1.82.3`, as of `main` at `cbb96a6a`: `splash_core` **613**,
+      `splash_spend` **308**, `splash_upgrade_delay` **74** (995 in all).
+      Before v2, `splash_core` had 14 (was 0 runnable).
 - [x] `sui move test` green for `splash_custody` — **16 tests** (was blocked).
+      It is testnet only since v2 (D11). On `mainnet-v1.82.3`, as of `main`
+      at `cbb96a6a`, it passes 16 of 16 and `splash_meter` 23 of 23.
       DeepBook pin is `daa5a951`; see the CLI item below for how it got there.
-- [x] **Sui CLI upgraded to 1.77.2 and the DeepBook pin moved forward** to
+- [x] **The v2 packages need Sui CLI `mainnet-v1.82.3`**, the version
+      `docs/MAINNET-CHECKLIST.md` requires before any publish. Older CLIs do
+      not run them: on 1.77.2, as of `main` at `cbb96a6a`, `splash_core` fails
+      613 of 613, `splash_spend` 308 of 308 and `splash_upgrade_delay` 74 of
+      74, every one with `MISSING_DEPENDENCY` on `sui::funds_accumulator`, a
+      framework linkage failure, not a code failure. Do not use 1.77.2 or
+      1.61.1 for this gate.
+      *Pre-v2 history, kept for the record.* Everything from here to the end
+      of this item held for the v1 suites (`splash_core` 14, `splash_meter`
+      22, `splash_custody` 16) and does not describe the v2 packages.
+      **Sui CLI upgraded to 1.77.2 and the DeepBook pin moved forward** to
       `daa5a951` (2026-08-18). The toolchain floor was 1.61.1:
       `std::unit_test::destroy` arrived in sui `d95572e1c1` (#24078) and first
       shipped in `testnet-v1.61.1`, while DeepBook's tests began using it in
@@ -93,19 +114,20 @@ Do not publish `splash_core` until every line is checked.
       after. Re-verified at the new rev rather than assumed: `FLOAT_SCALING ==
       1_000_000_000` matching `DEEPBOOK_PRICE_SCALING`, the three view
       signatures byte-identical, and no `published-at`.
-      **Minimum CLI for this repo is now 1.61.1.**
+      The minimum CLI for the v1 suites was then 1.61.1.
       **2026-09-05: re-verified.** The dev machine had drifted to 1.75.1, on
       which `splash_custody` fails 0/16 with `MISSING_DEPENDENCY` in
       `0x2::object` — a whole-package linkage failure, not a code failure
       (`splash_core` and `splash_meter` have no dependencies and stayed
       green). 1.77.2 was reinstalled and all three suites re-run: **14 + 22 +
-      16 = 52, no failures.** The checkboxes above hold, on 1.77.2 and not
+      16 = 52, no failures.** The v1 checkboxes held then, on 1.77.2 and not
       below it.
-      Note the committed `Move.lock` still records `compiler-version =
-      "1.59.1"` and pins framework `494fa6ed`. Any `sui move build` rewrites
-      it to lock format 4 with that CLI's own framework rev (1.75.1 →
-      `b9149cbf`, 1.77.2 → `06734f6f`); those rewrites have been reverted, so
-      the pin on record is not the framework these tests ran against.
+      At that time the committed `Move.lock` recorded `compiler-version =
+      "1.59.1"` and pinned framework `494fa6ed`, and builds on 1.75.1 and
+      1.77.2 rewrote it (to `b9149cbf` and `06734f6f`); those rewrites were
+      reverted. That is no longer the case: since v2 Phase 1 (`a5baf349`) every
+      package's committed `Move.lock` is lock format 4 and pins framework
+      `719fb296`.
 - [x] No value-bearing field in `splash_core` — `scripts/check-core-no-balance.mjs`,
       run by `.github/workflows/core-invariant.yml` on every push and PR, and by
       `npm run lint` locally. The checker parses struct BODIES out of
@@ -119,8 +141,8 @@ Do not publish `splash_core` until every line is checked.
 - [x] `npx tsc --noEmit` exits 0 · all TS suites green (165 tests)
 - [x] M1 closed — `create` returns `PaymentIntent` only; no `SettleReceipt`
       without a consumed `Coin`; `AnchorWitness` enforces a single consumer
-- [x] M-07 `revoke_verification` and M-08 `admin_set_paused` shipped — both are
-      impossible to add after the UpgradeCap burns
+- [x] M-07 `revoke_verification` and M-08 `admin_set_paused` shipped — written
+      when core was to publish immutable and could gain nothing afterwards
 - [x] M-09 `confirm_payment_intent` is generic over the coin, with the settlement
       asset bound at creation (abort 414)
 - [x] **`settle_batch` replaced by `settle_batch_delegated`** — the old form
@@ -150,8 +172,14 @@ Do not publish `splash_core` until every line is checked.
 - [ ] **Rotate `ComplianceCap` to a third address (C).**
       `compliance_config::create` transfers it to `ctx.sender()` — the multisig.
       `transfer_cap(cap, C)` is a required ceremony step missing from the runbook.
-- [x] `UpgradeCap` decision made: **immutable core** (below)
-- [ ] Independent Move review commissioned — deck slide 6 commits to this
+- [x] `UpgradeCap` decision made (v2, D11): **`splash_core` upgradable, additive
+      only, behind `splash_upgrade_delay`; `splash_spend` and
+      `splash_upgrade_delay` immutable** (below). This replaces the earlier
+      decision, an immutable core.
+- [ ] Independent Move review signed off on the audited commit (deck slide 6
+      commits to this). The review is planned with HackenProof (audit and
+      penetration testing); scope and dates are not agreed, and it has not
+      started.
 - [ ] `splash_core` published; package ID + object IDs here and in `.env`
 - [ ] One end-to-end mainnet settlement executed; digest recorded
 - [x] `SECURITY.md` updated
@@ -269,4 +297,4 @@ supplier list on a public chain.
 — chiefly A-11 (no amount cap or velocity limit on any `AdminCap` function) and
 A-12 (the S-10 cap split is written but not yet in effect at runtime). Both are
 custody-side and land with the Phase 2 publish, but A-12 is an operational
-change that should happen at the September ceremony regardless.
+change that should happen at the mainnet key ceremony regardless.
