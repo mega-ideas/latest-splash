@@ -190,20 +190,76 @@ nothing else moves.
 ## Near-threshold alerts (detective only)
 
 The chain enforces the second-approval threshold over a running total per
-(payer, recipient). Two patterns stay under it, and
+(payer, recipient) and, since pre-audit B1, a policy-wide total per
+recipient of what every payer paid it without an owner's approval; the
+check counts the larger of the two. Two patterns come close to it, and
 `lib/server/near-threshold.ts` flags them for the owners from the same
-index (running totals counted as `threshold_total` counts them, and
+index (running totals counted as `threshold_total` counts them, the
+policy-wide totals as `policy_threshold_total` counts them, and
 `RuleSpend`):
 
 - **`near_threshold_repeat`**: one spender has paid one recipient (or one
   bank beneficiary) two or more times (`RuleSpend`) and what the check counts
-  now is at least 80% of the threshold and below it. At or above the
-  threshold the chain itself asks for an approval, so that is not flagged.
+  now (the larger of their own total and the policy-wide one) is at least
+  80% of the threshold and below it. At or above the threshold the chain
+  itself asks for an approval, so that is not flagged.
 - **`same_recipient_many_spenders`**: two or more spenders (the operator's
   executor rule included) each have a total to the same recipient or
-  beneficiary, together at least 80% of the threshold; `over_threshold`
-  when together they reach it, since each total was checked alone and no
-  approval was asked for.
+  beneficiary, and the larger of their own totals added up and the
+  policy-wide total is at least 80% of the threshold; `over_threshold` when
+  it reaches it. Before B1 each total was checked alone, so a split could
+  pass the threshold with no approval; now the chain asks for an owner's
+  approval for any payment that would take the policy-wide total above it,
+  and the alert says so rather than that no approval was asked for (part of
+  what they paid may have carried one).
+
+The spend view's `nearThreshold` flag and `beforeApprovalMinor` on each
+running total count the same larger total; `countedMinor` stays the
+payer's own.
+
+### Policies of a package published before B1 (testnet today)
+
+B1 added a field to `SpendPolicy` (`policy_totals`). A published package's
+struct layouts never change, so B1 only exists in a `splash_spend` package
+published after it. The package on testnet
+(`0x59c3bac8598d7f15799ab7d741fb33f5ca85ac4c55d5325fd24b1aa47a151112`,
+version 1) was published before: its policies end at `running_totals`, it
+has none of `policy_threshold_total`, `policy_total_count` and
+`prune_policy_totals`, and its second-approval check counts each payer's
+own total alone. Splash reads both layouts, and for each policy it counts
+and says what that policy's own package enforces:
+
+- **Which layout** is told by the policy's bytes (`parseSpendPolicy`,
+  `lib/wallet/spend-rules-bcs.ts`): the two layouts are the same up to
+  `running_totals`, so a policy from before B1 has no bytes after that
+  field and one with B1 has exactly one more `LinkedTable`. Bytes that are
+  neither are refused by name. The reader has already checked that the
+  object is a `SpendPolicy` of the configured package
+  (`SPLASH_SPEND_PACKAGE_ID`).
+- **Reading** (`lib/server/spend-policy-read.ts`): for a policy from before
+  B1, `tables.policyTotals` is null, the chain is not asked for a
+  policy-wide totals table, and `policyTotals` is empty.
+- **The view**: `policy.countsAcrossPayers` is false and
+  `policy.recipientTotals` is empty, so `beforeApprovalMinor` and
+  `nearThreshold` go by the payer's own total, as that chain's check does.
+  Transfer still judges a payment by every payer's own totals added up, as
+  it did before B1, which is never less than that chain counts.
+- **The alerts**: `same_recipient_many_spenders` keeps the words from
+  before B1 (several spenders can together pass the threshold with no
+  approval there, and the alert says so); it never says the chain counts
+  them together.
+- **Transactions**: Splash calls none of the three functions B1 added, in
+  any transaction or read, so every transaction it builds is one the
+  testnet package accepts (`tests/spend-testnet-abi.test.mjs` keeps it so
+  while that package is in use).
+
+So on testnet nothing changes until `splash_spend` is published again: the
+split B1 closes stays open there on chain, and the owners' alert is the
+only sign of it. On a fresh publish from this source, new policies have
+`policy_totals` and everything above reads the B1 way with no switch to
+set. A policy does not move between packages: a policy id is derived under
+its own package's `PolicyRegistry`, so a fresh publish starts with new
+policies.
 
 RuleSpend carries no principal: the amounts are the policy's totals. A
 bank payout's RuleSpend names the partner deposit address, so its payments

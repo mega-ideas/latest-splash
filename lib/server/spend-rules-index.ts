@@ -9,8 +9,10 @@
  *     `current_spend`;
  *   - its `SpendPolicy` for the current wallet generation: the spenders with
  *     their own per-payment maximum, the verified recipients and
- *     beneficiaries, the limits, the running-total window, and the running
- *     totals per (payer, recipient) toward the second-approval threshold;
+ *     beneficiaries, the limits, the running-total window, the running
+ *     totals per (payer, recipient) toward the second-approval threshold,
+ *     and (pre-audit B1) the policy-wide totals per recipient of what every
+ *     payer paid it without an owner's approval;
  *   - `splash_spend::RuleSpend` events (one per payment under a rule: intent,
  *     allowance, approval, recipient, kind charged, fee).
  *
@@ -42,6 +44,29 @@ export type PolicyState = SpendPolicyHead & {
   recipients: Array<{ domain: number; address: string; kind: number }>;
   beneficiaries: Array<{ commitment: string; partnerDeposit: string }>;
   runningTotals: RunningEntry[];
+  /**
+   * Pre-audit B1: the policy-wide totals (payer @0x0), per recipient. Absent
+   * reads as none, and a policy of a package published before B1
+   * (`tables.policyTotals` is null) has none.
+   */
+  policyTotals?: RunningEntry[];
+};
+
+/**
+ * Pre-audit B1: what every payer has paid one recipient without an owner's
+ * approval, as `spend_policy::policy_threshold_total` counts it. The chain's
+ * second-approval check counts the larger of this and the payer's own total.
+ */
+export type RecipientTotalView = {
+  /** The recipient address, or null for a bank payout. */
+  recipient: string | null;
+  /** The beneficiary commitment (hex) of a bank payout, or null. */
+  beneficiary: string | null;
+  /** What the check counts now, for any payer. */
+  countedMinor: string;
+  countsUntilMs: string;
+  /** How much more anyone can pay this recipient without an approval, by this total alone. */
+  beforeApprovalMinor: string;
 };
 
 /** An allowance with the cap the wallet holds for it. */
@@ -94,9 +119,13 @@ export type RunningTotalView = {
    * from it still counts.
    */
   countsFromMs?: string;
-  /** How much more this payer can pay this recipient before an owner must approve. */
+  /**
+   * How much more this payer can pay this recipient before an owner must
+   * approve: the threshold less the larger of `countedMinor` and the
+   * recipient's policy-wide total (pre-audit B1), as the chain's check counts.
+   */
   beforeApprovalMinor: string;
-  /** At or above 80% of the threshold. */
+  /** What the check counts (the larger of the two) is at or above 80% of the threshold. */
   nearThreshold: boolean;
 };
 
@@ -129,6 +158,16 @@ export type SpendView = {
     generation: string;
     recipients: Array<{ address: string; tag: 'wallet' | 'exchange' }>;
     beneficiaries: Array<{ commitment: string; partnerDeposit: string }>;
+    /**
+     * Does this policy's chain count what EVERY payer paid a recipient
+     * without an owner's approval toward the second approval (pre-audit B1)?
+     * False for a policy of a package published before B1, such as the one
+     * on testnet: there each payer's own total is checked alone, and
+     * `recipientTotals` is always empty.
+     */
+    countsAcrossPayers: boolean;
+    /** Pre-audit B1: the policy-wide totals that count now. */
+    recipientTotals: RecipientTotalView[];
   } | null;
   rules: RuleView[];
   /** Allowances of the current wallet and policy whose spender is no longer on the policy: they cannot pay; revoke them. */
@@ -184,6 +223,28 @@ function allowanceView(a: HeldAllowance, now: bigint, current: boolean): Allowan
   };
 }
 
+/** Which recipient a running total is to: the bank beneficiary's commitment, or the address. */
+const destinationKey = (e: { recipient: string; beneficiary: string }) => (e.beneficiary.length > 0 ? `b:${e.beneficiary.toLowerCase()}` : `r:${e.recipient}`);
+
+/** Pre-audit B1: the policy-wide totals that still count at `now`, as the chain counts them. */
+function recipientTotals(policy: PolicyState, now: bigint): RecipientTotalView[] {
+  const threshold = policy.secondApprovalThreshold;
+  const out: RecipientTotalView[] = [];
+  for (const e of policy.policyTotals ?? []) {
+    const { countedMinor, countsUntilMs } = thresholdCounted(e, now);
+    if (countedMinor === 0n) continue;
+    const bank = e.beneficiary.length > 0;
+    out.push({
+      recipient: bank ? null : e.recipient,
+      beneficiary: bank ? e.beneficiary : null,
+      countedMinor: s(countedMinor),
+      countsUntilMs: s(countsUntilMs),
+      beforeApprovalMinor: s(countedMinor >= threshold ? 0n : threshold - countedMinor),
+    });
+  }
+  return out;
+}
+
 /** Does this allowance pay under this policy, from this wallet? The checks pay_intent makes. */
 export function boundTo(a: AllowanceState, policy: { id: string; wallet: string }, appName: string): boolean {
   return a.app === appName && a.funder === normalizeSuiAddress(policy.wallet) && a.name === allowanceNameFor(policy.id);
@@ -219,6 +280,11 @@ export function buildSpendView(input: {
   const unattached: AllowanceView[] = [];
   if (current) {
     const threshold = current.secondApprovalThreshold;
+    // Pre-audit B1: what every payer paid each recipient without an approval,
+    // counted now. The chain's check counts the larger of this and the
+    // payer's own total, so the room before an approval and the near flag do too.
+    const policyWide = new Map<string, bigint>();
+    for (const e of current.policyTotals ?? []) policyWide.set(destinationKey(e), thresholdCounted(e, now).countedMinor);
     for (const sp of current.spenders) {
       const mine = bound.filter((a) => a.spender === sp.spender).map((a) => allowanceView(a, now, true));
       const status: RuleView['status'] =
@@ -227,6 +293,8 @@ export function buildSpendView(input: {
         .filter((e) => e.payer === sp.spender)
         .map((e) => {
           const { countedMinor, countsUntilMs } = thresholdCounted(e, now);
+          const all = policyWide.get(destinationKey(e)) ?? 0n;
+          const checked = all > countedMinor ? all : countedMinor;
           const bank = e.beneficiary.length > 0;
           return {
             recipient: bank ? null : e.recipient,
@@ -237,8 +305,8 @@ export function buildSpendView(input: {
             countedMinor: s(countedMinor),
             countsUntilMs: s(countsUntilMs),
             countsFromMs: s(now < e.carriedUntilMs && e.carried > 0n ? e.windowStartMs - (e.windowEndMs - e.windowStartMs) : e.windowStartMs),
-            beforeApprovalMinor: s(countedMinor >= threshold ? 0n : threshold - countedMinor),
-            nearThreshold: threshold > 0n && countedMinor * 100n >= threshold * 80n,
+            beforeApprovalMinor: s(checked >= threshold ? 0n : threshold - checked),
+            nearThreshold: threshold > 0n && checked * 100n >= threshold * 80n,
           };
         })
         .filter((t) => t.countedMinor !== '0' || t.totalMinor !== '0');
@@ -279,6 +347,8 @@ export function buildSpendView(input: {
           generation: s(current.generation),
           recipients: current.recipients.map((r) => ({ address: r.address, tag: r.kind === 1 ? ('wallet' as const) : ('exchange' as const) })),
           beneficiaries: current.beneficiaries,
+          countsAcrossPayers: current.tables.policyTotals !== null,
+          recipientTotals: recipientTotals(current, now),
         }
       : null,
     rules,

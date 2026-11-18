@@ -15,8 +15,10 @@
 /// verified for exactly this kind of delivery), the amount is
 /// within the policy's and the spender's ceilings, and when the amount, with
 /// what the payer has already paid that recipient in the current window
-/// (decision 4), is above the second-approval threshold, a different owner
-/// has approved this exact payment. Then `splash_core` settles it against
+/// (decision 4), or with what every payer under the policy has paid it there
+/// without an owner's approval (pre-audit B1), is above the second-approval
+/// threshold, a different owner has approved this exact payment. Then
+/// `splash_core` settles it against
 /// the compliance config the policy recorded at creation (no other is
 /// accepted), accepting this
 /// package's `SettleWitness` because it is on that config's settlement-app
@@ -88,7 +90,9 @@ const E_OVER_PER_PAYMENT_MAX: u64 = 1005;
 /// The payment needs an approval and carries none: with what its payer has
 /// already paid its recipient in the current window, and what the window
 /// before it paid less than a window ago (`spend_policy::threshold_total`),
-/// it is above the second-approval threshold, or the payer is an executor.
+/// or with what every payer paid that recipient without an owner's approval
+/// (`spend_policy::policy_threshold_total`, pre-audit B1), it is above the
+/// second-approval threshold, or the payer is an executor.
 const E_APPROVAL_REQUIRED: u64 = 1006;
 /// The approval is for a different policy, intent, amount or payer.
 const E_APPROVAL_MISMATCH: u64 = 1007;
@@ -737,22 +741,32 @@ fun draw<C>(
     // executor always. What counts is the current window's total and what
     // the window before it paid less than a window length ago
     // (`threshold_total`), so a window primed at its start cannot double
-    // the threshold across its boundary. Every approval is the owners' (an
-    // owner's, or the wallet's delegation), and any approval passed must
-    // match and is consumed.
+    // the threshold across its boundary. Pre-audit B1: what counts is the
+    // larger of that and the same total over every payer under the policy
+    // (`policy_threshold_total`), so several staff splitting one recipient's
+    // invoices cannot each stay under the threshold. Every approval is the
+    // owners' (an owner's, or the wallet's delegation), and any approval
+    // passed must match and is consumed.
     let now = clock.timestamp_ms();
-    let paid_so_far = spend_policy::threshold_total(policy, payer, kind, recipient, beneficiary_ref, now);
+    let own = spend_policy::threshold_total(policy, payer, kind, recipient, beneficiary_ref, now);
+    let all = spend_policy::policy_threshold_total(policy, kind, recipient, beneficiary_ref, now);
+    let paid_so_far = if (all > own) all else own;
     let threshold = spend_policy::second_approval_threshold(policy);
     let over_threshold = paid_so_far > threshold || amount > threshold - paid_so_far;
     let needs_approval = over_threshold || spend_policy::is_executor(policy, payer);
-    if (approval.is_some()) {
+    let approved = approval.is_some();
+    if (approved) {
         consume(approval.destroy_some(), policy, account, intent, payer, fee, settle_by_ms, clock);
     } else {
         approval.destroy_none();
         assert!(!needs_approval, E_APPROVAL_REQUIRED);
     };
-    // Every payment counts toward the total, approved or not.
-    spend_policy::record_payment(policy, payer, kind, recipient, beneficiary_ref, amount, now);
+    // Every payment counts toward its payer's own total, approved or not.
+    // Only one paid without an owner's approval also counts toward the
+    // policy-wide total: an approved one has had its second look, and must
+    // not use up another spender's room (the executor's scheduled payments,
+    // say).
+    spend_policy::record_payment(policy, payer, kind, recipient, beneficiary_ref, amount, !approved, now);
 
     let funds = allowance::app_balance_spend(
         allowance,

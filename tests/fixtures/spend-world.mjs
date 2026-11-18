@@ -124,8 +124,8 @@ export async function spendWorld(opts = {}) {
           if (s.policies.has(id)) return abort('EObjectAlreadyClaimed');
           s.policies.set(id, {
             id, account: normalizeSuiAddress(ACCOUNT), wallet, walletEpoch: s.epoch, asset: USDC, owners: a.members.map((m) => m.address),
-            tables: { spenders: '0x1', recipients: '0x2', beneficiaries: '0x3', partnerDeposits: '0x4', runningTotals: '0x5' },
-            counts: { spenders: 0n, recipients: 0n, beneficiaries: 0n, runningTotals: 0n },
+            tables: { spenders: '0x1', recipients: '0x2', beneficiaries: '0x3', partnerDeposits: '0x4', runningTotals: '0x5', policyTotals: '0x6' },
+            counts: { spenders: 0n, recipients: 0n, beneficiaries: 0n, runningTotals: 0n, policyTotals: 0n },
             perPaymentMax: BigInt(a.perPaymentMaxMinor), secondApprovalThreshold: 10_000_000_000n, generation: 0n, runningWindowMs: 86_400_000n,
             initialSharedVersion: '11', spenders: [], recipients: [], beneficiaries: [], runningTotals: [],
           });

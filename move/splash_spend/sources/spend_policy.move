@@ -64,6 +64,20 @@
 /// they paid in the window counting, so it cannot hand them a fresh
 /// threshold's room.
 ///
+/// ─── The policy-wide total (pre-audit B1) ───────────────────────────────────
+///
+/// A total per payer alone lets several staff split one recipient's invoices,
+/// each under the threshold. So the policy also keeps, per recipient, what
+/// EVERY payer under it paid that recipient WITHOUT an owner's approval
+/// (`policy_totals`), with the same windows, carry-over and pruning, as if
+/// one payer had made all those payments. The second-approval check counts
+/// the larger of that and the payer's own total. A payment an owner
+/// approved counts toward its payer's own total only: it has had its
+/// second look, and must not use up another spender's room (an executor's
+/// scheduled payments always carry an approval, so they never do). Two
+/// staff who legitimately pay one recipient in a window reach the threshold
+/// sooner; that is the control working, and the owners can raise it.
+///
 /// ─── How the totals stay bounded ────────────────────────────────────────────
 ///
 /// The totals live in a `LinkedTable` (dynamic fields), so the policy object
@@ -80,7 +94,10 @@
 /// what it carries stops counting. Since no window lasts more than thirty
 /// days, that is at most sixty days after its start. So the table holds the
 /// windows opened in the last sixty days, plus spent entries that each
-/// later payment, or the wallet, clears.
+/// later payment, or the wallet, clears. The policy-wide totals are a second
+/// list kept the same way, with at most one entry per destination; each
+/// payment prunes up to two spent entries from the front of each list, and
+/// the wallet can prune more with `prune_policy_totals`.
 module splash_spend::spend_policy;
 
 use splash_core::address_registry::Registry;
@@ -169,6 +186,10 @@ const MAX_RUNNING_WINDOW_MS: u64 = 2_592_000_000;
 /// list, at most: more than the one entry a payment can add, so the backlog
 /// shrinks while payments run.
 const PRUNE_PER_PAYMENT: u64 = 2;
+/// Pre-audit B1: the payer every key in `policy_totals` names. Never a
+/// spender (`add_spender` refuses zero, and only a spender pays), and the
+/// two lists are separate tables, so it cannot meet a real payer's total.
+const POLICY_PAYER: address = @0x0;
 
 /// Shared once, at publish. The parent every policy's UID is derived from.
 public struct PolicyRegistry has key {
@@ -270,7 +291,8 @@ public struct SpendPolicy has key {
     partner_deposits: Table<address, u64>,
     per_payment_max: u64,
     /// A payment needs a second approval from an owner when it takes what
-    /// its payer has paid its recipient in the current window above this.
+    /// its payer has paid its recipient in the current window, or what every
+    /// payer paid it there without an approval, above this.
     second_approval_threshold: u64,
     /// Moves on every removal (a spender, a recipient, a beneficiary). Each
     /// approval records the generation it was given under and dies when it
@@ -284,6 +306,14 @@ public struct SpendPolicy has key {
     /// from `splash_spend`'s draw; expired entries are removed from the
     /// front by each payment and by `prune_running_totals`.
     running_totals: LinkedTable<RunningKey, RunningTotal>,
+    /// Pre-audit B1: per recipient, the principal EVERY payer under this
+    /// policy paid it without an owner's approval, keyed like
+    /// `running_totals` with `payer` set to `POLICY_PAYER` (@0x0). The
+    /// second-approval check counts the larger of this and the payer's own
+    /// total. Same windows, carry-over and pruning as `running_totals`
+    /// (by each payment, and by `prune_policy_totals`), and written only by
+    /// `record_payment`.
+    policy_totals: LinkedTable<RunningKey, RunningTotal>,
 }
 
 // ─── Events ────────────────────────────────────────────────────────────────
@@ -373,6 +403,7 @@ public fun create_policy<T>(
         generation: 0,
         running_window_ms: DEFAULT_RUNNING_WINDOW_MS,
         running_totals: linked_table::new(ctx),
+        policy_totals: linked_table::new(ctx),
     };
     let policy_id = object::id(&policy);
     event::emit(PolicyCreated {
@@ -655,11 +686,13 @@ fun spent(e: &RunningTotal, now_ms: u64): bool {
 }
 
 /// Add `amount` of principal to what `payer` has paid this recipient in the
-/// current window, starting a new window at `now_ms`, at the back of the
-/// list, if the last one has ended, and carrying into it what the ended
-/// one still counts; then remove up to `PRUNE_PER_PAYMENT` spent entries
-/// from the front. Saturates rather than aborts: a total that large is
-/// already far above any threshold.
+/// current window, and, when the payment carried no owner's approval
+/// (`unapproved`), to what every payer has paid it (pre-audit B1). Each
+/// total starts a new window at `now_ms`, at the back of its list, if its
+/// last one has ended, and carries into it what the ended one still
+/// counts. Then up to `PRUNE_PER_PAYMENT` spent entries are removed from
+/// the front of each list. Saturates rather than aborts: a total that large
+/// is already far above any threshold.
 public(package) fun record_payment(
     policy: &mut SpendPolicy,
     payer: address,
@@ -667,22 +700,43 @@ public(package) fun record_payment(
     recipient: address,
     beneficiary_ref: vector<u8>,
     amount: u64,
+    unapproved: bool,
     now_ms: u64,
 ) {
-    let key = running_key(payer, kind, recipient, beneficiary_ref);
-    if (is_live(policy, &key, now_ms)) {
-        let entry = policy.running_totals.borrow_mut(key);
+    let window_ms = policy.running_window_ms;
+    let own = running_key(payer, kind, recipient, beneficiary_ref);
+    add_to(&mut policy.running_totals, window_ms, own, amount, now_ms);
+    if (unapproved) {
+        let all = running_key(POLICY_PAYER, kind, recipient, beneficiary_ref);
+        add_to(&mut policy.policy_totals, window_ms, all, amount, now_ms);
+    };
+    prune_table(&mut policy.running_totals, PRUNE_PER_PAYMENT, now_ms);
+    prune_table(&mut policy.policy_totals, PRUNE_PER_PAYMENT, now_ms);
+}
+
+/// Add `amount` to `key`'s entry in `table`. If the entry's window has
+/// ended (or there is none), a new window of `window_ms` opens at `now_ms`
+/// at the back of the list, carrying what the ended one still counts.
+fun add_to(
+    table: &mut LinkedTable<RunningKey, RunningTotal>,
+    window_ms: u64,
+    key: RunningKey,
+    amount: u64,
+    now_ms: u64,
+) {
+    if (table.contains(key) && now_ms < table.borrow(key).window_end_ms) {
+        let entry = table.borrow_mut(key);
         entry.total = sat_add(entry.total, amount);
         entry.last_payment_ms = now_ms;
     } else {
         // An ended window for this key is replaced, not kept beside it; what
         // it still counts is carried into the new one.
-        let (carried, carried_until_ms) = if (policy.running_totals.contains(key)) {
-            let old = policy.running_totals.remove(key);
+        let (carried, carried_until_ms) = if (table.contains(key)) {
+            let old = table.remove(key);
             counted(&old, now_ms)
         } else (0, 0);
-        let window_end_ms = sat_add(now_ms, policy.running_window_ms);
-        policy.running_totals.push_back(key, RunningTotal {
+        let window_end_ms = sat_add(now_ms, window_ms);
+        table.push_back(key, RunningTotal {
             window_start_ms: now_ms,
             window_end_ms,
             last_payment_ms: now_ms,
@@ -691,20 +745,19 @@ public(package) fun record_payment(
             carried_until_ms,
         });
     };
-    prune_expired(policy, PRUNE_PER_PAYMENT, now_ms);
 }
 
-/// Remove up to `max_entries` spent entries from the front of the list,
+/// Remove up to `max_entries` spent entries from the front of `table`,
 /// stopping at the first one that still counts. Returns how many it
 /// removed.
-fun prune_expired(policy: &mut SpendPolicy, max_entries: u64, now_ms: u64): u64 {
+fun prune_table(table: &mut LinkedTable<RunningKey, RunningTotal>, max_entries: u64, now_ms: u64): u64 {
     let mut pruned = 0;
     while (pruned < max_entries) {
-        let front = *policy.running_totals.front();
+        let front = *table.front();
         if (front.is_none()) break;
         let key = front.destroy_some();
-        if (!spent(policy.running_totals.borrow(key), now_ms)) break;
-        policy.running_totals.remove(key);
+        if (!spent(table.borrow(key), now_ms)) break;
+        table.remove(key);
         pruned = pruned + 1;
     };
     pruned
@@ -716,10 +769,20 @@ fun prune_expired(policy: &mut SpendPolicy, max_entries: u64, now_ms: u64): u64 
 /// every state, like any cutting back. An entry that still counts toward
 /// the threshold is never removed, so this cannot loosen it, and it stops
 /// at the first such entry: one behind it is removed once that one is
-/// spent, at most sixty days after it opened.
+/// spent, at most sixty days after it opened. The policy-wide totals have
+/// their own list, pruned by `prune_policy_totals`.
 public fun prune_running_totals(policy: &mut SpendPolicy, max_entries: u64, clock: &Clock, ctx: &TxContext): u64 {
     assert_wallet(policy, ctx);
-    prune_expired(policy, max_entries, clock.timestamp_ms())
+    prune_table(&mut policy.running_totals, max_entries, clock.timestamp_ms())
+}
+
+/// Pre-audit B1: `prune_running_totals` for the policy-wide totals. Removes
+/// up to `max_entries` of them in which nothing counts any more, from the
+/// front of their list, and returns how many went. Only the wallet; open in
+/// every state; never removes an entry that still counts.
+public fun prune_policy_totals(policy: &mut SpendPolicy, max_entries: u64, clock: &Clock, ctx: &TxContext): u64 {
+    assert_wallet(policy, ctx);
+    prune_table(&mut policy.policy_totals, max_entries, clock.timestamp_ms())
 }
 
 // ─── Views ─────────────────────────────────────────────────────────────────
@@ -823,6 +886,24 @@ public fun threshold_total(
     let (amount, _) = counted(policy.running_totals.borrow(key), now_ms);
     amount
 }
+/// Pre-audit B1: what the second-approval check counts for EVERY payer
+/// under this policy paying this recipient at `now_ms`, before the payment
+/// itself: the payments made to it without an owner's approval, counted as
+/// `threshold_total` counts one payer's. The recipient is named as in
+/// `running_total`. `splash_spend` takes the larger of this and the payer's
+/// own `threshold_total`.
+public fun policy_threshold_total(
+    policy: &SpendPolicy,
+    kind: u8,
+    recipient: address,
+    beneficiary_ref: vector<u8>,
+    now_ms: u64,
+): u64 {
+    let key = running_key(POLICY_PAYER, kind, recipient, beneficiary_ref);
+    if (!policy.policy_totals.contains(key)) return 0;
+    let (amount, _) = counted(policy.policy_totals.borrow(key), now_ms);
+    amount
+}
 /// When the window counted by `running_total` started, if there is one.
 public fun running_window_start_ms(
     policy: &SpendPolicy,
@@ -853,6 +934,9 @@ public fun running_window_end_ms(
 /// How many running totals the policy holds, live, or ended and not yet
 /// pruned.
 public fun running_total_count(policy: &SpendPolicy): u64 { policy.running_totals.length() }
+/// Pre-audit B1: how many policy-wide totals the policy holds, live, or
+/// ended and not yet pruned.
+public fun policy_total_count(policy: &SpendPolicy): u64 { policy.policy_totals.length() }
 public fun max_spenders(): u64 { MAX_SPENDERS }
 public fun role_staff(): u8 { ROLE_STAFF }
 public fun role_executor(): u8 { ROLE_EXECUTOR }

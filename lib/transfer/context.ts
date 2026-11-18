@@ -31,7 +31,12 @@ type RuleLike = {
 };
 
 export type SpendViewLike = {
-  policy: { secondApprovalThresholdMinor: string; recipients: Array<{ address: string; tag?: string }> } | null;
+  policy: {
+    secondApprovalThresholdMinor: string;
+    recipients: Array<{ address: string; tag?: string }>;
+    /** Pre-audit B1: what every payer paid each recipient without an approval, as the chain counts it. */
+    recipientTotals?: Array<{ recipient: string | null; countedMinor: string }>;
+  } | null;
   rules: RuleLike[];
 };
 
@@ -66,6 +71,13 @@ export function staffFactsFrom(view: SpendViewLike | null, myAddresses: string[]
       const r = t.recipient ? norm(t.recipient) : null;
       if (r) sums.set(r, (sums.get(r) ?? 0n) + BigInt(t.countedMinor));
     }
+  }
+  // Pre-audit B1: the chain counts the larger of the payer's own total and the policy-wide one, which keeps
+  // counting until a window after its last part, whoever paid it, so it can be the larger of the two here too.
+  for (const t of view.policy?.recipientTotals ?? []) {
+    const r = t.recipient ? norm(t.recipient) : null;
+    const counted = BigInt(t.countedMinor);
+    if (r && counted > (sums.get(r) ?? 0n)) sums.set(r, counted);
   }
   const runningTotals: Record<string, string> = {};
   for (const [r, total] of sums) runningTotals[r] = total.toString();
