@@ -14,7 +14,7 @@ import { issuerUsdcAddress } from '@/lib/server/usdc-invoice-payments';
 import type { InvoiceRecord } from '@/lib/server/operations';
 import { requireSessionAccount } from '@/lib/server/session-account';
 import { sealAdapter } from '@/lib/server/seal';
-import { storeEncryptedInvoice, WalrusAdapterError } from '@/lib/server/walrus';
+import { storeEncryptedInvoice, WalrusAdapterError, walrusErrorReply } from '@/lib/server/walrus';
 import { requireTermsAccepted } from '@/lib/server/onboarding';
 
 const NO_STORE = { 'Cache-Control': 'no-store' };
@@ -108,7 +108,7 @@ export async function POST(request: Request) {
   }
 
   let document:
-    | { walrusBlobId: string; sealPolicyId: string; documentSha256: string; walrus: { sizeBytes: number; epochs: number; mode: string } }
+    | { walrusBlobId: string; sealPolicyId: string; documentSha256: string; walrus: { sizeBytes: number; epochs: number | null; mode: string } }
     | undefined;
 
   // A document is sealed and stored on Walrus, neither of which this launch
@@ -168,7 +168,9 @@ export async function POST(request: Request) {
     return made(once.invoice, 201, { walrus: document?.walrus ?? null });
   } catch (error) {
     if (error instanceof WalrusAdapterError) {
-      return NextResponse.json({ error: error.message }, { status: error.status });
+      // A configuration error is logged in full and answered generically.
+      const reply = walrusErrorReply(error, 'invoice create');
+      return NextResponse.json({ error: reply.error }, { status: reply.status });
     }
     // Logged, not echoed: an internal error is not an answer for the person.
     console.error('invoice create failed', { orgId, name: error instanceof Error ? error.name : typeof error });

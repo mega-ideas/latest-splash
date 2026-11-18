@@ -2,7 +2,7 @@ import { NextResponse } from 'next/server';
 
 import { requireCustomerRequest } from '@/lib/server/customer-auth';
 import { requireSessionAccount } from '@/lib/server/session-account';
-import { retrieveBlob, WalrusAdapterError } from '@/lib/server/walrus';
+import { retrieveBlob, WalrusAdapterError, walrusErrorReply } from '@/lib/server/walrus';
 import { orgReferencesBlob } from '@/lib/server/walrus-access';
 
 export const dynamic = 'force-dynamic';
@@ -46,7 +46,9 @@ export async function GET(request: Request, { params }: { params: Promise<{ blob
     );
   } catch (error) {
     if (error instanceof WalrusAdapterError) {
-      return NextResponse.json({ error: error.message }, { status: error.status, headers: NO_STORE });
+      // A configuration error is logged in full and answered generically.
+      const reply = walrusErrorReply(error, 'walrus proof');
+      return NextResponse.json({ error: reply.error }, { status: reply.status, headers: NO_STORE });
     }
     return NextResponse.json({ error: 'Walrus proof unavailable' }, { status: 500, headers: NO_STORE });
   }
