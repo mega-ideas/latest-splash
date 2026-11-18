@@ -17,10 +17,6 @@ const eslintConfig = defineConfig([
     // Agent worktrees are whole checkouts nested in this one, with their own
     // .next build output; they are linted in their own checkout, not here.
     ".claude/**",
-    // Hackathon builds (ETHGlobal Mumbai, Nov 2026) have their own toolchains
-    // and dependencies; they are not part of the Splash app.
-    "arc/**",
-    "mumbai/**",
   ]),
 ]);
 
