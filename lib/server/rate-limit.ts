@@ -52,6 +52,11 @@ export const RATE_LIMITS = {
    *  source spraying a common password across many. */
   loginFailureEmail: { bucket: 'login-failure:email', limit: 5, windowMs: 15 * MINUTE },
   loginFailureIp: { bucket: 'login-failure:ip', limit: 20, windowMs: HOUR },
+  /** Staff sign-in's address failures: the same limit, in a bucket of its own.
+   *  A key prefix inside the customer bucket would not do, because a
+   *  customer can type any address, prefix included (C5, pre-audit fix). The
+   *  network bucket above is shared by both sign-ins on purpose. */
+  loginFailureStaffEmail: { bucket: 'login-failure-staff:email', limit: 5, windowMs: 15 * MINUTE },
 
   /* ── Money, documents, model credits (WS7) ─────────────────────────── */
   /** The public pay link: marks an invoice paid and creates a recipient. */
@@ -139,6 +144,10 @@ export const RATE_LIMITS = {
  * Whether this hit may proceed. Call BEFORE doing the work, and record the
  * hit with `recordHit` when it proceeds — a limiter consulted afterwards has
  * already answered the request it then declines to count.
+ *
+ * Requests in flight together all read the same count here, since nothing is
+ * recorded until the caller records it. Where a burst must not pass the limit
+ * (the login limiter), use `reserveHit` instead.
  */
 export async function checkRateLimit(
   db: DrizzleDb,
@@ -165,14 +174,68 @@ export async function checkRateLimit(
   return { allowed: true };
 }
 
-export async function recordHit(db: DrizzleDb, input: { bucket: string; key: string; now?: Date }): Promise<void> {
+/** Record one hit. Returns its id, so a reservation can take it back. */
+export async function recordHit(db: DrizzleDb, input: { bucket: string; key: string; now?: Date }): Promise<string> {
   const now = input.now ?? new Date();
-  await db.insert(rateLimitHits).values({
-    id: `rl_${now.getTime()}_${Math.random().toString(36).slice(2, 10)}`,
-    bucket: input.bucket,
-    key: input.key,
-    hitAt: now,
-  });
+  const id = `rl_${now.getTime()}_${Math.random().toString(36).slice(2, 10)}`;
+  await db.insert(rateLimitHits).values({ id, bucket: input.bucket, key: input.key, hitAt: now });
+  return id;
+}
+
+/** Take back one hit, by the id `recordHit` or `reserveHit` returned. */
+export async function deleteHit(db: DrizzleDb, id: string): Promise<void> {
+  await db.delete(rateLimitHits).where(eq(rateLimitHits.id, id));
+}
+
+export type ReservationVerdict =
+  | { allowed: true; hitId: string }
+  | { allowed: false; retryAfterSeconds: number };
+
+/**
+ * Record the hit FIRST, then count, the hit included: the form of
+ * `checkRateLimit` + `recordHit` that holds for requests in flight together.
+ *
+ * Checking and recording separately leaves the time between them, while the
+ * work is done, in which every concurrent request reads the same count: a
+ * client that sends its requests together has all of them pass. Here each
+ * request's row is committed before it counts, so the k-th request to commit
+ * sees at least k rows, and no more than `limit` can ever see `limit` or
+ * fewer. Every statement commits on its own (no transaction, no lock), which
+ * is enough for that ordering on Postgres's default READ COMMITTED.
+ *
+ * A refused request takes its own row back, so a refusal neither counts as a
+ * hit nor pushes the window further out. That can refuse more than strictly
+ * needed while a burst is in flight (a later request may have counted a row
+ * that is then removed), never fewer: the safe way to be wrong.
+ *
+ * The caller owns the returned hit: keep it to count the request, or delete
+ * it with `deleteHit` when the request turns out not to count (a login that
+ * succeeds).
+ */
+export async function reserveHit(
+  db: DrizzleDb,
+  input: RateLimitRule & { key: string; now?: Date },
+): Promise<ReservationVerdict> {
+  const now = input.now ?? new Date();
+  const since = new Date(now.getTime() - input.windowMs);
+
+  await db.delete(rateLimitHits).where(and(eq(rateLimitHits.bucket, input.bucket), lt(rateLimitHits.hitAt, since)));
+
+  const hitId = await recordHit(db, { bucket: input.bucket, key: input.key, now });
+
+  const rows = await db
+    .select({ hitAt: rateLimitHits.hitAt })
+    .from(rateLimitHits)
+    .where(and(eq(rateLimitHits.bucket, input.bucket), eq(rateLimitHits.key, input.key), gte(rateLimitHits.hitAt, since)))
+    .orderBy(rateLimitHits.hitAt);
+
+  if (rows.length > input.limit) {
+    await deleteHit(db, hitId);
+    // The window frees up when the OLDEST counted hit ages out.
+    const retryAt = rows[0].hitAt.getTime() + input.windowMs;
+    return { allowed: false, retryAfterSeconds: Math.max(1, Math.ceil((retryAt - now.getTime()) / 1000)) };
+  }
+  return { allowed: true, hitId };
 }
 
 /** Forget a key's hits in one bucket — what a successful login does. */

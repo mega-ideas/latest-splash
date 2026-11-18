@@ -17,9 +17,12 @@ import {
 import {
   EMAIL_LIMIT,
   IP_LIMIT,
+  beginLoginAttempt,
   checkLoginRateLimit,
   clearLoginFailures,
   clientIp,
+  countRecentFailures,
+  loginAttemptSucceeded,
   recordFailedLogin,
 } from '../lib/auth/login-rate-limit.ts';
 import { hashPassword, needsRehash, verifyPassword, PasswordError } from '../lib/auth/password.ts';
@@ -286,6 +289,48 @@ test('attempts outside the window stop counting', async () => {
   const old = new Date(Date.now() - 20 * 60 * 1000);
   for (let i = 0; i < EMAIL_LIMIT; i++) await recordFailedLogin(db, { email, ip: '10.0.0.1', now: old });
   assert.equal((await checkLoginRateLimit(db, { email, ip: '10.0.0.1' })).allowed, true);
+  await client.close();
+});
+
+test('attempts begun together are let through no more often than the limit', async () => {
+  // Counting before recording let every attempt in flight read the same
+  // count. beginLoginAttempt records first, then counts.
+  const { client, db } = await migratedDb();
+  const email = 'burst@example.com';
+  const verdicts = await Promise.all(
+    Array.from({ length: 50 }, (_, i) => beginLoginAttempt(db, { email, ip: `10.1.0.${i}` })),
+  );
+  const allowed = verdicts.filter((v) => v.allowed).length;
+  assert.ok(allowed <= EMAIL_LIMIT, `at most ${EMAIL_LIMIT} let through, got ${allowed}`);
+  // Refused attempts took their rows back: only the ones let through count.
+  assert.equal(await countRecentFailures(db, { email }), allowed);
+  await client.close();
+});
+
+test('a refused attempt is not counted, and a network refusal takes back the address hit', async () => {
+  const { client, db } = await migratedDb();
+  const ip = '203.0.113.9';
+  for (let i = 0; i < IP_LIMIT; i++) await recordFailedLogin(db, { email: `sprayed${i}@example.com`, ip });
+  const verdict = await beginLoginAttempt(db, { email: 'Fresh@Example.com ', ip });
+  assert.equal(verdict.allowed, false);
+  assert.equal(verdict.scope, 'ip');
+  assert.equal(await countRecentFailures(db, { email: 'fresh@example.com' }), 0, 'the address was not charged');
+  assert.equal(await countRecentFailures(db, { ip }), IP_LIMIT, 'and the refusal did not add to the network');
+  await client.close();
+});
+
+test('a successful attempt clears the address and takes back only its own network hit', async () => {
+  const { client, db } = await migratedDb();
+  const ip = '198.51.100.40';
+  await recordFailedLogin(db, { email: 'other@example.com', ip });
+  await recordFailedLogin(db, { email: 'user@example.com', ip });
+  const verdict = await beginLoginAttempt(db, { email: 'USER@example.com', ip });
+  assert.equal(verdict.allowed, true);
+  assert.equal(await countRecentFailures(db, { email: 'user@example.com' }), 2, 'counted before the password is checked');
+  assert.equal(await countRecentFailures(db, { ip }), 3);
+  await loginAttemptSucceeded(db, verdict.attempt);
+  assert.equal(await countRecentFailures(db, { email: 'user@example.com' }), 0);
+  assert.equal(await countRecentFailures(db, { ip }), 2, 'the network keeps its earlier failures');
   await client.close();
 });
 
