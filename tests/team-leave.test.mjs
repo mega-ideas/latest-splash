@@ -271,8 +271,15 @@ test('declining keeps the person on the team and says so in words; they can ask 
   assert.equal(declined.ok, true);
   assert.equal(declined.changed, true);
   assert.equal(await roleOf(db, 'acme', 'u-maker'), 'maker');
-  const status = await leaveStatusOf(db, { orgId: 'acme', userId: 'u-maker' });
+  // The answer is shown for LEAVE_DECLINED_SHOWN_DAYS from when it was given, so read it on the test's own
+  // clock: on the wall clock this assertion started failing 14 days after T0 (2 Nov 2026).
+  const decidedAt = T0.getTime() + 5000;
+  const status = await leaveStatusOf(db, { orgId: 'acme', userId: 'u-maker', now: () => new Date(decidedAt + 1000) });
   assert.equal(status.state, 'declined');
+  const lastDay = await leaveStatusOf(db, { orgId: 'acme', userId: 'u-maker', now: () => new Date(decidedAt + 14 * 86400000 - 1) });
+  assert.equal(lastDay.state, 'declined', 'still said on the last moment of the 14 days');
+  const after = await leaveStatusOf(db, { orgId: 'acme', userId: 'u-maker', now: () => new Date(decidedAt + 14 * 86400000) });
+  assert.equal(after.state, 'none', 'no longer said once the 14 days are over');
   assert.equal(status.canRequest, true);
   assert.match(status.message, /declined your request to leave/i);
   assert.match(status.message, /still on the team/i);
