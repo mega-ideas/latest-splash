@@ -32,12 +32,15 @@ const nextConfig: NextConfig = {
     remotePatterns: [],
     // Local images are fetched through the router without the caller's
     // cookies, so without this list any unauthenticated route that returns
-    // bytes would feed the decoder. Only the asset folders in public/, and no
-    // query strings.
+    // bytes would feed the decoder. Only raster files in the asset folders in
+    // public/, and no query strings. SVGs are left out: <Image> already serves
+    // a .svg src as a plain file, and next up to 16.4.4 lets a direct
+    // /_next/image request push an SVG through the optimizer even with
+    // dangerouslyAllowSVG off (GHSA-7qx7-33qx-rqx2).
     localPatterns: [
-      { pathname: "/cinematic/**", search: "" },
-      { pathname: "/isometric/**", search: "" },
-      { pathname: "/partners/**", search: "" },
+      { pathname: "/cinematic/**/*.{png,jpg,jpeg,webp,avif,gif}", search: "" },
+      { pathname: "/isometric/**/*.{png,jpg,jpeg,webp,avif,gif}", search: "" },
+      { pathname: "/partners/**/*.{png,jpg,jpeg,webp,avif,gif}", search: "" },
       { pathname: "/splash-main-icon.png", search: "" },
     ],
     // A redirect is followed without re-checking remotePatterns (16.3 follows
