@@ -31,6 +31,11 @@ const rememberedSessionTtlSeconds = 60 * 60 * 24 * 30;
 
 let cachedDevSecret: string | null = null;
 
+/** Shared with wallet sign-in so both paths derive from one secret. */
+export function resolveSessionSecret(): string | null {
+  return resolveSecret();
+}
+
 function resolveSecret(): string | null {
   const configured = process.env.CUSTOMER_SESSION_SECRET?.trim();
   if (configured) return configured;

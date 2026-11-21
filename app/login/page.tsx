@@ -9,6 +9,7 @@ import { toast } from 'sonner';
 
 import { safeApproveReturn } from '@/lib/approve/link';
 import IsometricAuthShell from '@/components/auth/IsometricAuthShell';
+import WalletSignIn from '@/components/auth/WalletSignIn';
 import SplashLoading from '@/components/SplashLoading';
 
 export default function LoginPage() {
@@ -125,6 +126,20 @@ export default function LoginPage() {
           {!isSubmitting ? <ArrowRight aria-hidden="true" /> : null}
         </button>
       </form>
+
+      <div className="iso-auth-divider"><span>or</span></div>
+
+      <WalletSignIn
+        remember={remember}
+        onSignedIn={() => {
+          toast.success('Signed in with your wallet');
+          setAuthorizing(true);
+          // Same landing rule as the password path, including a safe ?next.
+          const next = safeApproveReturn(new URLSearchParams(window.location.search).get('next'));
+          router.push(next ?? '/dashboard');
+          router.refresh();
+        }}
+      />
 
       <ZkLoginButton onError={setError} />
 

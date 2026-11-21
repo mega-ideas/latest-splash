@@ -7721,3 +7721,66 @@ button.iso-product-row {
   color: var(--slate);
   opacity: 1;
 }
+
+/* ---------- wallet sign-in ---------- */
+/* A second way into the same workspace, set apart from the credential form. */
+.iso-auth-divider {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin: 18px 0 14px;
+  color: color-mix(in srgb, currentColor 45%, transparent);
+  font-size: 11px;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+}
+.iso-auth-divider::before,
+.iso-auth-divider::after {
+  content: '';
+  flex: 1;
+  height: 1px;
+  background: color-mix(in srgb, currentColor 18%, transparent);
+}
+
+.iso-auth-wallet-button,
+.iso-auth-wallet-list button {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  width: 100%;
+  min-height: 48px;
+  padding: 0 18px;
+  border-radius: 12px;
+  border: 1px solid color-mix(in srgb, currentColor 22%, transparent);
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  font-weight: 600;
+  cursor: pointer;
+  transition: border-color 0.15s ease, background 0.15s ease;
+}
+.iso-auth-wallet-button:hover:not(:disabled),
+.iso-auth-wallet-list button:hover:not(:disabled) {
+  border-color: color-mix(in srgb, currentColor 45%, transparent);
+  background: color-mix(in srgb, currentColor 5%, transparent);
+}
+.iso-auth-wallet-button:disabled,
+.iso-auth-wallet-list button:disabled { opacity: 0.6; cursor: not-allowed; }
+
+.iso-auth-wallet-list { display: grid; gap: 8px; }
+.iso-auth-wallet-list img { border-radius: 4px; }
+
+.iso-auth-wallet-empty {
+  margin: 0;
+  font-size: 13px;
+  line-height: 1.6;
+  color: color-mix(in srgb, currentColor 60%, transparent);
+}
+.iso-auth-wallet-empty a { text-decoration: underline; }
+
+.iso-auth-wallet-error {
+  margin: 10px 0 0;
+  font-size: 13px;
+  color: #c0392b;
+}
